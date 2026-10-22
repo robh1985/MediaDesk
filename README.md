@@ -96,7 +96,7 @@ You can configure MediaDesk in three ways. Environment variables override the co
 
 - Logging in to MediaDesk gives full API access to every connected service. Treat the portal password like an admin password.
 - For access from outside your network, put MediaDesk behind a reverse proxy with HTTPS (Caddy, Traefik, nginx, or SWAG). If the proxy sends `X-Forwarded-Proto: https`, the session cookie is marked `Secure`.
-- Login attempts are rate-limited, and sessions last 30 days. Changing the password signs everyone out.
+- To sign out, click the MediaDesk logo at the top left and choose **Log out**. Login attempts are rate-limited, and sessions last 30 days. Changing the password signs everyone out.
 - The config file is written with `0600` permissions.
 
 ## Compatibility

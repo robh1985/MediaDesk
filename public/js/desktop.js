@@ -2,7 +2,7 @@
 
 import { h, clear, formatSpeed, formatBytes, timeOf, debounce, toast, toastError, contextMenu, onNotify, notifications, timeAgo } from './ui.js';
 import { icon, appIcon } from './icons.js';
-import { radarr, sonarr, nzbget, jellyfin, isConfigured, serviceLink } from './api.js';
+import { radarr, sonarr, nzbget, jellyfin, isConfigured, serviceLink, portal, state } from './api.js';
 import { getApps, getApp, openApp, toggleApp, onChange, openWindows, focusedWindow, close as closeWindow } from './wm.js';
 import { live, subscribe } from './live.js';
 import { upcoming, posterUrl } from './apps/arr.js';
@@ -83,6 +83,20 @@ export function startDesktop() {
 function buildMenuBar() {
   const bar = document.getElementById('menubar');
   const appName = h('div', { class: 'menu-appname' }, 'MediaDesk');
+  const logo = h('button', { class: 'menu-logo', title: 'MediaDesk menu', 'aria-haspopup': 'menu', html: appIcon.dashboard });
+  // A pointerdown outside an open menu closes it, so remember whether this click should toggle it shut.
+  let menuWasOpen = false;
+  logo.addEventListener('pointerdown', () => { menuWasOpen = Boolean(document.querySelector('.context-menu')); });
+  logo.addEventListener('click', () => {
+    if (menuWasOpen) return;
+    const r = logo.getBoundingClientRect();
+    contextMenu(r.left, r.bottom + 4, [
+      { label: 'Search & apps', icon: icon.search, action: openLauncher },
+      { label: 'Overview', icon: icon.grid, action: () => openApp('dashboard') },
+      { label: 'Settings', icon: icon.sliders, action: () => openApp('settings') },
+      ...(state.config?.auth ? ['-', { label: 'Log out', icon: icon.lock, action: logOut }] : []),
+    ]);
+  });
   const speed = h('button', { class: 'tray-item', title: 'NZBGet', onclick: () => openApp('nzbget') });
   const streams = h('button', { class: 'tray-item', title: 'Jellyfin streams', onclick: () => openApp('jellyfin', { section: 'sessions' }) });
   const bell = h('button', { class: 'tray-item tray-icon', title: 'Notifications', html: icon.bell, onclick: toggleNotificationCenter });
@@ -98,7 +112,7 @@ function buildMenuBar() {
 
   clear(bar,
     h('div', { class: 'menu-left' },
-      h('button', { class: 'menu-logo', title: 'Search & apps (Ctrl+Space)', onclick: openLauncher, html: appIcon.dashboard }),
+      logo,
       appName,
       h('button', { class: 'menu-link', onclick: openLauncher }, 'Apps'),
       h('button', { class: 'menu-link', onclick: () => openApp('dashboard') }, 'Overview')),
@@ -126,6 +140,13 @@ function buildMenuBar() {
   };
   tick();
   setInterval(tick, 10e3);
+}
+
+async function logOut() {
+  try {
+    await portal.logout();
+    location.reload();
+  } catch (err) { toastError(err, 'Could not log out'); }
 }
 
 function toggleNotificationCenter() {
