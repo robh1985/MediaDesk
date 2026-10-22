@@ -67,9 +67,10 @@ To use a different port, run it from a command prompt as `install-windows.cmd -P
 Notes for Windows:
 - **Service URLs:** if Radarr, Sonarr, NZBGet or Jellyfin run on the same PC, use `http://localhost:7878` and so on in *Settings → Connections*.
 - **Other devices can't connect:** check that the network is set to *Private* in Windows Settings → Network. The firewall rule doesn't apply to *Public* networks.
-- **Logs:** the background version writes to `logs\mediadesk.log`.
-- **Manage it:** stop or start it from *Task Scheduler → MediaDesk*. To remove it, double-click `uninstall-windows.cmd`; your settings are kept.
-- **Update:** run `git pull` (or extract the new ZIP over the old folder), then restart the **MediaDesk** task or reboot.
+- **Update:** double-click `update-windows.cmd`. It downloads the latest version from the `main` branch (switching to `main` if you're on another branch) and restarts MediaDesk. If you installed from a ZIP, extract the new ZIP over the old folder and double-click `restart-windows.cmd`. Your settings are kept either way. Settings → About shows which version is running.
+- **Restart:** double-click `restart-windows.cmd`. This stops any leftover copy of MediaDesk before starting it again; ending the task in Task Scheduler doesn't always do that.
+- **Logs:** the background version writes to `logs\mediadesk.log`, including the version it started with and any startup errors.
+- **Remove:** double-click `uninstall-windows.cmd`. Your settings are kept.
 - **Docker Desktop** also works with `docker compose up -d --build`. In that case, services running on the Windows host are reached at `http://host.docker.internal:7878`, not `localhost`.
 
 ## Configuration

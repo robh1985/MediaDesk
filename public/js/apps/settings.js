@@ -166,6 +166,7 @@ function renderAbout(container) {
     h('div', { class: 'about-logo', html: appIcon.dashboard }),
     h('h2', {}, 'MediaDesk'),
     h('p', { class: 'muted' }, 'One desktop for Radarr, Sonarr, NZBGet and Jellyfin.'),
+    h('p', { class: 'small muted' }, `Version ${state.config.version || 'unknown'}`),
     h('p', { class: 'small muted' }, 'API keys stay on the MediaDesk server; your browser only talks to MediaDesk.'),
     h('div', { class: 'kbd-list' },
       h('div', {}, h('kbd', {}, 'Ctrl'), ' + ', h('kbd', {}, 'Space'), ' or ', h('kbd', {}, '/'), ' Search everything'),

@@ -16,25 +16,19 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+. "$PSScriptRoot\common.ps1"
 
 # Re-launch elevated if needed.
-$isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
-    [Security.Principal.WindowsBuiltInRole]::Administrator)
-if (-not $isAdmin) {
-    Write-Host 'Administrator rights are needed to register a startup task. Requesting elevation...'
-    $argList = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$PSCommandPath`"", '-TaskName', "`"$TaskName`"")
-    if ($Port) { $argList += @('-Port', $Port) }
-    if ($NoFirewall) { $argList += '-NoFirewall' }
-    Start-Process -FilePath 'powershell.exe' -Verb RunAs -ArgumentList $argList
-    exit
-}
+$passArgs = @('-TaskName', "`"$TaskName`"")
+if ($Port) { $passArgs += @('-Port', $Port) }
+if ($NoFirewall) { $passArgs += '-NoFirewall' }
+if (Invoke-Elevated $PSCommandPath $passArgs) { exit }
 
-$root = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
-$serverJs = Join-Path $root 'server.js'
-$runner = Join-Path $PSScriptRoot 'run-service.cmd'
+$root = $MediaDeskRoot
+$serverJs = $MediaDeskServerJs
 $configDir = Join-Path $root 'config'
-$configPath = Join-Path $configDir 'config.json'
-$logDir = Join-Path $root 'logs'
+$configPath = $MediaDeskConfig
+$logDir = $MediaDeskLogDir
 
 function Pause-Exit([int]$code) {
     Write-Host ''
@@ -102,13 +96,15 @@ $me = [Security.Principal.WindowsIdentity]::GetCurrent().Name
 & icacls.exe $configPath /inheritance:r /grant:r "*S-1-5-18:F" "*S-1-5-32-544:F" "${me}:F" | Out-Null
 
 # --- Startup task -----------------------------------------------------------
-$existing = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
-if ($existing) {
-    Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+# Stop any running copy first (including a node process left behind by an older task).
+Stop-MediaDesk $TaskName
+if (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) {
     Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false
 }
 
-$action = New-ScheduledTaskAction -Execute $runner -Argument "`"$nodePath`"" -WorkingDirectory $root
+# Run node directly (not through a batch file) so ending the task really stops MediaDesk.
+$logFile = Join-Path $logDir 'mediadesk.log'
+$action = New-ScheduledTaskAction -Execute $nodePath -Argument "`"$serverJs`" --log `"$logFile`"" -WorkingDirectory $root
 $trigger = New-ScheduledTaskTrigger -AtStartup
 $principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
 $settings = New-ScheduledTaskSettingsSet `
@@ -131,14 +127,7 @@ if (-not $NoFirewall) {
 # --- Start and check --------------------------------------------------------
 Start-ScheduledTask -TaskName $TaskName
 Write-Host 'Starting MediaDesk...'
-$ok = $false
-for ($i = 0; $i -lt 15 -and -not $ok; $i++) {
-    Start-Sleep -Seconds 1
-    try {
-        $r = Invoke-WebRequest -Uri "http://localhost:$Port/portal/session" -UseBasicParsing -TimeoutSec 2
-        $ok = $r.StatusCode -eq 200
-    } catch { }
-}
+$ok = Wait-MediaDesk $Port
 
 Write-Host ''
 if ($ok) {
@@ -156,8 +145,9 @@ if ($ok) {
     Write-Host 'Next: open the portal, go to Settings > Connections and add your services.'
     Start-Process "http://localhost:$Port"
 } else {
-    Write-Host 'MediaDesk did not respond yet. Check the log for errors:' -ForegroundColor Yellow
-    Write-Host "  $logDir\mediadesk.log"
-    Write-Host "A common cause is another program already using port $Port. Re-run with -Port 8081 to pick another."
+    Write-Host 'MediaDesk did not respond yet.' -ForegroundColor Yellow
+    Show-MediaDeskLogTail
+    Write-Host ''
+    Write-Host "If the log says port $Port is in use, another program is using it. Re-run with -Port 8081 to pick another."
 }
 Pause-Exit 0

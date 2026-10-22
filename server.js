@@ -12,6 +12,50 @@ const { Readable } = require('node:stream');
 const files = require('./files');
 
 const ROOT = __dirname;
+
+// `--log <file>` sends all output to a file (used by the Windows startup task, which has no console).
+const logArg = process.argv.indexOf('--log');
+let logStream = null;
+// Exit only after the log file has been flushed, so the reason for exiting is recorded.
+const exitAfterLog = (code) => (logStream ? logStream.end(() => process.exit(code)) : process.exit(code));
+if (logArg !== -1 && process.argv[logArg + 1]) {
+  const logFile = path.resolve(process.argv[logArg + 1]);
+  fs.mkdirSync(path.dirname(logFile), { recursive: true });
+  const stream = (logStream = fs.createWriteStream(logFile, { flags: 'a' }));
+  const stamp = (fn) => (...args) => fn(`[${new Date().toISOString()}]`, ...args);
+  const fileConsole = new console.Console({ stdout: stream, stderr: stream });
+  globalThis.console = Object.assign(Object.create(fileConsole), {
+    log: stamp(fileConsole.log), info: stamp(fileConsole.info), warn: stamp(fileConsole.warn), error: stamp(fileConsole.error),
+  });
+  process.on('uncaughtException', (err) => {
+    console.error('Fatal error:', err);
+    exitAfterLog(1);
+  });
+}
+
+// Which code is running: the package version plus the git commit when installed with git.
+function readVersion() {
+  let version = '1.0.0';
+  try { version = JSON.parse(fs.readFileSync(path.join(__dirname, 'package.json'), 'utf8')).version; } catch { /* ignore */ }
+  try {
+    const gitDir = path.join(__dirname, '.git');
+    const head = fs.readFileSync(path.join(gitDir, 'HEAD'), 'utf8').trim();
+    let sha = head;
+    let branch = null;
+    if (head.startsWith('ref: ')) {
+      const ref = head.slice(5);
+      branch = ref.replace('refs/heads/', '');
+      try { sha = fs.readFileSync(path.join(gitDir, ref), 'utf8').trim(); }
+      catch {
+        const packed = fs.readFileSync(path.join(gitDir, 'packed-refs'), 'utf8');
+        sha = (packed.split('\n').find((l) => l.endsWith(` ${ref}`)) || '').split(' ')[0];
+      }
+    }
+    if (sha) return `${version} (${branch ? `${branch} ` : ''}${sha.slice(0, 7)})`;
+  } catch { /* not a git checkout */ }
+  return version;
+}
+const VERSION = readVersion();
 const PUBLIC_DIR = path.join(ROOT, 'public');
 const CONFIG_PATH = process.env.CONFIG_PATH || path.join(ROOT, 'config', 'config.json');
 const HOST = process.env.HOST || '0.0.0.0';
@@ -85,7 +129,7 @@ function publicConfig() {
       hasPassword: Boolean(c.password),
     };
   }
-  return { services, mock: MOCK, auth: Boolean(config.portalPassword), files: filesStatus() };
+  return { services, mock: MOCK, auth: Boolean(config.portalPassword), files: filesStatus(), version: VERSION };
 }
 
 // The file manager can change anything inside its folders, so it also requires a portal password.
@@ -394,7 +438,17 @@ const server = http.createServer((req, res) => {
   });
 });
 
+server.on('error', (err) => {
+  if (err.code === 'EADDRINUSE') {
+    console.error(`Port ${PORT} is already in use. Another copy of MediaDesk (or another program) is probably running. Stop it, or choose a different port.`);
+  } else {
+    console.error('Server error:', err);
+  }
+  exitAfterLog(1);
+});
+
 server.listen(PORT, HOST, () => {
+  console.log(`MediaDesk ${VERSION} starting`);
   console.log(`MediaDesk running at http://${HOST === '0.0.0.0' ? 'localhost' : HOST}:${PORT}${MOCK ? '  (demo mode, fake data)' : ''}`);
   if (!MOCK) {
     const missing = SERVICES.filter((s) => !isConfigured(s));
