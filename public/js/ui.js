@@ -1,5 +1,7 @@
 // Small DOM + formatting helpers shared by every app.
 
+import { state } from './api.js';
+
 export function h(tag, attrs = {}, ...children) {
   const el = document.createElement(tag);
   for (const [k, v] of Object.entries(attrs || {})) {
@@ -81,12 +83,11 @@ export function debounce(fn, ms = 300) {
 // Notifications
 // ---------------------------------------------------------------------------
 
-const history = [];
-const listeners = new Set();
-export const onNotify = (fn) => listeners.add(fn);
-export const notifications = () => history;
-
+// Pop-ups confirm things you just did. Events that happen in the background are not pop-ups:
+// they become a number on the app's icon instead (see live.js). Errors always pop up, and other
+// pop-ups can be switched off in Settings → General.
 export function toast(title, { body = '', type = 'info', icon = null, timeout = 5000, action = null } = {}) {
+  if (type !== 'error' && state.config?.appSettings?.general?.actionPopups === false) return;
   const host = document.getElementById('toasts');
   const el = h('div', { class: `toast toast-${type}` },
     icon ? h('div', { class: 'toast-icon', html: icon }) : null,
@@ -97,9 +98,6 @@ export function toast(title, { body = '', type = 'info', icon = null, timeout = 
   const dismiss = () => { el.classList.add('leaving'); setTimeout(() => el.remove(), 250); };
   host.append(el);
   if (timeout) setTimeout(dismiss, timeout);
-  history.unshift({ title, body, type, icon, at: new Date() });
-  history.length = Math.min(history.length, 50);
-  listeners.forEach((fn) => fn(history));
 }
 
 export const toastError = (err, title = 'Something went wrong') => toast(title, { body: err?.message || String(err), type: 'error', timeout: 8000 });

@@ -10,6 +10,8 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const { Readable } = require('node:stream');
 const files = require('./files');
+const appSettings = require('./appsettings');
+const { createNotifier } = require('./notify');
 
 const ROOT = __dirname;
 
@@ -77,6 +79,8 @@ const MOCK = process.env.MOCK === '1' || process.argv.includes('--mock');
 const SERVICES = ['radarr', 'sonarr', 'nzbget', 'jellyfin'];
 const SESSION_DAYS = 30;
 const BUILD_ID = computeBuildId();
+// Lets the server's own notification watcher call the service proxies without a login cookie.
+const INTERNAL_TOKEN = crypto.randomBytes(24).toString('hex');
 
 // ---------------------------------------------------------------------------
 // Configuration
@@ -144,7 +148,7 @@ function publicConfig() {
       hasPassword: Boolean(c.password),
     };
   }
-  return { services, mock: MOCK, auth: Boolean(config.portalPassword), files: filesStatus(), version: VERSION };
+  return { services, mock: MOCK, auth: Boolean(config.portalPassword), files: filesStatus(), version: VERSION, appSettings: appSettings.resolve(config.appSettings) };
 }
 
 // The file manager can change anything inside its folders, so it also requires a portal password.
@@ -180,6 +184,8 @@ function parseCookies(req) {
 
 function isAuthed(req) {
   if (!config.portalPassword) return true;
+  const internal = req.headers['x-mediadesk-internal'];
+  if (internal && internal.length === INTERNAL_TOKEN.length && crypto.timingSafeEqual(Buffer.from(internal), Buffer.from(INTERNAL_TOKEN))) return true;
   const token = parseCookies(req).mediadesk_session || '';
   const [expires, sig] = token.split('.');
   if (!expires || !sig || Number(expires) < Date.now()) return false;
@@ -339,6 +345,7 @@ async function updateConfig(req, res) {
       if (typeof incoming[key] === 'string' && incoming[key] !== '') cur[key] = incoming[key].trim();
     }
   }
+  if (body.appSettings) next.appSettings = appSettings.merge(next.appSettings, body.appSettings);
   if (Array.isArray(body.fileRoots)) {
     const { roots, errors } = await files.validateRoots(body.fileRoots);
     if (errors.length) return sendJson(res, 400, { error: `Check these folders: ${errors.join('; ')}` });
@@ -380,6 +387,35 @@ async function testService(svc) {
 // ---------------------------------------------------------------------------
 
 const mock = MOCK ? require('./mock') : null;
+
+// --- Notifications ------------------------------------------------------------
+
+// Call a service through this server's own proxy (which adds credentials, or serves demo data).
+async function callApi(svc, rest, { method = 'GET', body } = {}) {
+  const host = HOST === '0.0.0.0' || HOST === '::' ? '127.0.0.1' : HOST;
+  const url = svc === 'nzbget' ? `http://${host}:${PORT}/api/nzbget` : `http://${host}:${PORT}/api/${svc}/${rest}`;
+  const res = await fetch(url, {
+    method, signal: AbortSignal.timeout(20e3),
+    headers: { 'X-MediaDesk': '1', 'X-MediaDesk-Internal': INTERNAL_TOKEN, ...(body ? { 'Content-Type': 'application/json' } : {}) },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const data = await res.json().catch(() => null);
+  if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`);
+  return data;
+}
+
+const notificationsFile = MOCK
+  ? path.join(require('node:os').tmpdir(), 'mediadesk-demo-notifications.json')
+  : path.join(path.dirname(CONFIG_PATH), 'notifications.json');
+if (MOCK) fs.rmSync(notificationsFile, { force: true });
+const notifier = createNotifier({
+  file: notificationsFile,
+  isConfigured: (svc) => MOCK || isConfigured(svc),
+  settings: () => appSettings.resolve(config.appSettings),
+  callApi,
+  log: (msg) => console.log(msg),
+});
+if (MOCK) mock.seedNotifications(notifier);
 
 async function handle(req, res) {
   const url = new URL(req.url, 'http://localhost');
@@ -426,8 +462,23 @@ async function handle(req, res) {
 
   if (p === '/portal/config' && req.method === 'GET') return sendJson(res, 200, publicConfig());
   if (p === '/portal/config' && req.method === 'POST') {
-    if (MOCK) return sendJson(res, 400, { error: 'Settings are read-only in demo mode' });
+    if (MOCK) {
+      // Demo mode: app preferences can be tried out (kept in memory); connections can't change.
+      const body = await readJson(req);
+      if (body.services || body.fileRoots) return sendJson(res, 400, { error: 'Connections and folders are read-only in demo mode' });
+      if (body.appSettings) config.appSettings = appSettings.merge(config.appSettings, body.appSettings);
+      return sendJson(res, 200, publicConfig());
+    }
     return updateConfig(req, res);
+  }
+  if (p === '/portal/notifications' && req.method === 'GET') return sendJson(res, 200, notifier.summary());
+  if (p === '/portal/notifications/read' && req.method === 'POST') {
+    notifier.markRead((await readJson(req)).app);
+    return sendJson(res, 200, notifier.summary());
+  }
+  if (p === '/portal/notifications/clear' && req.method === 'POST') {
+    notifier.clear((await readJson(req)).app);
+    return sendJson(res, 200, notifier.summary());
   }
   if (p === '/portal/test') {
     const results = {};
@@ -465,6 +516,7 @@ server.on('error', (err) => {
 
 server.listen(PORT, HOST, () => {
   console.log(`MediaDesk ${VERSION} starting`);
+  notifier.start();
   console.log(`MediaDesk running at http://${HOST === '0.0.0.0' ? 'localhost' : HOST}:${PORT}${MOCK ? '  (demo mode, fake data)' : ''}`);
   if (!MOCK) {
     const missing = SERVICES.filter((s) => !isConfigured(s));

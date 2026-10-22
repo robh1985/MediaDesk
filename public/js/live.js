@@ -1,8 +1,6 @@
-// Background polling shared by the menu bar, widgets and apps, plus completion notifications.
+// Background polling shared by the menu bar, widgets, dock badges and apps.
 
-import { nzbget, jellyfin, radarr, sonarr, isConfigured } from './api.js';
-import { toast } from './ui.js';
-import { appIcon } from './icons.js';
+import { nzbget, jellyfin, radarr, sonarr, portal, isConfigured } from './api.js';
 
 const subs = new Set();
 export const live = {
@@ -11,9 +9,14 @@ export const live = {
   speedHistory: [],      // bytes/s samples, newest last
   sessions: [],          // active Jellyfin sessions with something playing
   health: { radarr: [], sonarr: [] },
+  notifications: [],     // recorded by the server, newest first
+  unread: {},            // app id -> unread count (shown as a number on the app's icon)
+  system: [],            // MediaDesk's own notices, e.g. "MediaDesk was updated"
 };
 export const subscribe = (fn) => { subs.add(fn); fn(live); return () => subs.delete(fn); };
 const emit = () => subs.forEach((fn) => fn(live));
+
+export const totalUnread = () => Object.values(live.unread).reduce((a, n) => a + n, 0) + live.system.length;
 
 const speedOf = (s) => s.DownloadRate ?? ((s.DownloadRateHi || 0) * 2 ** 32 + (s.DownloadRateLo || 0));
 
@@ -29,22 +32,6 @@ async function pollNzb() {
   emit();
 }
 
-let lastHistoryId = null;
-async function pollNzbHistory() {
-  if (!isConfigured('nzbget')) return;
-  try {
-    const items = await nzbget('history', false);
-    const newest = items[0]?.NZBID ?? 0;
-    if (lastHistoryId !== null) {
-      for (const it of items.filter((i) => i.NZBID > lastHistoryId).slice(0, 5)) {
-        const ok = String(it.Status).startsWith('SUCCESS');
-        toast(ok ? 'Download complete' : 'Download failed', { body: it.Name, type: ok ? 'success' : 'error', icon: appIcon.nzbget, timeout: 7000 });
-      }
-    }
-    lastHistoryId = Math.max(lastHistoryId ?? 0, newest);
-  } catch { /* status poll reports errors */ }
-}
-
 async function pollSessions() {
   if (!isConfigured('jellyfin')) return;
   try {
@@ -57,13 +44,50 @@ async function pollSessions() {
 async function pollHealth() {
   for (const [svc, api] of [['radarr', radarr], ['sonarr', sonarr]]) {
     if (!isConfigured(svc)) continue;
-    try {
-      const health = await api.get('health');
-      const fresh = health.filter((x) => x.type === 'error' && !live.health[svc].some((o) => o.message === x.message));
-      fresh.forEach((x) => toast(`${svc === 'radarr' ? 'Radarr' : 'Sonarr'} health issue`, { body: x.message, type: 'error', icon: appIcon[svc], timeout: 10000 }));
-      live.health[svc] = health;
-    } catch { /* ignore */ }
+    try { live.health[svc] = await api.get('health'); } catch { /* ignore */ }
   }
+  emit();
+}
+
+function applyNotifications(n) {
+  live.notifications = n.items;
+  live.unread = n.unread;
+  emit();
+}
+
+export async function refreshNotifications() {
+  try { applyNotifications(await portal.notifications()); } catch { /* server restarting */ }
+}
+
+// Opening an app clears the number on its icon.
+const pendingRead = new Set();
+export async function markRead(app) {
+  if (!app || pendingRead.has(app)) return;
+  if (app === 'system') { live.system = []; emit(); return; }
+  if (!live.unread[app]) return;
+  pendingRead.add(app);
+  live.unread = { ...live.unread, [app]: 0 };
+  emit();
+  try { applyNotifications(await portal.markRead(app)); } catch { /* ignore */ }
+  pendingRead.delete(app);
+}
+export async function markAllRead() {
+  live.system = [];
+  try { applyNotifications(await portal.markRead()); } catch { /* ignore */ }
+}
+export async function clearNotifications() {
+  live.system = [];
+  try { applyNotifications(await portal.clearNotifications()); } catch { /* ignore */ }
+}
+
+export function dismissSystemNotice(id) {
+  live.system = live.system.filter((n) => n.id !== id);
+  emit();
+}
+
+export function addSystemNotice(notice) {
+  if (live.system.some((n) => n.id === notice.id)) return;
+  live.system = [{ ...notice, at: Date.now() }, ...live.system];
   emit();
 }
 
@@ -75,7 +99,8 @@ function every(fn, ms) {
 
 export function startLive() {
   every(pollNzb, 2000);
-  every(pollNzbHistory, 15000);
   every(pollSessions, 10000);
   every(pollHealth, 5 * 60000);
+  every(refreshNotifications, 15000);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) refreshNotifications(); });
 }

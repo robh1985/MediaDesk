@@ -142,7 +142,7 @@ if ($ok) {
         Write-Host 'No portal password is set. Anyone on your network can open the portal.' -ForegroundColor Yellow
     }
     Write-Host ''
-    Write-Host 'Next: open the portal, go to Settings > Connections and add your services.'
+    Write-Host 'Next: open the portal, go to Settings and connect each app.'
     Start-Process "http://localhost:$Port"
 } else {
     Write-Host 'MediaDesk did not respond yet.' -ForegroundColor Yellow

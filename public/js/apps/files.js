@@ -2,7 +2,7 @@
 
 import { h, clear, formatBytes, debounce, toast, toastError, confirmDialog, contextMenu, spinner, emptyState, errorState, progressBar, isTouch } from '../ui.js';
 import { icon, appIcon } from '../icons.js';
-import { state } from '../api.js';
+import { state, appPref } from '../api.js';
 import { openApp } from '../wm.js';
 
 // --- API -----------------------------------------------------------------------
@@ -104,7 +104,9 @@ class FileBrowser {
     this.history = [];
     this.future = [];
     this.sort = JSON.parse(localStorage.getItem('mediadesk.files.sort') || '{"key":"name","dir":1}');
-    this.showHidden = localStorage.getItem('mediadesk.files.hidden') === '1';
+    // The checkbox remembers your choice in this browser; Settings → Files sets the starting point.
+    const savedHidden = localStorage.getItem('mediadesk.files.hidden');
+    this.showHidden = savedHidden === null ? Boolean(appPref('files', 'showHidden')) : savedHidden === '1';
     this.build();
     this.loadRoots().then(() => this.go(opts.root ?? 0, opts.path ?? '', false));
     win.on('reopen', (o) => { if (o?.root !== undefined) this.go(o.root, o.path || ''); });

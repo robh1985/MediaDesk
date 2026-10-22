@@ -3,7 +3,7 @@
 import { h, clear, formatDuration, timeAgo, debounce, toast, toastError, confirmDialog,
   spinner, emptyState, errorState, progressBar, badge, sidebarLayout, poll } from '../ui.js';
 import { icon, appIcon } from '../icons.js';
-import { jellyfin, jellyfinUserId, jellyfinImage, serviceLink, isConfigured } from '../api.js';
+import { jellyfin, jellyfinUserId, jellyfinImage, serviceLink, isConfigured, appPref } from '../api.js';
 import { notConfigured } from './common.js';
 import { statCard } from './arr.js';
 
@@ -81,9 +81,9 @@ function renderHome(container, ctx) {
       jellyfin.get(`Users/${uid}/Items/Latest`, { Limit: 32, Fields: FIELDS }),
     ]);
     const shelves = [
-      shelf('Continue watching', resume.Items || [], ctx),
-      shelf('Next up', nextUp.Items || [], ctx),
-      shelf('Recently added', latest || [], ctx),
+      appPref('jellyfin', 'rowResume') !== false && shelf('Continue watching', resume.Items || [], ctx),
+      appPref('jellyfin', 'rowNextUp') !== false && shelf('Next up', nextUp.Items || [], ctx),
+      appPref('jellyfin', 'rowLatest') !== false && shelf('Recently added', latest || [], ctx),
     ].filter(Boolean);
     clear(body, shelves.length ? shelves : emptyState('Nothing here yet', 'Add some media to your libraries.'));
   })().catch((err) => clear(body, errorState(err)));

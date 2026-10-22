@@ -58,6 +58,9 @@ export const portal = {
   session: () => request('/portal/session'),
   login: (password) => request('/portal/login', { method: 'POST', body: { password } }),
   logout: () => request('/portal/logout', { method: 'POST' }),
+  notifications: () => request('/portal/notifications'),
+  markRead: (app) => request('/portal/notifications/read', { method: 'POST', body: { app } }),
+  clearNotifications: (app) => request('/portal/notifications/clear', { method: 'POST', body: { app } }),
 };
 
 // Shared state filled at boot.
@@ -75,6 +78,9 @@ export async function jellyfinUserId() {
 
 export const jellyfinImage = (id, { type = 'Primary', height = 360, tag } = {}) =>
   jellyfin.url(`Items/${id}/Images/${type}`, { fillHeight: height, quality: 90, tag });
+
+// This app's preferences from Settings (with defaults filled in by the server).
+export const appPref = (app, key) => state.config?.appSettings?.[app]?.[key];
 
 export const serviceLink = (svc) => state.config?.services[svc]?.publicUrl || '';
 export const isConfigured = (svc) => Boolean(state.config?.services[svc]?.configured);

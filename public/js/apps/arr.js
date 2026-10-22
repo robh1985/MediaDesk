@@ -3,7 +3,7 @@
 import { h, clear, formatBytes, formatDuration, dayLabel, timeOf, debounce, toast, toastError, confirmDialog,
   spinner, emptyState, errorState, progressBar, badge, sidebarLayout, poll } from '../ui.js';
 import { icon, appIcon } from '../icons.js';
-import { radarr, sonarr, serviceLink, isConfigured } from '../api.js';
+import { radarr, sonarr, serviceLink, isConfigured, appPref } from '../api.js';
 import { notConfigured } from './common.js';
 
 const KINDS = {
@@ -16,7 +16,7 @@ const KINDS = {
     size: (m) => m.sizeOnDisk || m.movieFile?.size || 0,
     addBody: (item, opts) => ({
       ...item, qualityProfileId: opts.qualityProfileId, rootFolderPath: opts.rootFolderPath, monitored: true,
-      minimumAvailability: 'released', addOptions: { searchForMovie: opts.search },
+      minimumAvailability: appPref('radarr', 'minimumAvailability') || 'released', addOptions: { searchForMovie: opts.search },
     }),
     searchCmd: (m) => ({ name: 'MoviesSearch', movieIds: [m.id] }),
     missingCmd: { name: 'MissingMoviesSearch' },
@@ -35,8 +35,8 @@ const KINDS = {
     size: (s) => s.statistics?.sizeOnDisk || 0,
     addBody: (item, opts) => ({
       ...item, qualityProfileId: opts.qualityProfileId, rootFolderPath: opts.rootFolderPath, monitored: true,
-      seasonFolder: true, languageProfileId: opts.languageProfileId,
-      addOptions: { searchForMissingEpisodes: opts.search, monitor: 'all' },
+      seasonFolder: appPref('sonarr', 'seasonFolder') !== false, languageProfileId: opts.languageProfileId,
+      addOptions: { searchForMissingEpisodes: opts.search, monitor: appPref('sonarr', 'monitor') || 'all' },
     }),
     searchCmd: (s) => ({ name: 'SeriesSearch', seriesId: s.id }),
     missingCmd: { name: 'MissingEpisodeSearch' },
@@ -327,7 +327,7 @@ function renderAdd(container, ctx) {
   const input = h('input', { class: 'input input-lg', type: 'search', placeholder: `Search for a ${K.noun.toLowerCase()} to add…`, autofocus: true });
   const profileSel = h('select', { class: 'input' });
   const rootSel = h('select', { class: 'input' });
-  const searchChk = h('input', { type: 'checkbox', checked: true });
+  const searchChk = h('input', { type: 'checkbox', checked: appPref(kindId, 'searchOnAdd') !== false });
   const results = h('div', { class: 'results' }, emptyState(`Find a ${K.noun.toLowerCase()}`, 'Search by title, or use tmdb:/tvdb: IDs.'));
   let languageProfileId;
 
@@ -347,9 +347,12 @@ function renderAdd(container, ctx) {
       ctx.rootFolders = roots;
       clear(profileSel, profiles.map((p) => h('option', { value: p.id }, p.name)));
       clear(rootSel, roots.map((r) => h('option', { value: r.path }, `${r.path} (${formatBytes(r.freeSpace)} free)`)));
+      // Defaults from Settings, otherwise whatever was used last time.
       const last = JSON.parse(localStorage.getItem(`mediadesk.${kindId}.add`) || '{}');
-      if (last.profile) profileSel.value = last.profile;
-      if (last.root) rootSel.value = last.root;
+      const profile = appPref(kindId, 'qualityProfileId') || last.profile;
+      const root = appPref(kindId, 'rootFolder') || last.root;
+      if (profile && profiles.some((p) => String(p.id) === String(profile))) profileSel.value = profile;
+      if (root && roots.some((r) => r.path === root)) rootSel.value = root;
       if (kindId === 'sonarr') {
         // Sonarr v3 needs a language profile; v4 removed them.
         try { languageProfileId = (await sonarr.get('languageprofile'))[0]?.id; } catch { languageProfileId = undefined; }
@@ -473,9 +476,11 @@ export async function upcoming(kindId, days = 14) {
 
 function renderCalendar(container, ctx) {
   const list = h('div', {}, spinner());
-  container.append(h('div', { class: 'pane-header' }, h('h2', {}, 'Upcoming'), h('span', { class: 'muted' }, 'Next 4 weeks')), list);
-  upcoming(ctx.kindId, 28).then((items) => {
-    if (!items.length) return clear(list, emptyState('Nothing coming up', 'No releases in the next four weeks.'));
+  const days = appPref(ctx.kindId, 'calendarDays') || 28;
+  const range = { 7: '1 week', 14: '2 weeks', 28: '4 weeks', 60: '2 months' }[days] || `${days} days`;
+  container.append(h('div', { class: 'pane-header' }, h('h2', {}, 'Upcoming'), h('span', { class: 'muted' }, `Next ${range}`)), list);
+  upcoming(ctx.kindId, days).then((items) => {
+    if (!items.length) return clear(list, emptyState('Nothing coming up', `No releases in the next ${range}.`));
     clear(list, calendarList(items, (it) => openItemById(ctx, it.id)));
   }).catch((err) => clear(list, errorState(err)));
 }

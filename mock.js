@@ -130,6 +130,24 @@ const nzb = {
 function nzbLog(kind, text) { nzb.log.push({ ID: nzb.log.length + 1, Kind: kind, Time: Math.floor(Date.now() / 1000), Text: text }); if (nzb.log.length > 300) nzb.log.shift(); }
 nzbLog('INFO', 'nzbget 24.3 server-mode'); nzbLog('INFO', 'Connected to news.example.net'); nzbLog('WARNING', 'Server news.example.net: article not found, trying backup');
 
+// Radarr/Sonarr download history, fed by the simulated downloads finishing.
+const arrHistory = { radarr: [], sonarr: [] };
+function recordImport(g, t) {
+  const words = g.name.replace(/\./g, ' ');
+  const quality = { quality: { name: /2160p/.test(g.name) ? 'WEBDL-2160p' : /720p/.test(g.name) ? 'HDTV-720p' : 'WEBDL-1080p' } };
+  const ep = g.name.match(/^(.*)\.S(\d+)E(\d+)/);
+  if (ep) {
+    const s = series.find((x) => x.title.toLowerCase() === ep[1].replace(/\./g, ' ').toLowerCase());
+    arrHistory.sonarr.push({ eventType: 'downloadFolderImported', date: iso(t), sourceTitle: g.name, quality, seriesId: s?.id,
+      series: s ? { title: s.title } : { title: ep[1].replace(/\./g, ' ') },
+      episode: { seasonNumber: +ep[2], episodeNumber: +ep[3], title: `Chapter ${+ep[3]}` } });
+  } else {
+    const m = movies.find((x) => words.toLowerCase().startsWith(x.title.toLowerCase()));
+    arrHistory.radarr.push({ eventType: 'downloadFolderImported', date: iso(t), sourceTitle: g.name, quality, movieId: m?.id,
+      movie: m ? { title: m.title, year: m.year } : { title: words.split(' 20')[0] } });
+  }
+}
+
 function tickNzb() {
   const t = Date.now();
   const dt = (t - nzb.last) / 1000;
@@ -148,6 +166,7 @@ function tickNzb() {
       nzb.groups = nzb.groups.filter((x) => x !== g);
       nzb.history.unshift({ id: nzb.nextId++, name: g.name, cat: g.cat, size: g.size, status: 'SUCCESS/ALL', time: t });
       nzbLog('INFO', `Collection ${g.name} added to history`);
+      recordImport(g, t);
     }
   }
 }
@@ -357,6 +376,11 @@ function arrRoute(svc, method, rest, q, body) {
     if (svc === 'radarr') return movies.filter((m) => [m.inCinemas, m.digitalRelease].some((d) => new Date(d) >= start && new Date(d) < end));
     return episodes.filter((e) => new Date(e.airDateUtc) >= start && new Date(e.airDateUtc) < end).map((e) => ({ ...e, series: series.find((s) => s.id === e.seriesId) }));
   }
+  if (path === 'history/since') {
+    tickNzb();
+    const since = Date.parse(q.get('date') || 0);
+    return arrHistory[svc].filter((e) => Date.parse(e.date) > since);
+  }
   if (path === 'episode') return episodes.filter((e) => e.seriesId === Number(q.get('seriesId')));
   if (path === `${entity}/lookup`) {
     const term = (q.get('term') || '').toLowerCase();
@@ -455,4 +479,12 @@ function demoFileRoots() {
   return demoRoots;
 }
 
-module.exports = { handle, demoFileRoots };
+// A few example notifications so the demo shows unread badges straight away.
+function seedNotifications(notifier) {
+  notifier.add('radarr', 'imported', { title: 'Movie downloaded', body: 'Burning Atlas (2024) · WEBDL-1080p', level: 'success', link: { app: 'radarr', opts: { itemId: movies.find((m) => m.title === 'Burning Atlas')?.id } } });
+  notifier.add('sonarr', 'imported', { title: 'Episode downloaded', body: 'Copper Valley S03E08 · Chapter 8 · WEBDL-1080p', level: 'success', link: { app: 'sonarr', opts: {} } });
+  notifier.add('sonarr', 'imported', { title: 'Episode downloaded', body: 'The Archivists S03E02 · Chapter 2 · WEBDL-1080p', level: 'success', link: { app: 'sonarr', opts: {} } });
+  notifier.add('nzbget', 'failed', { title: 'Download failed', body: 'Glasshouse.S02E04.720p.WEB.h264', level: 'error', link: { app: 'nzbget', opts: { tab: 'history' } } });
+}
+
+module.exports = { handle, demoFileRoots, seedNotifications };

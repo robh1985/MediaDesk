@@ -10,7 +10,8 @@ One web portal for **Radarr, Sonarr, NZBGet and Jellyfin**, laid out like a desk
 - **Radarr / Sonarr**: browse and filter the library, see movie or series details (including seasons and episodes), search, monitor or unmonitor, refresh, delete, add new titles, manage the queue, and view the calendar, health and disk space.
 - **NZBGet**: a live speed graph, pause and resume (everything or one download), a speed limit, move to top, delete, history (including retrying failed downloads), adding an NZB by URL or file upload, the message log, and server stats.
 - **Jellyfin**: continue watching, next up, recently added, library browsing and search, item details (mark watched, favourite, refresh metadata), now playing (pause, stop or message a viewer), library scans, scheduled tasks, the activity log, and restart.
-- **Notifications** when downloads finish or fail, and when Radarr or Sonarr report health errors.
+- **Notification badges**: when a download finishes or fails, a movie or episode is imported, or Radarr/Sonarr report a problem, a number appears on that app's icon instead of a pop-up. Opening the app clears it, and the bell lists everything. The server keeps watching even when no browser is open.
+- **Settings for each app**: connection details, which events to count, and preferences such as the default quality profile and root folder for new titles, Sonarr's monitoring choice, the calendar range, the NZBGet category and priority, which Jellyfin user to browse as, and which home rows to show.
 - **Files**: a file manager for folders you choose on the MediaDesk server. You can browse, upload (drag and drop, any size), download, create folders, rename, cut/copy/paste, drag files between folders, delete, preview images, play video and audio, and edit text files such as `.nfo` and `.srt`.
 - **Web UI windows**: open any service's own interface inside a window for anything MediaDesk doesn't cover.
 
@@ -29,7 +30,7 @@ npm run demo        # or: node server.js --mock
 
 ```bash
 docker compose up -d --build
-# open http://<your-server>:8080, then go to Settings → Connections
+# open http://<your-server>:8080, then open Settings and connect each app
 ```
 
 Edit `PORTAL_PASSWORD` in `docker-compose.yml` first. Settings you save in the UI are stored in `./config/config.json`.
@@ -65,7 +66,7 @@ There are no dependencies and nothing to `npm install`.
 To use a different port, run it from a command prompt as `install-windows.cmd -Port 8081`. Run it again at any time to change the password or port.
 
 Notes for Windows:
-- **Service URLs:** if Radarr, Sonarr, NZBGet or Jellyfin run on the same PC, use `http://localhost:7878` and so on in *Settings → Connections*.
+- **Service URLs:** if Radarr, Sonarr, NZBGet or Jellyfin run on the same PC, use `http://localhost:7878` and so on on each app's page in *Settings*.
 - **Other devices can't connect:** check that the network is set to *Private* in Windows Settings → Network. The firewall rule doesn't apply to *Public* networks.
 - **Update:** double-click `update-windows.cmd`. It downloads the latest version from the `main` branch (switching to `main` if you're on another branch) and restarts MediaDesk. If you installed from a ZIP, extract the new ZIP over the old folder and double-click `restart-windows.cmd`. Your settings are kept either way. Settings → About shows which version is running.
 - **Restart:** double-click `restart-windows.cmd`. This stops any leftover copy of MediaDesk before starting it again; ending the task in Task Scheduler doesn't always do that.
@@ -77,7 +78,7 @@ Notes for Windows:
 
 You can configure MediaDesk in three ways. Environment variables override the config file.
 
-1. **Settings app** (easiest): open *Settings → Connections*, fill in the fields, then click *Test connections* and *Save*.
+1. **Settings app** (easiest): open *Settings*, pick an app in the sidebar, fill in its connection fields and click *Save & reconnect*. *Settings → General* tests every connection at once.
 2. **`config/config.json`**: see `config/config.example.json`.
 3. **Environment variables**:
 

@@ -1,10 +1,10 @@
 // The desktop shell: wallpaper, menu bar, dock, desktop icons, widgets and the launcher.
 
-import { h, clear, formatSpeed, formatBytes, timeOf, debounce, toast, toastError, contextMenu, onNotify, notifications, timeAgo } from './ui.js';
+import { h, clear, formatSpeed, formatBytes, timeOf, debounce, toast, toastError, contextMenu, timeAgo } from './ui.js';
 import { icon, appIcon } from './icons.js';
-import { radarr, sonarr, nzbget, jellyfin, isConfigured, serviceLink, portal, state } from './api.js';
+import { radarr, sonarr, nzbget, jellyfin, isConfigured, serviceLink, portal, state, appPref } from './api.js';
 import { getApps, getApp, openApp, toggleApp, onChange, openWindows, focusedWindow, close as closeWindow } from './wm.js';
-import { live, subscribe } from './live.js';
+import { live, subscribe, markRead, markAllRead, clearNotifications, totalUnread, dismissSystemNotice } from './live.js';
 import { upcoming, posterUrl } from './apps/arr.js';
 import { itemImage, searchJellyfin } from './apps/jellyfin.js';
 
@@ -122,9 +122,14 @@ function buildMenuBar() {
     document.body.classList.toggle('has-window', openWindows().some((x) => !x.minimized));
     const w = focusedWindow();
     appName.textContent = w ? (getApp(w.appId)?.name || 'MediaDesk') : 'MediaDesk';
+    // Looking at an app clears the number on its icon.
+    if (w) markRead(w.appId);
   });
   subscribe((l) => {
-    if (isConfigured('nzbget') && l.nzb) {
+    const total = totalUnread();
+    bell.dataset.count = total > 99 ? '99+' : total || '';
+    bell.title = total ? `${total} unread notification${total === 1 ? '' : 's'}` : 'Notifications';
+    if (isConfigured('nzbget') && l.nzb && appPref('nzbget', 'speedInMenuBar') !== false) {
       clear(speed, h('span', { class: 'tray-glyph', html: l.nzb.DownloadPaused ? icon.pause : icon.download }), l.nzb.DownloadPaused ? 'Paused' : formatSpeed(l.nzb.speed));
       speed.classList.toggle('active', l.nzb.speed > 0 && !l.nzb.DownloadPaused);
       speed.hidden = false;
@@ -134,7 +139,6 @@ function buildMenuBar() {
       streams.hidden = false;
     } else streams.hidden = true;
   });
-  onNotify(() => bell.classList.add('has-new'));
   const tick = () => {
     const d = new Date();
     clear(clock, h('span', { class: 'clock-date' }, d.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' })), h('span', {}, timeOf(d)));
@@ -153,20 +157,41 @@ async function logOut() {
 function toggleNotificationCenter() {
   const existing = document.querySelector('.notif-center');
   if (existing) return existing.remove();
-  document.querySelector('.tray-icon.has-new')?.classList.remove('has-new');
-  const list = notifications();
+  const list = h('div', { class: 'notif-list' });
   const panel = h('div', { class: 'notif-center glass' },
     h('div', { class: 'notif-cal' },
       h('div', { class: 'notif-day' }, new Date().toLocaleDateString(undefined, { weekday: 'long' })),
       h('div', { class: 'notif-date' }, new Date().toLocaleDateString(undefined, { month: 'long', day: 'numeric' }))),
-    h('h4', {}, 'Notifications'),
-    list.length ? list.map((n) => h('div', { class: `notif notif-${n.type}` },
-      n.icon ? h('div', { class: 'notif-icon', html: n.icon }) : null,
-      h('div', {}, h('strong', {}, n.title), n.body ? h('div', { class: 'small' }, n.body) : null, h('div', { class: 'small muted' }, timeAgo(n.at)))))
-      : h('div', { class: 'muted small' }, 'You’re all caught up.'));
+    h('div', { class: 'notif-head' }, h('h4', {}, 'Notifications'),
+      h('button', { class: 'btn btn-sm btn-ghost', onclick: () => markAllRead() }, 'Mark all read'),
+      h('button', { class: 'btn btn-sm btn-ghost', onclick: () => clearNotifications() }, 'Clear')),
+    list);
+  const draw = (l) => {
+    const items = [...l.system.map((n) => ({ ...n, app: 'system', read: false })), ...l.notifications];
+    if (!items.length) return clear(list, h('div', { class: 'muted small notif-empty' }, 'You’re all caught up.'));
+    clear(list, items.slice(0, 60).map((n) => {
+      const app = getApp(n.app);
+      const go = () => {
+        panel.remove();
+        if (n.app === 'system') { dismissSystemNotice(n.id); return n.action?.onClick(); }
+        markRead(n.app);
+        if (n.link) openApp(n.link.app, n.link.opts || {});
+      };
+      return h('button', { class: `notif notif-${n.level || 'info'} ${n.read ? 'read' : 'unread'}`, onclick: go },
+        h('div', { class: 'notif-icon', html: app?.icon || appIcon.dashboard }),
+        h('div', { class: 'grow' },
+          h('div', { class: 'notif-title' }, h('strong', {}, n.title), h('span', { class: 'small muted' }, timeAgo(n.at))),
+          n.body ? h('div', { class: 'small' }, n.body) : null,
+          n.action ? h('span', { class: 'btn btn-sm btn-primary notif-action' }, n.action.label) : null),
+        n.read ? null : h('span', { class: 'notif-dot', 'aria-label': 'Unread' }));
+    }));
+  };
+  const unsub = subscribe(draw);
   document.body.append(panel);
+  const close = () => { panel.remove(); unsub(); };
   setTimeout(() => document.addEventListener('pointerdown', function off(e) {
-    if (!panel.contains(e.target) && !e.target.closest('.tray-item')) { panel.remove(); document.removeEventListener('pointerdown', off); }
+    if (!panel.isConnected) { unsub(); document.removeEventListener('pointerdown', off); return; }
+    if (!panel.contains(e.target) && !e.target.closest('.tray-item')) { close(); document.removeEventListener('pointerdown', off); }
   }), 0);
 }
 
@@ -190,17 +215,14 @@ function buildDock() {
       },
       h('span', { class: 'dock-icon', html: opts.icon || app.icon }),
       h('span', { class: 'dock-label' }, opts.label || app.name),
-      badgeCount ? h('span', { class: 'dock-badge' }, badgeCount) : null);
+      badgeCount ? h('span', { class: 'dock-badge', 'aria-label': `${badgeCount} unread` }, badgeCount > 99 ? '99+' : badgeCount) : null);
     };
-    const healthCount = (svc) => live.health[svc].filter((x) => x.type === 'error' || x.type === 'warning').length;
     const webviews = openWindows().filter((w) => w.appId === 'webview');
     clear(dock,
       h('div', { class: 'dock-inner glass' },
         item('launcher', { icon: appIcon.dashboard, label: 'Search', onclick: openLauncher }),
         h('div', { class: 'dock-sep' }),
-        DOCK_APPS.map((id) => item(id, {
-          badge: id === 'jellyfin' ? live.sessions.length : id === 'radarr' || id === 'sonarr' ? healthCount(id) : 0,
-        })),
+        DOCK_APPS.map((id) => item(id, { badge: live.unread[id] || 0 })),
         h('div', { class: 'dock-sep' }),
         webviews.length ? item('webview', { label: `Web UI (${webviews.length})` }) : null,
         item('settings')));
@@ -230,8 +252,14 @@ function buildDesktopIcons() {
     { id: 'settings', name: 'Settings', icon: appIcon.settings, open: () => openApp('settings') },
   ];
   clear(host, entries.map((e) => {
+    const badge = h('span', { class: 'dock-badge desktop-badge', hidden: true });
     const el = h('button', { class: 'desktop-icon', dataset: { app: e.id } },
-      h('span', { class: 'desktop-icon-img', html: e.icon }), h('span', { class: 'desktop-icon-label' }, e.name));
+      h('span', { class: 'desktop-icon-img', html: e.icon }), badge, h('span', { class: 'desktop-icon-label' }, e.name));
+    subscribe((l) => {
+      const n = l.unread[e.id] || 0;
+      badge.hidden = !n;
+      badge.textContent = n > 99 ? '99+' : n;
+    });
     el.addEventListener('click', () => {
       host.querySelectorAll('.selected').forEach((x) => x.classList.remove('selected'));
       el.classList.add('selected');
@@ -312,7 +340,7 @@ function buildWidgets() {
     const w = widget('Now playing', 'jellyfin', body, () => openApp('jellyfin', { section: 'sessions' }));
     host.append(w);
     subscribe((l) => {
-      w.hidden = !l.sessions.length;
+      w.hidden = !l.sessions.length || appPref('jellyfin', 'nowPlayingWidget') === false;
       clear(body, l.sessions.slice(0, 3).map((s) => {
         const it = s.NowPlayingItem;
         const pct = it.RunTimeTicks ? ((s.PlayState?.PositionTicks || 0) / it.RunTimeTicks) * 100 : 0;

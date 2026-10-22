@@ -3,7 +3,7 @@
 import { h, clear, formatBytes, formatSpeed, formatDuration, timeAgo, toast, toastError, confirmDialog,
   spinner, emptyState, errorState, progressBar, badge, poll } from '../ui.js';
 import { icon, appIcon } from '../icons.js';
-import { nzbget, isConfigured } from '../api.js';
+import { nzbget, isConfigured, appPref } from '../api.js';
 import { subscribe, live } from '../live.js';
 import { notConfigured, tabs } from './common.js';
 import { diskRow } from './arr.js';
@@ -12,7 +12,7 @@ const MB = 1024 * 1024;
 
 export const nzbgetApp = {
   id: 'nzbget', name: 'NZBGet', icon: appIcon.nzbget, size: [1000, 680], description: 'Usenet downloader',
-  open(win) {
+  open(win, opts = {}) {
     if (!isConfigured('nzbget')) return clear(win.body, notConfigured('NZBGet', 'nzbget'));
 
     const speed = h('div', { class: 'nzb-speed' }, '—');
@@ -55,15 +55,17 @@ export const nzbgetApp = {
     win.on('close', unsub);
 
     let stop;
+    let tabBar;
     const show = (id) => {
       stop?.();
       clear(content);
       stop = ({ queue: renderQueue, history: renderHistory, add: renderAdd, log: renderLog, server: renderServer }[id])(content);
     };
     win.body.append(h('div', { class: 'nzb' }, header,
-      tabs([['queue', 'Queue'], ['history', 'History'], ['add', 'Add NZB'], ['log', 'Messages'], ['server', 'Server']], show),
+      (tabBar = tabs([['queue', 'Queue'], ['history', 'History'], ['add', 'Add NZB'], ['log', 'Messages'], ['server', 'Server']], show, opts.tab)),
       content));
     win.on('close', () => stop?.());
+    win.on('reopen', (o) => { if (o?.tab) tabBar.select(o.tab); });
   },
 };
 
@@ -185,14 +187,14 @@ function renderAdd(container) {
   const url = h('input', { class: 'input input-lg', type: 'url', placeholder: 'https://indexer.example/getnzb/…' });
   const file = h('input', { type: 'file', accept: '.nzb,application/x-nzb', class: 'input' });
   const cat = h('select', { class: 'input' }, h('option', { value: '' }, 'No category'));
-  const prio = h('select', { class: 'input' }, [['0', 'Normal'], ['50', 'High'], ['100', 'Very high'], ['900', 'Force'], ['-50', 'Low'], ['-100', 'Very low']].map(([v, l]) => h('option', { value: v }, l)));
+  const prio = h('select', { class: 'input' }, [['0', 'Normal'], ['50', 'High'], ['100', 'Very high'], ['900', 'Force'], ['-50', 'Low'], ['-100', 'Very low']].map(([v, l]) => h('option', { value: v, selected: String(appPref('nzbget', 'defaultPriority') ?? 0) === v }, l)));
   const top = h('input', { type: 'checkbox' });
   const paused = h('input', { type: 'checkbox' });
   const submit = h('button', { class: 'btn btn-primary btn-lg' }, h('span', { html: icon.plus }), 'Add to queue');
 
   nzbget('config').then((cfg) => {
     const names = cfg.filter((o) => /^Category\d+\.Name$/.test(o.Name) && o.Value).map((o) => o.Value);
-    cat.append(...names.map((n) => h('option', { value: n }, n)));
+    cat.append(...names.map((n) => h('option', { value: n, selected: n === appPref('nzbget', 'defaultCategory') }, n)));
   }).catch(() => {});
 
   submit.onclick = async () => {
