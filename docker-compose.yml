@@ -1,0 +1,24 @@
+services:
+  mediadesk:
+    build: .
+    container_name: mediadesk
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./config:/config
+    environment:
+      # Strongly recommended if the portal is reachable by anyone else.
+      PORTAL_PASSWORD: "change-me"
+      # Everything below is optional — you can also fill these in from Settings inside the portal.
+      # RADARR_URL: "http://radarr:7878"
+      # RADARR_API_KEY: ""
+      # SONARR_URL: "http://sonarr:8989"
+      # SONARR_API_KEY: ""
+      # NZBGET_URL: "http://nzbget:6789"
+      # NZBGET_USERNAME: "nzbget"
+      # NZBGET_PASSWORD: ""
+      # JELLYFIN_URL: "http://jellyfin:8096"
+      # JELLYFIN_API_KEY: ""
+      # Optional browser-facing URLs for "Open in …" links, if different from the URLs above:
+      # RADARR_PUBLIC_URL: "https://radarr.example.com"

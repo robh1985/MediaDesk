@@ -1,0 +1,369 @@
+#!/usr/bin/env node
+// MediaDesk — a unified desktop-style portal for Radarr, Sonarr, NZBGet and Jellyfin.
+// Zero dependencies: requires Node.js 18+ (uses the built-in fetch).
+
+'use strict';
+
+const http = require('node:http');
+const fs = require('node:fs');
+const path = require('node:path');
+const crypto = require('node:crypto');
+const { Readable } = require('node:stream');
+
+const ROOT = __dirname;
+const PUBLIC_DIR = path.join(ROOT, 'public');
+const CONFIG_PATH = process.env.CONFIG_PATH || path.join(ROOT, 'config', 'config.json');
+const PORT = Number(process.env.PORT) || 8080;
+const HOST = process.env.HOST || '0.0.0.0';
+const MOCK = process.env.MOCK === '1' || process.argv.includes('--mock');
+const SERVICES = ['radarr', 'sonarr', 'nzbget', 'jellyfin'];
+const SESSION_DAYS = 30;
+
+// ---------------------------------------------------------------------------
+// Configuration
+// ---------------------------------------------------------------------------
+
+function loadConfig() {
+  let cfg = {};
+  try {
+    cfg = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
+  } catch (err) {
+    if (err.code !== 'ENOENT') console.error(`Could not read ${CONFIG_PATH}: ${err.message}`);
+  }
+  cfg.services = cfg.services || {};
+  for (const name of SERVICES) cfg.services[name] = cfg.services[name] || {};
+
+  // Environment variables override the file (handy for Docker).
+  const env = process.env;
+  const set = (svc, key, value) => { if (value !== undefined && value !== '') cfg.services[svc][key] = value; };
+  for (const svc of SERVICES) {
+    const p = svc.toUpperCase();
+    set(svc, 'url', env[`${p}_URL`]);
+    set(svc, 'publicUrl', env[`${p}_PUBLIC_URL`]);
+    set(svc, 'apiKey', env[`${p}_API_KEY`]);
+  }
+  set('nzbget', 'username', env.NZBGET_USERNAME);
+  set('nzbget', 'password', env.NZBGET_PASSWORD);
+  set('jellyfin', 'userId', env.JELLYFIN_USER_ID);
+  if (env.PORTAL_PASSWORD) cfg.portalPassword = env.PORTAL_PASSWORD;
+  return cfg;
+}
+
+let config = loadConfig();
+
+function saveConfig(next) {
+  fs.mkdirSync(path.dirname(CONFIG_PATH), { recursive: true });
+  fs.writeFileSync(CONFIG_PATH, JSON.stringify(next, null, 2), { mode: 0o600 });
+  config = loadConfig();
+}
+
+const trimSlash = (u) => String(u || '').replace(/\/+$/, '');
+const isConfigured = (svc) => {
+  const c = config.services[svc];
+  if (!c || !c.url) return false;
+  return svc === 'nzbget' ? true : Boolean(c.apiKey);
+};
+
+// Shape of the config the browser is allowed to see: no secrets.
+function publicConfig() {
+  const services = {};
+  for (const svc of SERVICES) {
+    const c = config.services[svc];
+    services[svc] = {
+      configured: MOCK || isConfigured(svc),
+      url: c.url || '',
+      publicUrl: trimSlash(c.publicUrl || c.url || ''),
+      username: c.username || '',
+      userId: c.userId || '',
+      hasApiKey: Boolean(c.apiKey),
+      hasPassword: Boolean(c.password),
+    };
+  }
+  return { services, mock: MOCK, auth: Boolean(config.portalPassword) };
+}
+
+// ---------------------------------------------------------------------------
+// Authentication (optional — enabled when a portal password is set)
+// ---------------------------------------------------------------------------
+
+function sign(value) {
+  return crypto.createHmac('sha256', String(config.portalPassword)).update(value).digest('base64url');
+}
+
+function makeSession() {
+  const expires = String(Date.now() + SESSION_DAYS * 864e5);
+  return `${expires}.${sign(expires)}`;
+}
+
+function parseCookies(req) {
+  const out = {};
+  for (const part of (req.headers.cookie || '').split(';')) {
+    const i = part.indexOf('=');
+    if (i > 0) out[part.slice(0, i).trim()] = decodeURIComponent(part.slice(i + 1).trim());
+  }
+  return out;
+}
+
+function isAuthed(req) {
+  if (!config.portalPassword) return true;
+  const token = parseCookies(req).mediadesk_session || '';
+  const [expires, sig] = token.split('.');
+  if (!expires || !sig || Number(expires) < Date.now()) return false;
+  const expected = Buffer.from(sign(expires));
+  const given = Buffer.from(sig);
+  return expected.length === given.length && crypto.timingSafeEqual(expected, given);
+}
+
+function safeEqual(a, b) {
+  const ha = crypto.createHash('sha256').update(String(a)).digest();
+  const hb = crypto.createHash('sha256').update(String(b)).digest();
+  return crypto.timingSafeEqual(ha, hb);
+}
+
+// Basic brute-force protection for the login endpoint.
+const loginAttempts = new Map();
+function tooManyAttempts(ip) {
+  const now = Date.now();
+  const entry = loginAttempts.get(ip) || { count: 0, since: now };
+  if (now - entry.since > 15 * 60e3) { entry.count = 0; entry.since = now; }
+  entry.count++;
+  loginAttempts.set(ip, entry);
+  return entry.count > 10;
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function sendJson(res, status, body, headers = {}) {
+  const data = JSON.stringify(body);
+  res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', ...headers });
+  res.end(data);
+}
+
+function readBody(req, limit = 5 * 1024 * 1024) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    let size = 0;
+    req.on('data', (c) => {
+      size += c.length;
+      if (size > limit) { reject(new Error('Body too large')); req.destroy(); return; }
+      chunks.push(c);
+    });
+    req.on('end', () => resolve(Buffer.concat(chunks)));
+    req.on('error', reject);
+  });
+}
+
+async function readJson(req) {
+  const buf = await readBody(req);
+  if (!buf.length) return {};
+  return JSON.parse(buf.toString('utf8'));
+}
+
+const MIME = {
+  '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8',
+  '.svg': 'image/svg+xml', '.png': 'image/png', '.jpg': 'image/jpeg', '.ico': 'image/x-icon',
+  '.json': 'application/json', '.webmanifest': 'application/manifest+json', '.woff2': 'font/woff2',
+};
+
+function serveStatic(req, res, pathname) {
+  let rel = decodeURIComponent(pathname);
+  if (rel === '/') rel = '/index.html';
+  const file = path.normalize(path.join(PUBLIC_DIR, rel));
+  if (!file.startsWith(PUBLIC_DIR + path.sep)) return sendJson(res, 403, { error: 'Forbidden' });
+  fs.stat(file, (err, st) => {
+    if (err || !st.isFile()) return sendJson(res, 404, { error: 'Not found' });
+    res.writeHead(200, {
+      'Content-Type': MIME[path.extname(file)] || 'application/octet-stream',
+      'Content-Length': st.size,
+      'Cache-Control': 'no-cache',
+    });
+    fs.createReadStream(file).pipe(res);
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Service proxies
+// ---------------------------------------------------------------------------
+
+const HOP_HEADERS = new Set(['content-encoding', 'content-length', 'transfer-encoding', 'connection', 'keep-alive', 'set-cookie']);
+
+async function pipeUpstream(res, upstream) {
+  const headers = {};
+  upstream.headers.forEach((v, k) => { if (!HOP_HEADERS.has(k)) headers[k] = v; });
+  res.writeHead(upstream.status, headers);
+  if (upstream.body) Readable.fromWeb(upstream.body).pipe(res);
+  else res.end();
+}
+
+// Radarr, Sonarr, Jellyfin: REST passthrough with credentials injected server-side.
+async function proxyRest(req, res, svc, rest, search) {
+  const c = config.services[svc];
+  if (!isConfigured(svc)) return sendJson(res, 503, { error: `${svc} is not configured` });
+
+  const headers = { Accept: req.headers.accept || 'application/json' };
+  if (req.headers['content-type']) headers['Content-Type'] = req.headers['content-type'];
+  if (svc === 'jellyfin') {
+    headers['X-Emby-Token'] = c.apiKey;
+    headers.Authorization = `MediaBrowser Client="MediaDesk", Device="MediaDesk", DeviceId="mediadesk", Version="1.0.0", Token="${c.apiKey}"`;
+  } else {
+    headers['X-Api-Key'] = c.apiKey;
+  }
+
+  const hasBody = !['GET', 'HEAD'].includes(req.method);
+  const body = hasBody ? await readBody(req) : undefined;
+  const target = `${trimSlash(c.url)}/${rest}${search}`;
+  try {
+    const upstream = await fetch(target, { method: req.method, headers, body, signal: AbortSignal.timeout(30e3) });
+    await pipeUpstream(res, upstream);
+  } catch (err) {
+    sendJson(res, 502, { error: `Could not reach ${svc}: ${err.cause?.code || err.message}` });
+  }
+}
+
+// NZBGet: JSON-RPC. The browser posts {method, params}; we add the auth.
+async function proxyNzbget(req, res) {
+  const c = config.services.nzbget;
+  if (!isConfigured('nzbget')) return sendJson(res, 503, { error: 'nzbget is not configured' });
+  const { method, params = [] } = await readJson(req);
+  if (typeof method !== 'string' || !/^[a-z]+$/i.test(method)) return sendJson(res, 400, { error: 'Invalid method' });
+
+  const headers = { 'Content-Type': 'application/json' };
+  if (c.username) headers.Authorization = 'Basic ' + Buffer.from(`${c.username}:${c.password || ''}`).toString('base64');
+  try {
+    const upstream = await fetch(`${trimSlash(c.url)}/jsonrpc`, {
+      method: 'POST', headers, body: JSON.stringify({ version: '1.1', id: 1, method, params }),
+      signal: AbortSignal.timeout(30e3),
+    });
+    if (upstream.status === 401) return sendJson(res, 401, { error: 'NZBGet rejected the username/password' });
+    const data = await upstream.json();
+    if (data.error) return sendJson(res, 400, { error: data.error.message || 'NZBGet error' });
+    sendJson(res, 200, data.result);
+  } catch (err) {
+    sendJson(res, 502, { error: `Could not reach nzbget: ${err.cause?.code || err.message}` });
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Portal endpoints
+// ---------------------------------------------------------------------------
+
+async function updateConfig(req, res) {
+  const body = await readJson(req);
+  const next = JSON.parse(fs.existsSync(CONFIG_PATH) ? fs.readFileSync(CONFIG_PATH, 'utf8') : '{}');
+  next.services = next.services || {};
+  for (const svc of SERVICES) {
+    const incoming = body.services?.[svc];
+    if (!incoming) continue;
+    const cur = (next.services[svc] = next.services[svc] || {});
+    for (const key of ['url', 'publicUrl', 'username', 'userId']) {
+      if (typeof incoming[key] === 'string') cur[key] = incoming[key].trim();
+    }
+    // Secrets are only replaced when a new value is supplied.
+    for (const key of ['apiKey', 'password']) {
+      if (typeof incoming[key] === 'string' && incoming[key] !== '') cur[key] = incoming[key].trim();
+    }
+  }
+  saveConfig(next);
+  sendJson(res, 200, publicConfig());
+}
+
+async function testService(svc) {
+  if (MOCK) return { ok: true, version: 'mock' };
+  if (!isConfigured(svc)) return { ok: false, error: 'Not configured' };
+  const c = config.services[svc];
+  const base = trimSlash(c.url);
+  try {
+    let r;
+    if (svc === 'nzbget') {
+      const headers = { 'Content-Type': 'application/json' };
+      if (c.username) headers.Authorization = 'Basic ' + Buffer.from(`${c.username}:${c.password || ''}`).toString('base64');
+      r = await fetch(`${base}/jsonrpc`, { method: 'POST', headers, body: '{"method":"version"}', signal: AbortSignal.timeout(8e3) });
+      if (!r.ok) return { ok: false, error: `HTTP ${r.status}` };
+      return { ok: true, version: (await r.json()).result };
+    }
+    if (svc === 'jellyfin') {
+      r = await fetch(`${base}/System/Info`, { headers: { 'X-Emby-Token': c.apiKey }, signal: AbortSignal.timeout(8e3) });
+      if (!r.ok) return { ok: false, error: `HTTP ${r.status}` };
+      return { ok: true, version: (await r.json()).Version };
+    }
+    r = await fetch(`${base}/api/v3/system/status`, { headers: { 'X-Api-Key': c.apiKey }, signal: AbortSignal.timeout(8e3) });
+    if (!r.ok) return { ok: false, error: `HTTP ${r.status}` };
+    return { ok: true, version: (await r.json()).version };
+  } catch (err) {
+    return { ok: false, error: err.cause?.code || err.message };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Router
+// ---------------------------------------------------------------------------
+
+const mock = MOCK ? require('./mock') : null;
+
+async function handle(req, res) {
+  const url = new URL(req.url, 'http://localhost');
+  const p = url.pathname;
+
+  // Public routes
+  if (p === '/portal/login' && req.method === 'POST') {
+    const ip = req.socket.remoteAddress;
+    if (tooManyAttempts(ip)) return sendJson(res, 429, { error: 'Too many attempts — try again later' });
+    const { password } = await readJson(req);
+    if (!config.portalPassword || !safeEqual(password || '', config.portalPassword)) {
+      return sendJson(res, 401, { error: 'Incorrect password' });
+    }
+    loginAttempts.delete(ip);
+    const secure = req.headers['x-forwarded-proto'] === 'https' ? '; Secure' : '';
+    return sendJson(res, 200, { ok: true }, {
+      'Set-Cookie': `mediadesk_session=${makeSession()}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${SESSION_DAYS * 86400}${secure}`,
+    });
+  }
+  if (p === '/portal/logout' && req.method === 'POST') {
+    return sendJson(res, 200, { ok: true }, { 'Set-Cookie': 'mediadesk_session=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0' });
+  }
+  if (p === '/portal/session') return sendJson(res, 200, { authed: isAuthed(req), auth: Boolean(config.portalPassword) });
+
+  const isApi = p.startsWith('/api/') || p.startsWith('/portal/');
+  if (!isApi) return serveStatic(req, res, p);
+  if (!isAuthed(req)) return sendJson(res, 401, { error: 'Not logged in' });
+
+  if (p === '/portal/config' && req.method === 'GET') return sendJson(res, 200, publicConfig());
+  if (p === '/portal/config' && req.method === 'POST') {
+    if (MOCK) return sendJson(res, 400, { error: 'Settings are read-only in demo mode' });
+    return updateConfig(req, res);
+  }
+  if (p === '/portal/test') {
+    const results = {};
+    await Promise.all(SERVICES.map(async (s) => { results[s] = await testService(s); }));
+    return sendJson(res, 200, results);
+  }
+
+  const m = p.match(/^\/api\/(radarr|sonarr|nzbget|jellyfin)(?:\/(.*))?$/);
+  if (!m) return sendJson(res, 404, { error: 'Unknown endpoint' });
+  const [, svc, rest = ''] = m;
+
+  if (mock) return mock.handle(req, res, svc, rest, url, { readJson, sendJson });
+  if (svc === 'nzbget') return proxyNzbget(req, res);
+  return proxyRest(req, res, svc, rest, url.search);
+}
+
+const server = http.createServer((req, res) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Referrer-Policy', 'same-origin');
+  handle(req, res).catch((err) => {
+    console.error(err);
+    if (!res.headersSent) sendJson(res, 500, { error: err.message });
+    else res.end();
+  });
+});
+
+server.listen(PORT, HOST, () => {
+  console.log(`MediaDesk running at http://${HOST === '0.0.0.0' ? 'localhost' : HOST}:${PORT}${MOCK ? '  (demo mode, fake data)' : ''}`);
+  if (!MOCK) {
+    const missing = SERVICES.filter((s) => !isConfigured(s));
+    if (missing.length) console.log(`Not configured yet: ${missing.join(', ')} — open Settings in the portal or edit ${CONFIG_PATH}`);
+  }
+  if (!config.portalPassword) console.log('Warning: no portal password set. Set PORTAL_PASSWORD if this is reachable by others.');
+});
