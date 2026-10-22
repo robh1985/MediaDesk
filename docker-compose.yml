@@ -7,6 +7,8 @@ services:
       - "8080:8080"
     volumes:
       - ./config:/config
+      # Folders for the Files app: mount them here, then add the container path (e.g. /media) in Settings > Files.
+      # - /mnt/media:/media
     environment:
       # Strongly recommended if the portal is reachable by anyone else.
       PORTAL_PASSWORD: "change-me"

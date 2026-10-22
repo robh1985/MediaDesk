@@ -11,6 +11,7 @@ One web portal for **Radarr, Sonarr, NZBGet and Jellyfin**, laid out like a desk
 - **NZBGet**: a live speed graph, pause and resume (everything or one download), a speed limit, move to top, delete, history (including retrying failed downloads), adding an NZB by URL or file upload, the message log, and server stats.
 - **Jellyfin**: continue watching, next up, recently added, library browsing and search, item details (mark watched, favourite, refresh metadata), now playing (pause, stop or message a viewer), library scans, scheduled tasks, the activity log, and restart.
 - **Notifications** when downloads finish or fail, and when Radarr or Sonarr report health errors.
+- **Files**: a file manager for folders you choose on the MediaDesk server. You can browse, upload (drag and drop, any size), download, create folders, rename, cut/copy/paste, drag files between folders, delete, preview images, play video and audio, and edit text files such as `.nfo` and `.srt`.
 - **Web UI windows**: open any service's own interface inside a window for anything MediaDesk doesn't cover.
 
 Your API keys stay on the MediaDesk server. The browser only talks to MediaDesk, which adds the credentials when it forwards each request. This also avoids CORS problems.
@@ -86,11 +87,23 @@ You can configure MediaDesk in three ways. Environment variables override the co
 | `SONARR_URL`, `SONARR_API_KEY` | Sonarr → *Settings → General → API Key* |
 | `NZBGET_URL`, `NZBGET_USERNAME`, `NZBGET_PASSWORD` | NZBGet → *Settings → Security* (`ControlUsername` / `ControlPassword`) |
 | `JELLYFIN_URL`, `JELLYFIN_API_KEY` | Jellyfin → *Dashboard → API Keys → +* |
+| `FILE_ROOTS` | Optional. Folders the Files app may manage (also settable in *Settings → Files*) |
 | `JELLYFIN_USER_ID` | Optional. Which user's view to browse (defaults to the first admin) |
 | `*_PUBLIC_URL` | Optional. The browser-facing URL used for "Open in…" links and Web UI windows, if it differs from the server-side URL |
 | `PORT`, `HOST`, `CONFIG_PATH` | Server settings (defaults: `8080`, `0.0.0.0`, `./config/config.json`). The port can also be set as `"port"` in the config file. |
 
 **Server URL compared with public URL:** the *server URL* is how the MediaDesk server reaches a service (for example `http://radarr:7878` inside Docker). The *public URL* is what your browser uses (for example `https://radarr.example.com`) and only matters for links and embedded web UIs.
+
+## Files
+
+The Files app only works with folders you've shared in **Settings → Files**, which takes one full path per line, such as `D:\Media` or `/mnt/media`. You can also set them with the `FILE_ROOTS` environment variable (separate paths with `;` on Windows or `:` on Linux/macOS). Settings suggests folders from Radarr, Sonarr and NZBGet.
+
+- **Password required:** anyone who can open Files can change or delete anything in the shared folders, so Files stays switched off until a portal password is set.
+- **Contained to shared folders:** paths can't escape the shared folders, including through symlinks or Windows junctions.
+- **Permanent deletes:** deleting is permanent. Nothing goes to the Recycle Bin.
+- **Whole folders can't be downloaded:** you can download files, but not a folder in one go.
+- **Network shares on Windows:** the startup task runs as the SYSTEM account, which can't see mapped drive letters such as `Z:`. Use the share's full address, such as `\\NAS\Media`, and make sure the share allows the PC's computer account.
+- **Docker:** Files only sees folders mounted into the container. Add each one under `volumes:` in `docker-compose.yml` (for example `- /mnt/media:/media`), then share the container path (`/media`).
 
 ## Security notes
 

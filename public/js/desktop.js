@@ -52,7 +52,7 @@ export function openWebView(svc) {
 // Boot the desktop
 // ---------------------------------------------------------------------------
 
-const DOCK_APPS = ['dashboard', 'radarr', 'sonarr', 'nzbget', 'jellyfin'];
+const DOCK_APPS = ['dashboard', 'radarr', 'sonarr', 'nzbget', 'jellyfin', 'files'];
 
 export function startDesktop() {
   buildMenuBar();

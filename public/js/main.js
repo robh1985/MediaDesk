@@ -9,10 +9,11 @@ import { jellyfinApp } from './apps/jellyfin.js';
 import { dashboardApp } from './apps/dashboard.js';
 import { settingsApp } from './apps/settings.js';
 import { webviewApp } from './apps/webview.js';
+import { filesApp } from './apps/files.js';
 
 applyAppearance();
 
-[dashboardApp, makeArrApp('radarr'), makeArrApp('sonarr'), nzbgetApp, jellyfinApp, settingsApp, webviewApp,
+[dashboardApp, makeArrApp('radarr'), makeArrApp('sonarr'), nzbgetApp, jellyfinApp, filesApp, settingsApp, webviewApp,
   { id: 'launcher', name: 'Search', icon: '', open() {} }].forEach(registerApp);
 
 async function boot() {

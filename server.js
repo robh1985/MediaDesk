@@ -9,6 +9,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const { Readable } = require('node:stream');
+const files = require('./files');
 
 const ROOT = __dirname;
 const PUBLIC_DIR = path.join(ROOT, 'public');
@@ -48,6 +49,8 @@ function loadConfig() {
   set('nzbget', 'password', env.NZBGET_PASSWORD);
   set('jellyfin', 'userId', env.JELLYFIN_USER_ID);
   if (env.PORTAL_PASSWORD) cfg.portalPassword = env.PORTAL_PASSWORD;
+  if (env.FILE_ROOTS) cfg.fileRoots = env.FILE_ROOTS.split(path.delimiter).filter(Boolean);
+  if (MOCK) cfg.fileRoots = require('./mock').demoFileRoots();
   return cfg;
 }
 
@@ -82,7 +85,16 @@ function publicConfig() {
       hasPassword: Boolean(c.password),
     };
   }
-  return { services, mock: MOCK, auth: Boolean(config.portalPassword) };
+  return { services, mock: MOCK, auth: Boolean(config.portalPassword), files: filesStatus() };
+}
+
+// The file manager can change anything inside its folders, so it also requires a portal password.
+function filesStatus() {
+  const roots = files.rootList(config).map((r) => r.path);
+  let reason = null;
+  if (!config.portalPassword && !MOCK) reason = 'password';
+  else if (!roots.length) reason = 'roots';
+  return { enabled: !reason, reason, roots };
 }
 
 // ---------------------------------------------------------------------------
@@ -268,6 +280,11 @@ async function updateConfig(req, res) {
       if (typeof incoming[key] === 'string' && incoming[key] !== '') cur[key] = incoming[key].trim();
     }
   }
+  if (Array.isArray(body.fileRoots)) {
+    const { roots, errors } = await files.validateRoots(body.fileRoots);
+    if (errors.length) return sendJson(res, 400, { error: `Check these folders: ${errors.join('; ')}` });
+    next.fileRoots = roots;
+  }
   saveConfig(next);
   sendJson(res, 200, publicConfig());
 }
@@ -309,6 +326,13 @@ async function handle(req, res) {
   const url = new URL(req.url, 'http://localhost');
   const p = url.pathname;
 
+  // Changes must come from MediaDesk's own pages: browsers won't let another site send this
+  // header without a CORS preflight, which this server never approves.
+  const unsafe = !['GET', 'HEAD', 'OPTIONS'].includes(req.method);
+  if (unsafe && (p.startsWith('/api/') || p.startsWith('/portal/')) && req.headers['x-mediadesk'] !== '1') {
+    return sendJson(res, 403, { error: 'Missing X-MediaDesk header' });
+  }
+
   // Public routes
   if (p === '/portal/login' && req.method === 'POST') {
     const ip = req.socket.remoteAddress;
@@ -331,6 +355,14 @@ async function handle(req, res) {
   const isApi = p.startsWith('/api/') || p.startsWith('/portal/');
   if (!isApi) return serveStatic(req, res, p);
   if (!isAuthed(req)) return sendJson(res, 401, { error: 'Not logged in' });
+
+  if (p.startsWith('/portal/files/')) {
+    const status = filesStatus();
+    if (!status.enabled) {
+      return sendJson(res, 403, { error: status.reason === 'password' ? 'Set a portal password to use Files' : 'No folders are shared yet. Add some in Settings → Files.' });
+    }
+    return files.handle(req, res, url, { config, sendJson, readJson });
+  }
 
   if (p === '/portal/config' && req.method === 'GET') return sendJson(res, 200, publicConfig());
   if (p === '/portal/config' && req.method === 'POST') {

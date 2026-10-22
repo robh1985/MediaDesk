@@ -2,7 +2,7 @@
 
 import { h, clear, toast, toastError, spinner } from '../ui.js';
 import { icon, appIcon } from '../icons.js';
-import { portal, state } from '../api.js';
+import { portal, state, radarr, sonarr, nzbget, isConfigured } from '../api.js';
 import { applyAppearance, appearance, WALLPAPERS, ACCENTS } from '../desktop.js';
 import { tabs } from './common.js';
 
@@ -15,14 +15,14 @@ const SERVICES = [
 
 export const settingsApp = {
   id: 'settings', name: 'Settings', icon: appIcon.settings, size: [820, 640], description: 'Connections & appearance',
-  open(win) {
+  open(win, opts = {}) {
     const content = h('div', { class: 'settings-content' });
-    win.body.append(h('div', { class: 'settings' },
-      tabs([['services', 'Connections'], ['appearance', 'Appearance'], ['about', 'About']], (id) => {
-        clear(content);
-        ({ services: renderServices, appearance: renderAppearance, about: renderAbout })[id](content);
-      }),
-      content));
+    const bar = tabs([['services', 'Connections'], ['files', 'Files'], ['appearance', 'Appearance'], ['about', 'About']], (id) => {
+      clear(content);
+      ({ services: renderServices, files: renderFiles, appearance: renderAppearance, about: renderAbout })[id](content);
+    }, opts.tab);
+    win.body.append(h('div', { class: 'settings' }, bar, content));
+    win.on('reopen', (o) => { if (o?.tab) bar.select(o.tab); });
   },
 };
 
@@ -80,6 +80,62 @@ function renderServices(container) {
     } catch (err) { toastError(err, 'Could not save'); save.disabled = false; }
   };
   runTest();
+}
+
+function renderFiles(container) {
+  const cfg = state.config;
+  const files = cfg.files || { roots: [] };
+  const area = h('textarea', { class: 'input fm-roots-input', rows: 6, spellcheck: 'false', disabled: cfg.mock,
+    placeholder: 'One folder per line, for example:\nD:\\Media\nC:\\Users\\You\\Downloads' });
+  area.value = files.roots.join('\n');
+  const suggestions = h('div', { class: 'chips' });
+  const save = h('button', { class: 'btn btn-primary', disabled: cfg.mock }, h('span', { html: icon.check }), 'Save folders');
+
+  if (cfg.mock) container.append(h('div', { class: 'notice' }, 'Demo mode: Files is using sample folders in a temporary directory, and this list can’t be changed.'));
+  else if (files.reason === 'password') {
+    container.append(h('div', { class: 'notice notice-warn' },
+      h('strong', {}, 'Files needs a portal password. '),
+      'Files can change anything in the folders you share, so it stays switched off until MediaDesk has a password. On Windows, run install-windows.cmd again to set one; otherwise set PORTAL_PASSWORD.'));
+  }
+  container.append(
+    h('h3', { class: 'section-title' }, 'Shared folders'),
+    h('p', { class: 'muted small' }, 'The Files app can browse, upload, rename, move and delete anything inside these folders on the computer running MediaDesk, and nothing outside them. Use full paths as that computer sees them.'),
+    area,
+    h('div', { class: 'small muted', style: { margin: '10px 0 6px' } }, 'Suggestions from your connected apps:'),
+    suggestions,
+    h('div', { class: 'btn-row sticky-actions' }, save));
+
+  const addLine = (p) => {
+    const lines = area.value.split('\n').map((l) => l.trim()).filter(Boolean);
+    if (!lines.includes(p)) area.value = [...lines, p].join('\n');
+  };
+  (async () => {
+    const found = [];
+    const tryAdd = async (label, fn) => { try { (await fn()).forEach((p) => p && found.push([p, label])); } catch { /* app unreachable */ } };
+    await Promise.all([
+      isConfigured('radarr') && tryAdd('Radarr', async () => (await radarr.get('rootfolder')).map((r) => r.path)),
+      isConfigured('sonarr') && tryAdd('Sonarr', async () => (await sonarr.get('rootfolder')).map((r) => r.path)),
+      isConfigured('nzbget') && tryAdd('NZBGet', async () => {
+        const conf = await nzbget('config');
+        const get = (n) => conf.find((o) => o.Name === n)?.Value || '';
+        const main = get('MainDir');
+        return [get('DestDir'), get('InterDir')].map((v) => v.replace('${MainDir}', main));
+      }),
+    ].filter(Boolean));
+    clear(suggestions, found.length
+      ? found.map(([p, label]) => h('button', { class: 'badge badge-info chip-btn', disabled: cfg.mock, onclick: () => addLine(p) }, `+ ${p} (${label})`))
+      : h('span', { class: 'small muted' }, 'None found.'));
+  })();
+
+  save.onclick = async () => {
+    save.disabled = true;
+    try {
+      state.config = await portal.saveConfig({ fileRoots: area.value.split('\n').map((l) => l.trim()).filter(Boolean) });
+      toast('Folders saved', { body: state.config.files.enabled ? 'Open Files from the dock to manage them.' : '', type: 'success', icon: appIcon.files });
+      clear(container);
+      renderFiles(container);
+    } catch (err) { toastError(err, 'Could not save folders'); save.disabled = false; }
+  };
 }
 
 function renderAppearance(container) {

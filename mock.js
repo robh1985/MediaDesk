@@ -418,4 +418,41 @@ async function handle(req, res, svc, rest, url, { readJson, sendJson }) {
   setTimeout(() => sendJson(res, 200, out), 60 + Math.random() * 120);
 }
 
-module.exports = { handle };
+// ---------------------------------------------------------------------------
+// Demo folders for the Files app (recreated in the system temp folder on every start)
+// ---------------------------------------------------------------------------
+
+let demoRoots = null;
+function demoFileRoots() {
+  if (demoRoots) return demoRoots;
+  const fs = require('node:fs');
+  const os = require('node:os');
+  const path = require('node:path');
+  const base = path.join(os.tmpdir(), 'mediadesk-demo-files');
+  fs.rmSync(base, { recursive: true, force: true });
+  const put = (rel, content) => {
+    const p = path.join(base, rel);
+    fs.mkdirSync(path.dirname(p), { recursive: true });
+    fs.writeFileSync(p, content);
+  };
+  const blob = (kb) => Buffer.alloc(kb * 1024, 7);
+  for (const m of movies.slice(0, 8)) {
+    const dir = `Media/Movies/${m.title.replace(/[’']/g, '')} (${m.year})`;
+    put(`${dir}/${m.title.replace(/[’']/g, '')} (${m.year}).mkv`, blob(64 + (hash(m.title) % 400)));
+    put(`${dir}/poster.svg`, posterSvg(m.title));
+    put(`${dir}/movie.nfo`, `<movie>\n  <title>${m.title}</title>\n  <year>${m.year}</year>\n  <plot>${OVERVIEW}</plot>\n</movie>\n`);
+  }
+  for (const s of series.slice(0, 4)) {
+    for (let e = 1; e <= 3; e++) put(`Media/TV/${s.title}/Season 01/${s.title} - S01E0${e}.mkv`, blob(48));
+    put(`Media/TV/${s.title}/poster.svg`, posterSvg(s.title));
+  }
+  put('Media/Music/.hidden-cache', 'cache');
+  put('Downloads/complete/Velvet.Thunder.2025.1080p.WEB-DL/Velvet.Thunder.2025.1080p.WEB-DL.mkv', blob(900));
+  put('Downloads/complete/Velvet.Thunder.2025.1080p.WEB-DL/Velvet.Thunder.2025.1080p.WEB-DL.nfo', 'Release notes for the demo download.\n');
+  put('Downloads/incomplete/Ironclad.S04E02.2160p.WEB.h265.part', blob(300));
+  put('Downloads/README.txt', 'Demo folder for MediaDesk Files.\nEverything here is recreated each time demo mode starts.\n');
+  demoRoots = [path.join(base, 'Media'), path.join(base, 'Downloads')];
+  return demoRoots;
+}
+
+module.exports = { handle, demoFileRoots };

@@ -5,7 +5,7 @@ export class ApiError extends Error {
 }
 
 async function request(url, { method = 'GET', body, headers = {} } = {}) {
-  const init = { method, headers: { Accept: 'application/json', ...headers }, credentials: 'same-origin' };
+  const init = { method, headers: { Accept: 'application/json', 'X-MediaDesk': '1', ...headers }, credentials: 'same-origin' };
   if (body !== undefined) {
     init.body = typeof body === 'string' ? body : JSON.stringify(body);
     init.headers['Content-Type'] = 'application/json';

@@ -17,5 +17,6 @@ export function tabs(items, onSelect, initial) {
   };
   for (const [id, label] of items) bar.append(h('button', { class: 'tab', dataset: { id }, onclick: () => set(id) }, label));
   queueMicrotask(() => set(initial || items[0][0]));
+  bar.select = set;
   return bar;
 }
