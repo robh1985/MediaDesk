@@ -86,11 +86,12 @@ const listeners = new Set();
 export const onNotify = (fn) => listeners.add(fn);
 export const notifications = () => history;
 
-export function toast(title, { body = '', type = 'info', icon = null, timeout = 5000 } = {}) {
+export function toast(title, { body = '', type = 'info', icon = null, timeout = 5000, action = null } = {}) {
   const host = document.getElementById('toasts');
   const el = h('div', { class: `toast toast-${type}` },
     icon ? h('div', { class: 'toast-icon', html: icon }) : null,
-    h('div', { class: 'toast-text' }, h('strong', {}, title), body ? h('span', {}, body) : null),
+    h('div', { class: 'toast-text' }, h('strong', {}, title), body ? h('span', {}, body) : null,
+      action ? h('button', { class: 'btn btn-sm btn-primary toast-action', onclick: () => { dismiss(); action.onClick(); } }, action.label) : null),
     h('button', { class: 'toast-close', 'aria-label': 'Dismiss', onclick: () => dismiss() }, '×'),
   );
   const dismiss = () => { el.classList.add('leaving'); setTimeout(() => el.remove(), 250); };

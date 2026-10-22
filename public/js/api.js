@@ -17,6 +17,8 @@ async function request(url, { method = 'GET', body, headers = {} } = {}) {
   const text = await res.text();
   let data = null;
   try { data = text ? JSON.parse(text) : null; } catch { data = text; }
+  // The server rejects requests from a page running code from before an update.
+  if (data && data.code === 'stale-page') window.dispatchEvent(new Event('mediadesk:stale'));
   if (!res.ok) {
     const msg = (data && (data.error || data.message || (Array.isArray(data) && data[0]?.errorMessage))) || `HTTP ${res.status}`;
     throw new ApiError(msg, res.status);

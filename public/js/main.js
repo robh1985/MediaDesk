@@ -36,9 +36,33 @@ async function boot() {
 
 addEventListener('mediadesk:logout', () => location.reload());
 
+// After MediaDesk is updated, pages that were already open are still running the old code.
+// Notice that (by comparing the server's build fingerprint) and offer a reload.
+let loadedBuild = null;
+let staleShown = false;
+function showUpdated() {
+  if (staleShown) return;
+  staleShown = true;
+  toast('MediaDesk was updated', {
+    body: 'Reload to start using the new version.', type: 'success', timeout: 0,
+    action: { label: 'Reload now', onClick: () => location.reload() },
+  });
+}
+async function checkForUpdate() {
+  if (document.hidden || staleShown) return;
+  try {
+    const s = await portal.session();
+    if (loadedBuild && s.build && s.build !== loadedBuild) showUpdated();
+  } catch { /* server restarting */ }
+}
+addEventListener('mediadesk:stale', showUpdated);
+document.addEventListener('visibilitychange', checkForUpdate);
+setInterval(checkForUpdate, 60e3);
+
 (async () => {
   try {
     const session = await portal.session();
+    loadedBuild = session.build;
     if (session.auth && !session.authed) {
       document.body.classList.add('ready', 'locked');
       showLockScreen(() => { document.body.classList.remove('locked'); return boot(); });

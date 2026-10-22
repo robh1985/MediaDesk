@@ -15,6 +15,7 @@ async function call(route, { method = 'GET', params, body } = {}) {
     body: body ? JSON.stringify(body) : undefined,
   });
   const data = await res.json().catch(() => ({}));
+  if (data.code === 'stale-page') window.dispatchEvent(new Event('mediadesk:stale'));
   if (!res.ok) throw Object.assign(new Error(data.error || `HTTP ${res.status}`), { status: res.status });
   return data;
 }

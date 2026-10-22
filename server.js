@@ -56,12 +56,27 @@ function readVersion() {
   return version;
 }
 const VERSION = readVersion();
+
+// Fingerprint of the browser code, so open pages can tell when MediaDesk has been updated.
+function computeBuildId() {
+  const hash = crypto.createHash('sha1');
+  const walk = (dir) => {
+    for (const d of fs.readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+      const full = path.join(dir, d.name);
+      if (d.isDirectory()) walk(full);
+      else { const st = fs.statSync(full); hash.update(`${path.relative(PUBLIC_DIR, full)}:${st.size}:${st.mtimeMs}\n`); }
+    }
+  };
+  try { walk(PUBLIC_DIR); } catch { hash.update(String(Date.now())); }
+  return hash.digest('hex').slice(0, 12);
+}
 const PUBLIC_DIR = path.join(ROOT, 'public');
 const CONFIG_PATH = process.env.CONFIG_PATH || path.join(ROOT, 'config', 'config.json');
 const HOST = process.env.HOST || '0.0.0.0';
 const MOCK = process.env.MOCK === '1' || process.argv.includes('--mock');
 const SERVICES = ['radarr', 'sonarr', 'nzbget', 'jellyfin'];
 const SESSION_DAYS = 30;
+const BUILD_ID = computeBuildId();
 
 // ---------------------------------------------------------------------------
 // Configuration
@@ -374,7 +389,8 @@ async function handle(req, res) {
   // header without a CORS preflight, which this server never approves.
   const unsafe = !['GET', 'HEAD', 'OPTIONS'].includes(req.method);
   if (unsafe && (p.startsWith('/api/') || p.startsWith('/portal/')) && req.headers['x-mediadesk'] !== '1') {
-    return sendJson(res, 403, { error: 'Missing X-MediaDesk header' });
+    // Usually a page that was opened before MediaDesk was updated and is still running old code.
+    return sendJson(res, 403, { error: 'This page is out of date because MediaDesk was updated. Reload the page (Ctrl+F5) and try again.', code: 'stale-page' });
   }
 
   // Public routes
@@ -394,7 +410,7 @@ async function handle(req, res) {
   if (p === '/portal/logout' && req.method === 'POST') {
     return sendJson(res, 200, { ok: true }, { 'Set-Cookie': 'mediadesk_session=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0' });
   }
-  if (p === '/portal/session') return sendJson(res, 200, { authed: isAuthed(req), auth: Boolean(config.portalPassword) });
+  if (p === '/portal/session') return sendJson(res, 200, { authed: isAuthed(req), auth: Boolean(config.portalPassword), build: BUILD_ID });
 
   const isApi = p.startsWith('/api/') || p.startsWith('/portal/');
   if (!isApi) return serveStatic(req, res, p);

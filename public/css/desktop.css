@@ -372,6 +372,7 @@ input[type="checkbox"] { accent-color: var(--accent); width: 15px; height: 15px;
 .toast-icon { width: 32px; height: 32px; flex: none; }
 .toast-text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .toast-text span { color: var(--text-muted); font-size: 12.5px; overflow-wrap: anywhere; }
+.toast-action { align-self: flex-start; margin-top: 8px; }
 .toast-close { border: 0; background: none; font-size: 18px; line-height: 1; color: var(--text-muted); cursor: pointer; padding: 0 2px; }
 @keyframes toast-in { from { opacity: 0; transform: translateX(30px); } }
 @keyframes toast-out { to { opacity: 0; transform: translateX(30px); } }
