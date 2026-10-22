@@ -69,8 +69,14 @@ export const nzbgetApp = {
 
 function drawSparkline(canvas, data) {
   const dpr = devicePixelRatio || 1;
-  const w = canvas.clientWidth || 300, hgt = canvas.clientHeight || 80;
-  if (canvas.width !== w * dpr) { canvas.width = w * dpr; canvas.height = hgt * dpr; }
+  const box = canvas.getBoundingClientRect();
+  if (!box.width || !box.height) return;
+  const w = box.width, hgt = box.height;
+  // Match the canvas's pixel size to its on-screen box so the graph isn't stretched.
+  if (canvas.width !== Math.round(w * dpr) || canvas.height !== Math.round(hgt * dpr)) {
+    canvas.width = Math.round(w * dpr);
+    canvas.height = Math.round(hgt * dpr);
+  }
   const ctx = canvas.getContext('2d');
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, w, hgt);
@@ -122,10 +128,10 @@ function renderQueue(container) {
           const [label, kind] = STATUS_LABEL[g.Status] || [g.Status, ''];
           return h('div', { class: 'tr' },
             h('div', { class: 'td-title' }, h('strong', { title: g.NZBName }, g.NZBName), h('span', { class: 'small muted' }, g.Category || 'No category', g.Health < 1000 ? ` · health ${(g.Health / 10).toFixed(1)}%` : '')),
-            h('div', {}, badge(label, kind)),
+            h('div', { dataset: { label: 'Status' } }, badge(label, kind)),
             h('div', { class: 'td-progress' }, progressBar(done, paused ? 'muted' : ''), h('span', { class: 'small muted' }, `${done.toFixed(1)}%`)),
-            h('div', { class: 'muted small' }, `${formatBytes(total - remaining)} / ${formatBytes(total)}`),
-            h('div', { class: 'muted small' }, eta),
+            h('div', { class: 'muted small', dataset: { label: 'Size' } }, `${formatBytes(total - remaining)} / ${formatBytes(total)}`),
+            h('div', { class: 'muted small', dataset: { label: 'ETA' } }, eta),
             h('div', { class: 'row-actions' },
               h('button', { class: 'btn btn-icon btn-sm', title: paused ? 'Resume' : 'Pause', html: paused ? icon.play : icon.pause,
                 onclick: () => edit(paused ? 'GroupResume' : 'GroupPause', [g.NZBID]).then(draw).catch(toastError) }),
@@ -158,9 +164,9 @@ function renderHistory(container) {
         const status = String(i.Status).split('/');
         return h('div', { class: 'tr' },
           h('div', { class: 'td-title' }, h('strong', { title: i.Name }, i.Name), h('span', { class: 'small muted' }, i.Category || 'No category')),
-          h('div', {}, badge(ok ? 'Success' : status[1] ? `${status[0][0]}${status[0].slice(1).toLowerCase()}: ${status[1].toLowerCase()}` : status[0], ok ? 'ok' : status[0] === 'DELETED' ? '' : 'bad')),
-          h('div', { class: 'muted small' }, formatBytes(i.FileSizeMB * MB)),
-          h('div', { class: 'muted small' }, timeAgo(i.HistoryTime * 1000)),
+          h('div', { dataset: { label: 'Result' } }, badge(ok ? 'Success' : status[1] ? `${status[0][0]}${status[0].slice(1).toLowerCase()}: ${status[1].toLowerCase()}` : status[0], ok ? 'ok' : status[0] === 'DELETED' ? '' : 'bad')),
+          h('div', { class: 'muted small', dataset: { label: 'Size' } }, formatBytes(i.FileSizeMB * MB)),
+          h('div', { class: 'muted small', dataset: { label: 'Finished' } }, timeAgo(i.HistoryTime * 1000)),
           h('div', { class: 'row-actions' },
             !ok ? h('button', { class: 'btn btn-icon btn-sm', title: 'Download again', html: icon.refresh,
               onclick: () => edit('HistoryRedownload', [i.NZBID]).then(() => { toast('Re-queued', { body: i.Name }); load(); }).catch(toastError) }) : null,

@@ -119,6 +119,15 @@ The Files app only works with folders you've shared in **Settings → Files**, w
 - NZBGet v18+ and nzbget-ng
 - Jellyfin 10.8+
 
+## Phones and tablets
+
+Everything works on touch screens too:
+
+- **Same features:** phones and tablets get every feature desktop has, including the widgets (which appear under the desktop icons on phones) and every value in the download queues (shown as labelled cards).
+- **Long-press = right-click:** press and hold anywhere you'd right-click with a mouse (files, dock icons, the wallpaper) to open the same menu. Holding an icon-only button shows its name.
+- **Selecting in Files:** use the checkboxes, or **Select all** in the header. Once something is selected, tapping other items adds them to the selection; with nothing selected, a tap opens the item. To move files, use Cut and Paste, since dragging isn't available on touch screens.
+- **Windows:** on phones every app fills the screen. Switch between apps with the dock.
+
 ## Keyboard shortcuts
 
 | Keys | Action |

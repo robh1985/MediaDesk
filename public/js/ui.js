@@ -149,6 +149,64 @@ document.addEventListener('pointerdown', (e) => { if (openMenu && !openMenu.cont
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeMenu(); });
 
 // ---------------------------------------------------------------------------
+// Touch: long-press does what right-click and hover do with a mouse
+// ---------------------------------------------------------------------------
+
+// Holding a finger still for half a second fires a `contextmenu` event, so every right-click menu
+// also works on phones and tablets (iOS never fires one natively). If nothing handles it and the
+// element has a title, the title is shown instead, standing in for the hover tooltip.
+let press = null;
+const LONG_PRESS_MS = 500;
+
+function showTip(text, x, y) {
+  document.querySelector('.touch-tip')?.remove();
+  const tip = h('div', { class: 'touch-tip' }, text);
+  document.body.append(tip);
+  const r = tip.getBoundingClientRect();
+  tip.style.left = `${Math.max(8, Math.min(x - r.width / 2, innerWidth - r.width - 8))}px`;
+  tip.style.top = `${Math.max(8, y - r.height - 28)}px`;
+  setTimeout(() => tip.remove(), 1600);
+}
+
+document.addEventListener('pointerdown', (e) => {
+  if (e.pointerType !== 'touch' || !e.isPrimary) { press = null; return; }
+  const target = e.target;
+  const x = e.clientX, y = e.clientY;
+  clearTimeout(press?.timer);
+  press = {
+    x, y, fired: false,
+    timer: setTimeout(() => {
+      press.fired = true;
+      const ev = new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: x, clientY: y });
+      target.dispatchEvent(ev);
+      if (!ev.defaultPrevented) {
+        const titled = target.closest?.('[title], [aria-label]');
+        const text = titled?.getAttribute('title') || titled?.getAttribute('aria-label');
+        if (text) showTip(text, x, y);
+        else press.fired = false;
+      }
+      if (press.fired) navigator.vibrate?.(8);
+    }, LONG_PRESS_MS),
+  };
+}, true);
+document.addEventListener('pointermove', (e) => {
+  if (press && !press.fired && Math.hypot(e.clientX - press.x, e.clientY - press.y) > 10) clearTimeout(press.timer);
+}, true);
+const endPress = () => { if (press) clearTimeout(press.timer); };
+document.addEventListener('pointerup', endPress, true);
+document.addEventListener('pointercancel', endPress, true);
+// Android fires its own contextmenu on long-press; let ours stand down when it does.
+document.addEventListener('contextmenu', (e) => {
+  if (e.isTrusted && press && !press.fired) { clearTimeout(press.timer); press.fired = true; }
+}, true);
+// The finger lifting after a long-press must not also count as a tap (it could hit a menu item).
+document.addEventListener('click', (e) => {
+  if (press?.fired) { e.preventDefault(); e.stopPropagation(); press = null; }
+}, true);
+
+export const isTouch = () => matchMedia('(pointer: coarse)').matches;
+
+// ---------------------------------------------------------------------------
 // Common view pieces
 // ---------------------------------------------------------------------------
 

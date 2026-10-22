@@ -430,9 +430,9 @@ function renderQueue(container, ctx) {
           return h('div', { class: 'tr' },
             h('div', { class: 'td-title' }, h('strong', {}, K.queueTitle(r)), h('span', { class: 'muted small' }, K.queueSub(r)),
               warn ? h('span', { class: 'small text-warn' }, (r.statusMessages || []).flatMap((m) => m.messages).join(' ') || r.errorMessage || 'Needs attention') : null),
-            h('div', {}, badge(r.quality?.quality?.name || '—')),
+            h('div', { dataset: { label: 'Quality' } }, badge(r.quality?.quality?.name || '—')),
             h('div', { class: 'td-progress' }, progressBar(pct, warn ? 'warn' : ''), h('span', { class: 'small muted' }, `${Math.round(pct)}% · ${r.status}`)),
-            h('div', { class: 'muted' }, r.timeleft || '—'),
+            h('div', { class: 'muted', dataset: { label: 'Time left' } }, r.timeleft || '—'),
             h('div', {}, h('button', { class: 'btn btn-icon btn-sm', title: 'Remove from queue', html: icon.trash, onclick: () => removeQueue(r) })));
         })));
     } catch (err) { clear(table, errorState(err, draw)); }

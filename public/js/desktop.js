@@ -119,6 +119,7 @@ function buildMenuBar() {
     h('div', { class: 'menu-right' }, speed, streams, bell, theme, clock));
 
   onChange(() => {
+    document.body.classList.toggle('has-window', openWindows().some((x) => !x.minimized));
     const w = focusedWindow();
     appName.textContent = w ? (getApp(w.appId)?.name || 'MediaDesk') : 'MediaDesk';
   });
@@ -129,7 +130,7 @@ function buildMenuBar() {
       speed.hidden = false;
     } else speed.hidden = true;
     if (isConfigured('jellyfin') && l.sessions.length) {
-      clear(streams, h('span', { class: 'tray-glyph', html: icon.play }), `${l.sessions.length} streaming`);
+      clear(streams, h('span', { class: 'tray-glyph', html: icon.play }), `${l.sessions.length}`, h('span', { class: 'tray-word' }, ' streaming'));
       streams.hidden = false;
     } else streams.hidden = true;
   });

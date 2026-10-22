@@ -1,6 +1,6 @@
 // Files: a file manager for the folders shared in Settings → Files.
 
-import { h, clear, formatBytes, debounce, toast, toastError, confirmDialog, contextMenu, spinner, emptyState, errorState, progressBar } from '../ui.js';
+import { h, clear, formatBytes, debounce, toast, toastError, confirmDialog, contextMenu, spinner, emptyState, errorState, progressBar, isTouch } from '../ui.js';
 import { icon, appIcon } from '../icons.js';
 import { state } from '../api.js';
 import { openApp } from '../wm.js';
@@ -162,6 +162,7 @@ class FileBrowser {
       this.select([]);
       contextMenu(e.clientX, e.clientY, [
         { label: 'New folder', icon: icon.folder, action: () => this.newFolder() },
+        { label: 'Select all', icon: icon.check, disabled: !this.entries.length, action: () => this.select(this.visible().map((x) => x.name)) },
         { label: 'Upload files…', icon: icon.arrowUp, action: () => this.uploadInput.click() },
         { label: clipboard.paths.length ? `Paste ${clipboard.paths.length} item${clipboard.paths.length > 1 ? 's' : ''}` : 'Paste', icon: ICON_PASTE, disabled: !clipboard.paths.length, action: () => this.paste() },
         '-', { label: 'Refresh', icon: icon.refresh, action: () => this.refresh() },
@@ -265,7 +266,10 @@ class FileBrowser {
       this.render();
     } }, label, this.sort.key === key ? (this.sort.dir > 0 ? ' ↑' : ' ↓') : '');
     const rows = h('div', { class: 'fm-rows' });
-    clear(this.list, h('div', { class: 'fm-row fm-head' }, h('span'), head('name', 'Name'), head('modified', 'Modified'), head('type', 'Type'), head('size', 'Size')), rows);
+    this.allCheck = h('input', { type: 'checkbox', class: 'fm-check', 'aria-label': 'Select all', title: 'Select all' });
+    this.allCheck.addEventListener('change', () => this.select(this.allCheck.checked ? items.map((x) => x.name) : []));
+    clear(this.list, h('div', { class: 'fm-row fm-head' }, h('span', { class: 'fm-check-cell' }, this.allCheck), h('span', { class: 'fm-head-icon' }),
+      head('name', 'Name'), head('modified', 'Modified'), head('type', 'Type'), head('size', 'Size')), rows);
     if (!items.length) rows.append(emptyState(this.entries.length ? 'Nothing matches the filter' : 'This folder is empty', this.entries.length ? '' : 'Drag files here to upload them.'));
 
     // Large folders render in chunks as you scroll.
@@ -282,12 +286,17 @@ class FileBrowser {
     this.observer = new IntersectionObserver((en) => { if (en[0].isIntersecting) more(); }, { root: this.list, rootMargin: '400px' });
     more();
     if (shown < items.length) this.observer.observe(sentinel);
-    this.updateStatus();
+    this.select([...this.selected]);
   }
 
   row(e) {
     const kind = kindOf(e);
-    const el = h('div', { class: `fm-row ${this.selected.has(e.name) ? 'selected' : ''} ${this.isCut(e.name) ? 'cut' : ''}`, draggable: 'true', dataset: { name: e.name } },
+    const check = h('input', { type: 'checkbox', class: 'fm-check', 'aria-label': `Select ${e.name}`, checked: this.selected.has(e.name) });
+    check.addEventListener('click', (ev) => ev.stopPropagation());
+    check.addEventListener('change', () => this.toggle(e.name));
+    // HTML drag and drop doesn't work with touch; touch users move files with cut and paste.
+    const el = h('div', { class: `fm-row ${this.selected.has(e.name) ? 'selected' : ''} ${this.isCut(e.name) ? 'cut' : ''}`, draggable: isTouch() ? 'false' : 'true', dataset: { name: e.name } },
+      h('span', { class: 'fm-check-cell' }, check),
       h('span', { class: 'fm-icon', html: fileIcon(kind) }),
       h('span', { class: 'fm-name', title: e.name }, e.name, e.link ? h('span', { class: 'fm-link', title: 'Link' }, ' ↗') : null),
       h('span', { class: 'fm-date' }, e.modified ? new Date(e.modified).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) : '—'),
@@ -295,7 +304,8 @@ class FileBrowser {
       h('span', { class: 'fm-size' }, e.dir ? '' : e.size == null ? '—' : formatBytes(e.size)));
     el.addEventListener('click', (ev) => {
       if (ev.detail > 1) return;
-      if (matchMedia('(pointer: coarse)').matches && !ev.ctrlKey && !ev.metaKey && !ev.shiftKey) return this.open(e);
+      // Touch: a tap opens, unless you're already selecting, in which case it adds or removes the item.
+      if (isTouch() && !ev.ctrlKey && !ev.metaKey && !ev.shiftKey) return this.selected.size ? this.toggle(e.name) : this.open(e);
       this.clickSelect(e.name, ev);
     });
     el.addEventListener('dblclick', () => this.open(e));
@@ -354,8 +364,25 @@ class FileBrowser {
   // ---- Selection ----
   select(names) {
     this.selected = new Set(names);
-    this.list.querySelectorAll('.fm-row[data-name]').forEach((r) => r.classList.toggle('selected', this.selected.has(r.dataset.name)));
+    this.list.querySelectorAll('.fm-row[data-name]').forEach((r) => {
+      const on = this.selected.has(r.dataset.name);
+      r.classList.toggle('selected', on);
+      const c = r.querySelector('.fm-check');
+      if (c) c.checked = on;
+    });
+    if (this.allCheck) {
+      const total = this.visible().length;
+      this.allCheck.checked = total > 0 && this.selected.size >= total;
+      this.allCheck.indeterminate = this.selected.size > 0 && this.selected.size < total;
+    }
+    this.list.classList.toggle('selecting', this.selected.size > 0);
     this.updateStatus();
+  }
+  toggle(name) {
+    const next = new Set(this.selected);
+    next.has(name) ? next.delete(name) : next.add(name);
+    this.anchor = name;
+    this.select([...next]);
   }
   clickSelect(name, ev) {
     const items = this.visible().map((e) => e.name);
