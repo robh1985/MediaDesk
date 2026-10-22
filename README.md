@@ -43,6 +43,34 @@ PORTAL_PASSWORD=change-me node server.js
 
 There are no dependencies and nothing to `npm install`.
 
+### Windows
+
+1. Install **Node.js LTS** from <https://nodejs.org> (the default options are fine).
+2. Download MediaDesk: either `git clone https://github.com/robh1985/MediaDesk.git`, or on GitHub click *Code → Download ZIP* and extract it. A permanent spot like `C:\MediaDesk` works best.
+3. Pick how you want to run it:
+
+| | How | Good for |
+| --- | --- | --- |
+| **Try it** | Double-click `start-windows.cmd`. To use sample data instead, run `start-windows.cmd --mock` from a command prompt. | Testing. It stops when you close the window. |
+| **Run all the time** | Double-click `install-windows.cmd` and approve the admin prompt. | Everyday use. It starts with Windows (even before anyone logs in) and restarts if it crashes. |
+
+`install-windows.cmd` does the following:
+- asks for a portal password
+- registers a startup task called **MediaDesk**
+- opens the port in Windows Firewall for Private networks
+- starts the portal and opens it in your browser
+- prints the address other devices on your network can use
+
+To use a different port, run it from a command prompt as `install-windows.cmd -Port 8081`. Run it again at any time to change the password or port.
+
+Notes for Windows:
+- **Service URLs:** if Radarr, Sonarr, NZBGet or Jellyfin run on the same PC, use `http://localhost:7878` and so on in *Settings → Connections*.
+- **Other devices can't connect:** check that the network is set to *Private* in Windows Settings → Network. The firewall rule doesn't apply to *Public* networks.
+- **Logs:** the background version writes to `logs\mediadesk.log`.
+- **Manage it:** stop or start it from *Task Scheduler → MediaDesk*. To remove it, double-click `uninstall-windows.cmd`; your settings are kept.
+- **Update:** run `git pull` (or extract the new ZIP over the old folder), then restart the **MediaDesk** task or reboot.
+- **Docker Desktop** also works with `docker compose up -d --build`. In that case, services running on the Windows host are reached at `http://host.docker.internal:7878`, not `localhost`.
+
 ## Configuration
 
 You can configure MediaDesk in three ways. Environment variables override the config file.
@@ -60,7 +88,7 @@ You can configure MediaDesk in three ways. Environment variables override the co
 | `JELLYFIN_URL`, `JELLYFIN_API_KEY` | Jellyfin → *Dashboard → API Keys → +* |
 | `JELLYFIN_USER_ID` | Optional. Which user's view to browse (defaults to the first admin) |
 | `*_PUBLIC_URL` | Optional. The browser-facing URL used for "Open in…" links and Web UI windows, if it differs from the server-side URL |
-| `PORT`, `HOST`, `CONFIG_PATH` | Server settings (defaults: `8080`, `0.0.0.0`, `./config/config.json`) |
+| `PORT`, `HOST`, `CONFIG_PATH` | Server settings (defaults: `8080`, `0.0.0.0`, `./config/config.json`). The port can also be set as `"port"` in the config file. |
 
 **Server URL compared with public URL:** the *server URL* is how the MediaDesk server reaches a service (for example `http://radarr:7878` inside Docker). The *public URL* is what your browser uses (for example `https://radarr.example.com`) and only matters for links and embedded web UIs.
 

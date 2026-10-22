@@ -13,7 +13,6 @@ const { Readable } = require('node:stream');
 const ROOT = __dirname;
 const PUBLIC_DIR = path.join(ROOT, 'public');
 const CONFIG_PATH = process.env.CONFIG_PATH || path.join(ROOT, 'config', 'config.json');
-const PORT = Number(process.env.PORT) || 8080;
 const HOST = process.env.HOST || '0.0.0.0';
 const MOCK = process.env.MOCK === '1' || process.argv.includes('--mock');
 const SERVICES = ['radarr', 'sonarr', 'nzbget', 'jellyfin'];
@@ -23,10 +22,13 @@ const SESSION_DAYS = 30;
 // Configuration
 // ---------------------------------------------------------------------------
 
+// Notepad on Windows may save JSON with a byte-order mark, which JSON.parse rejects.
+const readConfigFile = () => JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8').replace(/^\uFEFF/, ''));
+
 function loadConfig() {
   let cfg = {};
   try {
-    cfg = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
+    cfg = readConfigFile();
   } catch (err) {
     if (err.code !== 'ENOENT') console.error(`Could not read ${CONFIG_PATH}: ${err.message}`);
   }
@@ -50,6 +52,7 @@ function loadConfig() {
 }
 
 let config = loadConfig();
+const PORT = Number(process.env.PORT) || Number(config.port) || 8080;
 
 function saveConfig(next) {
   fs.mkdirSync(path.dirname(CONFIG_PATH), { recursive: true });
@@ -251,7 +254,7 @@ async function proxyNzbget(req, res) {
 
 async function updateConfig(req, res) {
   const body = await readJson(req);
-  const next = JSON.parse(fs.existsSync(CONFIG_PATH) ? fs.readFileSync(CONFIG_PATH, 'utf8') : '{}');
+  const next = fs.existsSync(CONFIG_PATH) ? readConfigFile() : {};
   next.services = next.services || {};
   for (const svc of SERVICES) {
     const incoming = body.services?.[svc];
@@ -363,7 +366,7 @@ server.listen(PORT, HOST, () => {
   console.log(`MediaDesk running at http://${HOST === '0.0.0.0' ? 'localhost' : HOST}:${PORT}${MOCK ? '  (demo mode, fake data)' : ''}`);
   if (!MOCK) {
     const missing = SERVICES.filter((s) => !isConfigured(s));
-    if (missing.length) console.log(`Not configured yet: ${missing.join(', ')} — open Settings in the portal or edit ${CONFIG_PATH}`);
+    if (missing.length) console.log(`Not configured yet: ${missing.join(', ')} - open Settings in the portal or edit ${CONFIG_PATH}`);
   }
   if (!config.portalPassword) console.log('Warning: no portal password set. Set PORTAL_PASSWORD if this is reachable by others.');
 });
