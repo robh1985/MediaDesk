@@ -13,6 +13,7 @@ const files = require('./files');
 const appSettings = require('./appsettings');
 const { createNotifier } = require('./notify');
 const { createWallpapers } = require('./wallpapers');
+const media = require('./media');
 
 const ROOT = __dirname;
 
@@ -149,7 +150,10 @@ function publicConfig() {
       hasPassword: Boolean(c.password),
     };
   }
-  return { services, mock: MOCK, auth: Boolean(config.portalPassword), files: filesStatus(), version: VERSION, appSettings: appSettings.resolve(config.appSettings) };
+  return {
+    services, mock: MOCK, auth: Boolean(config.portalPassword), files: filesStatus(), version: VERSION, appSettings: appSettings.resolve(config.appSettings),
+    media: { ...media.status(), ffmpegPath: config.ffmpegPath || '', libreOfficePath: config.libreOfficePath || '' },
+  };
 }
 
 // The file manager can change anything inside its folders, so it also requires a portal password.
@@ -258,6 +262,8 @@ const MIME = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8',
   '.svg': 'image/svg+xml', '.png': 'image/png', '.jpg': 'image/jpeg', '.ico': 'image/x-icon',
   '.json': 'application/json', '.webmanifest': 'application/manifest+json', '.woff2': 'font/woff2',
+  '.mjs': 'text/javascript; charset=utf-8', '.wasm': 'application/wasm', '.ttf': 'font/ttf', '.pfb': 'application/octet-stream',
+  '.md': 'text/plain; charset=utf-8',
 };
 
 function serveStatic(req, res, pathname) {
@@ -267,11 +273,16 @@ function serveStatic(req, res, pathname) {
   if (!file.startsWith(PUBLIC_DIR + path.sep)) return sendJson(res, 403, { error: 'Forbidden' });
   fs.stat(file, (err, st) => {
     if (err || !st.isFile()) return sendJson(res, 404, { error: 'Not found' });
+    // Let browsers re-use unchanged files (the PDF viewer alone is several MB).
+    const etag = `"${st.size.toString(36)}-${Math.floor(st.mtimeMs).toString(36)}"`;
+    if (req.headers['if-none-match'] === etag) { res.writeHead(304, { ETag: etag, 'Cache-Control': 'no-cache' }); return res.end(); }
     res.writeHead(200, {
       'Content-Type': MIME[path.extname(file)] || 'application/octet-stream',
       'Content-Length': st.size,
       'Cache-Control': 'no-cache',
+      ETag: etag,
     });
+    if (req.method === 'HEAD') return res.end();
     fs.createReadStream(file).pipe(res);
   });
 }
@@ -368,7 +379,12 @@ async function updateConfig(req, res) {
     if (errors.length) return sendJson(res, 400, { error: `Check these folders: ${errors.join('; ')}` });
     next.fileRoots = roots;
   }
+  let toolsChanged = false;
+  for (const key of ['ffmpegPath', 'libreOfficePath']) {
+    if (typeof body[key] === 'string' && body[key].trim() !== (next[key] || '')) { next[key] = body[key].trim(); toolsChanged = true; }
+  }
   saveConfig(next);
+  if (toolsChanged || body.recheckTools) await media.detect(config);
   sendJson(res, 200, publicConfig());
 }
 
@@ -507,6 +523,7 @@ async function handle(req, res) {
       const body = await readJson(req);
       if (body.services || body.fileRoots) return sendJson(res, 400, { error: 'Connections and folders are read-only in demo mode' });
       if (body.appSettings) config.appSettings = appSettings.merge(config.appSettings, body.appSettings);
+      if (body.recheckTools) await media.detect(config);
       return sendJson(res, 200, publicConfig());
     }
     return updateConfig(req, res);
@@ -557,6 +574,7 @@ server.on('error', (err) => {
 server.listen(PORT, HOST, () => {
   console.log(`MediaDesk ${VERSION} starting`);
   notifier.start();
+  media.detect(config).then((t) => console.log(`Preview helpers: ffmpeg ${t.ffmpeg ? 'found' : 'not found'}, LibreOffice ${t.office ? 'found' : 'not found'}`));
   console.log(`MediaDesk running at http://${HOST === '0.0.0.0' ? 'localhost' : HOST}:${PORT}${MOCK ? '  (demo mode, fake data)' : ''}`);
   if (!MOCK) {
     const missing = SERVICES.filter((s) => !isConfigured(s));

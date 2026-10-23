@@ -291,7 +291,8 @@ function renderFiles(container) {
       h('div', { class: 'small muted', style: { margin: '10px 0 6px' } }, 'Suggestions from your connected apps:'),
       suggestions,
       h('div', { class: 'btn-row' }, save)),
-    view);
+    view,
+    previewHelpers(cfg));
 
   const addLine = (p) => {
     const lines = area.value.split('\n').map((l) => l.trim()).filter(Boolean);
@@ -324,6 +325,41 @@ function renderFiles(container) {
       renderFiles(container);
     } catch (err) { toastError(err, 'Could not save folders'); save.disabled = false; }
   };
+}
+
+// Optional programs that let Preview open more kinds of file.
+function previewHelpers(cfg) {
+  const m = cfg.media || {};
+  const win = /Win/.test(navigator.platform);
+  const row = (ok, name, what, install) => h('div', { class: 'helper-row' },
+    h('span', { class: `helper-dot ${ok ? 'ok' : ''}` }),
+    h('div', { class: 'grow' }, h('strong', {}, name), h('span', { class: 'small muted' }, ok ? ` — found. ${what}` : ` — not found. ${what}`),
+      ok ? null : h('div', { class: 'small helper-install' }, install)));
+  const ffPath = h('input', { class: 'input', value: m.ffmpegPath || '', placeholder: win ? 'C:\\ffmpeg\\bin\\ffmpeg.exe (optional)' : '/usr/bin/ffmpeg (optional)', disabled: cfg.mock });
+  const loPath = h('input', { class: 'input', value: m.libreOfficePath || '', placeholder: win ? 'C:\\Program Files\\LibreOffice\\program\\soffice.exe (optional)' : '/usr/bin/soffice (optional)', disabled: cfg.mock });
+  const check = h('button', { class: 'btn' }, h('span', { html: icon.refresh }), 'Check again');
+  const sec = section('Preview helpers',
+    h('p', { class: 'muted small' }, 'Preview opens pictures, PDFs and most documents by itself. Two free programs on the MediaDesk computer let it do more:'),
+    row(m.ffmpeg, 'ffmpeg', 'Plays any video or audio format (AVI, WMV, MKV with any codec, FLV, MPEG-TS, WMA, AC3, …) and shows TIFF/HEIC pictures.',
+      win ? h('span', {}, 'Install: open PowerShell and run ', h('code', {}, 'winget install Gyan.FFmpeg'), ', then restart MediaDesk (restart-windows.cmd).')
+        : h('span', {}, 'Install: ', h('code', {}, 'sudo apt install ffmpeg'), ' (Docker images include it), then restart MediaDesk.')),
+    row(m.office, 'LibreOffice', 'Shows Word, Excel and PowerPoint files exactly as they print, including older .doc and .ppt files.',
+      win ? h('span', {}, 'Install: ', h('code', {}, 'winget install TheDocumentFoundation.LibreOffice'), ', then press Check again.')
+        : h('span', {}, 'Install: ', h('code', {}, 'sudo apt install libreoffice-core libreoffice-writer libreoffice-calc libreoffice-impress'), ' (Docker: build with ', h('code', {}, '--build-arg WITH_OFFICE=true'), ').')),
+    h('details', { class: 'helper-paths' }, h('summary', { class: 'small' }, 'Installed somewhere unusual?'),
+      h('label', { class: 'field' }, h('span', {}, 'ffmpeg program'), ffPath),
+      h('label', { class: 'field' }, h('span', {}, 'LibreOffice program (soffice)'), loPath)),
+    h('div', { class: 'btn-row' }, check));
+  check.onclick = async () => {
+    check.disabled = true;
+    try {
+      state.config = await portal.saveConfig({ recheckTools: true, ...(cfg.mock ? {} : { ffmpegPath: ffPath.value, libreOfficePath: loPath.value }) });
+      const t = state.config.media;
+      toast('Checked', { body: `ffmpeg ${t.ffmpeg ? 'found' : 'not found'} · LibreOffice ${t.office ? 'found' : 'not found'}`, type: t.ffmpeg && t.office ? 'success' : 'info' });
+      sec.replaceWith(previewHelpers(state.config));
+    } catch (err) { toastError(err, 'Could not check'); check.disabled = false; }
+  };
+  return sec;
 }
 
 // ---------------------------------------------------------------------------

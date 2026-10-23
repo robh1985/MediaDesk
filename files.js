@@ -10,6 +10,7 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const { Transform } = require('node:stream');
 const { pipeline } = require('node:stream/promises');
+const media = require('./media');
 
 const TEXT_LIMIT = 10 * 1024 * 1024;
 const TEXT_EXT = new Set(['.txt', '.nfo', '.srt', '.ass', '.ssa', '.sub', '.vtt', '.log', '.md', '.json', '.xml', '.yml', '.yaml',
@@ -44,6 +45,7 @@ const FRIENDLY = {
 
 function toFileError(err) {
   if (err instanceof FileError) return err;
+  if (err instanceof media.MediaError) return new FileError(err.status, err.message);
   const f = FRIENDLY[err.code];
   return f ? new FileError(f[0], `${f[1]} (${err.code})`) : new FileError(500, err.message);
 }
@@ -405,6 +407,14 @@ async function handle(req, res, url, { config, sendJson, readJson }) {
     if (route === 'list') return sendJson(res, 200, await listDir(getRoot(config, q.get('root')), q.get('path'), q.get('hidden') === '1'));
     if (route === 'download') return await sendFile(req, res, getRoot(config, q.get('root')), q.get('path'), q.get('inline') === '1');
     if (route === 'text' && req.method === 'GET') return sendJson(res, 200, await readText(getRoot(config, q.get('root')), q.get('path')));
+    // Preview helpers (need ffmpeg / LibreOffice on the server; see media.js).
+    if (route === 'probe') return sendJson(res, 200, await media.probe(await resolveShared(config, q.get('root'), q.get('path'))));
+    if (route === 'stream') {
+      const abs = await resolveShared(config, q.get('root'), q.get('path'));
+      return await media.stream(req, res, abs, { start: Math.max(0, Number(q.get('start')) || 0), audio: Math.max(0, Number(q.get('audio')) || 0), audioOnly: q.get('audioOnly') === '1', format: q.get('format') === 'webm' ? 'webm' : 'mp4' });
+    }
+    if (route === 'convert') return await media.sendPdf(req, res, await media.convertToPdf(await resolveShared(config, q.get('root'), q.get('path'))));
+    if (route === 'image') return await media.toJpeg(req, res, await resolveShared(config, q.get('root'), q.get('path')));
     if (route === 'upload/chunk' && req.method === 'POST') {
       return sendJson(res, 200, await uploadChunk(req, getRoot(config, q.get('root')), q.get('id'), q.get('offset')));
     }

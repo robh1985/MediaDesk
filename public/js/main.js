@@ -13,10 +13,11 @@ import { filesApp } from './apps/files.js';
 import { musicApp } from './apps/music.js';
 import { calculatorApp } from './apps/calculator.js';
 import { notesApp } from './apps/notes.js';
+import { previewApp } from './apps/preview.js';
 
 applyAppearance();
 
-[dashboardApp, makeArrApp('radarr'), makeArrApp('sonarr'), nzbgetApp, jellyfinApp, musicApp, filesApp, notesApp, calculatorApp, settingsApp, webviewApp,
+[dashboardApp, makeArrApp('radarr'), makeArrApp('sonarr'), nzbgetApp, jellyfinApp, musicApp, filesApp, notesApp, previewApp, calculatorApp, settingsApp, webviewApp,
   { id: 'launcher', name: 'Search', icon: '', open() {} }].forEach(registerApp);
 
 async function boot() {

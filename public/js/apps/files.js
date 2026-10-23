@@ -38,9 +38,12 @@ const ICON_PASTE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" s
 // --- File types ----------------------------------------------------------------
 
 const KINDS = {
-  video: ['mkv', 'mp4', 'm4v', 'avi', 'mov', 'wmv', 'webm', 'ts', 'm2ts', 'mpg', 'mpeg', 'flv'],
-  audio: ['mp3', 'flac', 'm4a', 'aac', 'ogg', 'opus', 'wav', 'wma', 'alac'],
-  image: ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg', 'ico', 'avif', 'tbn'],
+  video: ['mkv', 'mp4', 'm4v', 'avi', 'mov', 'wmv', 'webm', 'ts', 'm2ts', 'mts', 'mpg', 'mpeg', 'm2v', 'flv', 'vob', 'ogv', '3gp', '3g2', 'divx', 'xvid', 'asf', 'rm', 'rmvb', 'f4v', 'mxf', 'dv'],
+  audio: ['mp3', 'flac', 'm4a', 'm4b', 'aac', 'ogg', 'oga', 'opus', 'wav', 'weba', 'wma', 'alac', 'ape', 'ac3', 'eac3', 'dts', 'mka', 'wv', 'tta', 'aiff', 'aif', 'amr', 'mp2'],
+  image: ['jpg', 'jpeg', 'jfif', 'png', 'gif', 'webp', 'bmp', 'svg', 'ico', 'avif', 'tbn', 'tif', 'tiff', 'heic', 'heif', 'psd', 'tga', 'jxl'],
+  word: ['doc', 'docx', 'docm', 'dot', 'dotx', 'odt', 'ott', 'rtf'],
+  sheet: ['xls', 'xlsx', 'xlsm', 'xlsb', 'ods', 'ots', 'numbers'],
+  slides: ['ppt', 'pptx', 'pptm', 'pps', 'ppsx', 'odp', 'otp'],
   text: ['txt', 'nfo', 'srt', 'ass', 'ssa', 'sub', 'vtt', 'log', 'md', 'json', 'xml', 'yml', 'yaml', 'ini', 'conf', 'cfg', 'config', 'csv',
     'tsv', 'sh', 'bat', 'cmd', 'ps1', 'py', 'js', 'ts', 'css', 'html', 'htm', 'env', 'properties', 'toml', 'm3u', 'm3u8', 'cue', 'sfv', 'nzb'],
   archive: ['zip', 'rar', '7z', 'tar', 'gz', 'bz2', 'xz', 'iso', 'r00', 'r01', 'par2'],
@@ -53,9 +56,8 @@ function kindOf(entry) {
   if (/^r\d\d$/.test(ext) || /^part\d*$/.test(ext)) return 'archive';
   return Object.keys(KINDS).find((k) => KINDS[k].includes(ext)) || 'file';
 }
-const PLAYABLE = { video: ['mp4', 'm4v', 'webm', 'mov', 'mkv'], audio: ['mp3', 'm4a', 'aac', 'flac', 'ogg', 'opus', 'wav'] };
-const KIND_LABEL = { folder: 'Folder', video: 'Video', audio: 'Audio', image: 'Image', text: 'Text', archive: 'Archive', pdf: 'PDF', file: 'File' };
-const KIND_COLOR = { folder: '#f5b82e', video: '#8b5cf6', audio: '#ec4899', image: '#10b981', text: '#64748b', archive: '#f97316', pdf: '#ef4444', file: '#94a3b8' };
+const KIND_LABEL = { folder: 'Folder', video: 'Video', audio: 'Audio', image: 'Image', text: 'Text', archive: 'Archive', pdf: 'PDF', word: 'Document', sheet: 'Spreadsheet', slides: 'Presentation', file: 'File' };
+const KIND_COLOR = { folder: '#f5b82e', video: '#8b5cf6', audio: '#ec4899', image: '#10b981', text: '#64748b', archive: '#f97316', pdf: '#ef4444', word: '#2b579a', sheet: '#217346', slides: '#d24726', file: '#94a3b8' };
 
 function fileIcon(kind) {
   const c = KIND_COLOR[kind];
@@ -69,6 +71,9 @@ function fileIcon(kind) {
     text: '<path d="M8 11h8M8 13.5h8M8 16h5" stroke="#fff" stroke-width="1.3" stroke-linecap="round"/>',
     archive: '<path d="M12 9v1.5M12 11.5V13M12 14v1.5" stroke="#fff" stroke-width="1.6"/><rect x="10.8" y="15.5" width="2.4" height="2" rx=".5" fill="#fff"/>',
     pdf: '<text x="12" y="16.8" font-size="5" font-family="system-ui,sans-serif" font-weight="800" text-anchor="middle" fill="#fff">PDF</text>',
+    word: '<text x="12" y="17.2" font-size="7.5" font-family="system-ui,sans-serif" font-weight="800" text-anchor="middle" fill="#fff">W</text>',
+    sheet: '<text x="12" y="17.2" font-size="7.5" font-family="system-ui,sans-serif" font-weight="800" text-anchor="middle" fill="#fff">X</text>',
+    slides: '<text x="12" y="17.2" font-size="7.5" font-family="system-ui,sans-serif" font-weight="800" text-anchor="middle" fill="#fff">P</text>',
     file: '',
   }[kind];
   return `<svg viewBox="0 0 24 24"><path d="M6 2.5h8l5 5v13a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1v-17a1 1 0 0 1 1-1z" fill="${c}"/><path d="M14 2.5v4a1 1 0 0 0 1 1h4" fill="#fff" opacity=".45"/>${glyph}</svg>`;
@@ -436,9 +441,9 @@ class FileBrowser {
   rowMenu(ev, e) {
     const many = this.selected.size > 1;
     contextMenu(ev.clientX, ev.clientY, [
-      { label: e.dir ? 'Open' : 'Open / preview', icon: e.dir ? icon.folder : icon.eye, disabled: many, action: () => this.open(e) },
+      { label: e.dir ? 'Open' : kindOf(e) === 'text' ? 'Open in Notes' : 'Open in Preview', icon: e.dir ? icon.folder : icon.eye, disabled: many, action: () => this.open(e) },
       !e.dir ? { label: 'Download', icon: icon.download, action: () => this.download() } : null,
-      !e.dir ? { label: 'Open in Notes', icon: appIcon.notes, disabled: many, action: () => openApp('notes', { root: this.root, path: join(this.path, e.name) }) } : null,
+      !e.dir && kindOf(e) !== 'text' ? { label: 'Open in Notes', icon: appIcon.notes, disabled: many, action: () => openApp('notes', { root: this.root, path: join(this.path, e.name) }) } : null,
       kindOf(e) === 'image' && extOf(e.name) !== 'ico' && extOf(e.name) !== 'tbn' ? { label: 'Set as desktop wallpaper', icon: icon.image, disabled: many, action: () => this.setWallpaper(e) } : null,
       ...(this.selectedAudio().length ? ['-',
         { label: 'Play in Music', icon: icon.play, action: () => this.toMusic(true) },
@@ -674,73 +679,11 @@ class FileBrowser {
   }
 
   // ---- Preview ----
-  async preview(e) {
-    const kind = kindOf(e);
+  // Text opens in Notes; everything else in Preview.
+  preview(e) {
     const p = join(this.path, e.name);
-    const root = this.root;
-    if (kind === 'text') { openApp('notes', { root, path: p }); return; }
-    this.win.body.querySelector('.sheet')?.remove();
-    const close = () => { sheet.classList.add('leaving'); setTimeout(() => sheet.remove(), 200); this.list.focus({ preventScroll: true }); };
-    const body = h('div', { class: 'fm-preview-body' });
-    const actions = h('div', { class: 'btn-row' },
-      h('a', { class: 'btn', href: fileUrl(root, p), download: e.name }, h('span', { html: icon.download }), 'Download'),
-      kind === 'audio' ? h('button', { class: 'btn btn-primary', onclick: () => { close(); openApp('music', { tracks: fromFiles(root, this.path, [e]), play: true }); } }, h('span', { html: icon.play }), 'Play in Music') : null,
-      ['image', 'pdf', 'video', 'audio', 'text'].includes(kind) ? h('a', { class: 'btn', href: fileUrl(root, p, true), target: '_blank', rel: 'noopener' }, h('span', { html: icon.external }), 'Open in new tab') : null);
-    const sheet = h('div', { class: 'sheet fm-sheet' },
-      h('div', { class: 'sheet-inner fm-preview' },
-        h('button', { class: 'btn btn-icon sheet-close', title: 'Close', html: icon.x, onclick: close }),
-        h('div', { class: 'fm-preview-head' },
-          h('span', { class: 'fm-preview-icon', html: fileIcon(kind) }),
-          h('div', { class: 'grow' }, h('h2', {}, e.name),
-            h('div', { class: 'muted small' }, [formatBytes(e.size || 0), e.modified ? new Date(e.modified).toLocaleString() : null, p].filter(Boolean).join(' · '))),
-          actions),
-        body));
-    sheet.addEventListener('keydown', (ev) => { if (ev.key === 'Escape') close(); });
-    this.win.body.append(sheet);
-
-    const ext = extOf(e.name);
-    if (kind === 'image' && ext !== 'tbn') {
-      body.append(h('div', { class: 'fm-media' }, h('img', { src: fileUrl(root, p, true), alt: e.name })));
-    } else if ((kind === 'video' || kind === 'audio') && PLAYABLE[kind].includes(ext)) {
-      const media = h(kind, { src: fileUrl(root, p, true), controls: true, preload: 'metadata', class: 'fm-player' });
-      media.addEventListener('error', () => body.append(h('p', { class: 'muted small' }, 'Your browser can’t play this format. Download it or open it in Jellyfin instead.')));
-      body.append(h('div', { class: 'fm-media' }, media));
-    } else if (kind === 'text' || (kind === 'file' && (e.size || 0) < 512 * 1024)) {
-      this.textEditor(body, actions, root, p, e, kind === 'text');
-    } else {
-      body.append(emptyState('No preview available', 'Download the file to open it.'));
-    }
-  }
-
-  async textEditor(body, actions, root, p, e, expected) {
-    body.append(spinner());
-    let doc;
-    try { doc = await call('text', { params: { root, path: p } }); }
-    catch (err) {
-      clear(body, expected || err.status !== 415 ? errorState(err) : emptyState('No preview available', 'This is not a text file.'));
-      return;
-    }
-    const area = h('textarea', { class: 'fm-text', spellcheck: 'false' });
-    area.value = doc.text;
-    const save = h('button', { class: 'btn btn-primary', disabled: true }, h('span', { html: icon.check }), 'Save');
-    const saveNow = async () => {
-      save.disabled = true;
-      try {
-        const r = await call('text', { method: 'POST', body: { root, path: p, text: area.value, modified: doc.modified, bom: doc.bom } });
-        doc.modified = r.modified;
-        doc.text = area.value;
-        toast('Saved', { body: e.name, type: 'success', icon: appIcon.files, timeout: 2000 });
-        if (root === this.root) this.refresh();
-      } catch (err) { save.disabled = false; toastError(err, 'Could not save'); }
-    };
-    save.onclick = saveNow;
-    area.addEventListener('input', () => { save.disabled = area.value === doc.text; });
-    area.addEventListener('keydown', (ev) => {
-      if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === 's') { ev.preventDefault(); if (!save.disabled) saveNow(); }
-      if (ev.key === 'Tab') { ev.preventDefault(); area.setRangeText('\t', area.selectionStart, area.selectionEnd, 'end'); area.dispatchEvent(new Event('input')); }
-    });
-    actions.prepend(save);
-    clear(body, area);
+    if (kindOf(e) === 'text') openApp('notes', { root: this.root, path: p });
+    else openApp('preview', { key: `${this.root}:${p}`, root: this.root, path: p, size: e.size, modified: e.modified });
   }
 }
 
