@@ -5,6 +5,8 @@ import { icon, appIcon } from '../icons.js';
 import { portal, state, radarr, sonarr, nzbget, jellyfin, isConfigured } from '../api.js';
 import { applyAppearance, appearance, WALLPAPERS, ACCENTS, WALLPAPER_FITS, useCustomWallpaper, setWallpaperFromFile } from '../desktop.js';
 import { pickFile } from '../fileapi.js';
+import { layout, updateDock, updateDesktop, resetLayout, PLACEABLE_EXCLUDE } from '../layout.js';
+import { getApps } from '../wm.js';
 import { SCREENSAVERS } from '../savers.js';
 import * as screensaver from '../screensaver.js';
 
@@ -33,6 +35,7 @@ export const settingsApp = {
       page('music', 'Music', appIconSmall('music'), renderMusic),
       page('files', 'Files', appIconSmall('files'), renderFiles),
       page('appearance', 'Appearance', icon.image, renderAppearance),
+      page('dock', 'Dock & Desktop', icon.grid, renderDockPage),
       page('screensaver', 'Screensaver', icon.moon, renderScreensaver),
       page('about', 'About', icon.heartPulse, renderAbout),
     ], { initial: opts.tab });
@@ -462,6 +465,68 @@ function wallpaperPicker(a, set) {
   grid.addEventListener('dragleave', () => grid.classList.remove('drop'));
   grid.addEventListener('drop', (e) => { e.preventDefault(); grid.classList.remove('drop'); const f = [...(e.dataTransfer?.files || [])].find((x) => x.type.startsWith('image/')); if (f) upload(f); });
   return h('div', {}, grid, fitRow, status, h('p', { class: 'small muted' }, 'Your pictures are stored on the MediaDesk server, so every device can use them.'));
+}
+
+function renderDockPage(container) {
+  const d = layout().dock;
+  const phone = innerWidth < 760;
+  const rerender = () => { clear(container); renderDockPage(container); };
+  const set = (patch) => { updateDock(patch); rerender(); };
+  const slider = (label, key, min, max, disabled) => {
+    const out = h('span', { class: 'small muted slider-val' }, `${d[key]} px`);
+    const input = h('input', { type: 'range', min, max, step: 2, value: d[key], disabled, class: 'pref-slider' });
+    input.addEventListener('input', () => { out.textContent = `${input.value} px`; updateDock({ [key]: Number(input.value) }); });
+    return h('label', { class: `pref-row pref-select ${disabled ? 'dimmed' : ''}` }, h('span', {}, h('span', {}, label)), input, out);
+  };
+  const check = (label, key, help, disabled) => h('label', { class: `pref-row ${disabled ? 'dimmed' : ''}` },
+    h('input', { type: 'checkbox', checked: d[key], disabled, onchange: (e) => set({ [key]: e.target.checked }) }),
+    h('span', {}, h('span', {}, label), help ? h('span', { class: 'small muted pref-help' }, help) : null));
+  const seg = (options, value, onPick, disabled) => h('div', { class: 'seg' }, options.map(([v, l]) =>
+    h('button', { class: `seg-btn ${value === v ? 'active' : ''}`, disabled, onclick: () => onPick(v) }, l)));
+
+  const dock = section('Dock',
+    phone ? h('p', { class: 'small muted' }, 'On phones the dock always sits at the bottom at a fixed size. Which apps it holds can still be changed below.') : null,
+    slider('Size', 'size', 32, 80, phone),
+    check('Magnification', 'magnify', 'Icons grow as the pointer passes over them.', phone),
+    d.magnify ? slider('Magnified size', 'magnifySize', 48, 128, phone) : null,
+    h('div', { class: `pref-row pref-select ${phone ? 'dimmed' : ''}` }, h('span', {}, h('span', {}, 'Position on screen')),
+      seg([['left', 'Left'], ['bottom', 'Bottom'], ['right', 'Right']], d.position, (v) => set({ position: v }), phone)),
+    check('Automatically hide and show the Dock', 'autohide', 'Windows get the whole screen; move the pointer to the edge to bring the dock back.', phone),
+    check('Show indicators for open apps', 'indicators'),
+    check('Show open apps that aren’t kept in the Dock', 'showOpen'),
+    h('div', { class: 'pref-row pref-select' }, h('span', {}, h('span', {}, 'Double-click a window’s title bar to')),
+      seg([['zoom', 'Zoom'], ['minimize', 'Minimise']], d.titleDoubleClick, (v) => set({ titleDoubleClick: v }))));
+
+  const l = layout();
+  const onDesktop = (id) => l.desktop.items.some((it) => (it.type === 'app' && it.id === id) || (it.type === 'group' && it.apps.includes(id)));
+  const apps = getApps().filter((a) => !PLACEABLE_EXCLUDE.has(a.id)).sort((a, b) => a.name.localeCompare(b.name));
+  const list = h('div', { class: 'dock-apps' },
+    h('div', { class: 'dock-apps-head small muted' }, h('span', {}, 'App'), h('span', {}, 'In Dock'), h('span', {}, 'On desktop')),
+    apps.map((a) => h('div', { class: 'dock-apps-row' },
+      h('span', { class: 'dock-apps-name' }, h('span', { class: 'dock-apps-icon', html: a.icon }), a.name),
+      h('input', { type: 'checkbox', 'aria-label': `${a.name} in Dock`, checked: d.apps.includes(a.id), onchange: (e) => set({ apps: e.target.checked ? [...d.apps, a.id] : d.apps.filter((x) => x !== a.id) }) }),
+      h('input', { type: 'checkbox', 'aria-label': `${a.name} on desktop`, checked: onDesktop(a.id), onchange: (e) => {
+        updateDesktop((dk) => {
+          if (e.target.checked) dk.items.push({ type: 'app', id: a.id });
+          else {
+            dk.items = dk.items.filter((it) => !(it.type === 'app' && it.id === a.id));
+            dk.items.forEach((it) => { if (it.type === 'group') it.apps = it.apps.filter((x) => x !== a.id); });
+          }
+        });
+        rerender();
+      } }))));
+  const appsSec = section('Apps', h('p', { class: 'small muted' }, 'You can also drag apps in the Dock to reorder them, drag them off to remove them, and drag desktop icons onto the Dock. Drop one desktop icon onto another to make a group.'),
+    list,
+    h('div', { class: 'btn-row' },
+      h('button', { class: 'btn', onclick: () => { resetLayout('dock'); rerender(); toast('Dock reset'); } }, 'Reset Dock'),
+      h('button', { class: 'btn', onclick: async () => {
+        if (!(await confirmDialog({ title: 'Reset the desktop?', message: 'Icons go back to their original places and groups are removed.', confirm: 'Reset', danger: true }))) return;
+        resetLayout('desktop'); rerender(); toast('Desktop reset');
+      } }, 'Reset desktop icons & groups')));
+
+  container.append(h('div', { class: 'pane-header' }, h('h2', {}, 'Dock & Desktop')),
+    h('p', { class: 'small muted' }, 'Saved in this browser, so your phone and computer can be arranged differently.'),
+    dock, appsSec);
 }
 
 function renderScreensaver(container) {

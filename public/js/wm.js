@@ -2,6 +2,7 @@
 
 import { h } from './ui.js';
 import { icon } from './icons.js';
+import { dockReserve, layout, onLayout } from './layout.js';
 
 const apps = new Map();      // id -> app definition
 const windows = new Map();   // key -> window record
@@ -11,7 +12,6 @@ let layer;
 let snapPreview;
 
 const TOP = 34;              // menu bar height
-const DOCK = 86;             // space reserved for the dock
 const MIN_W = 360, MIN_H = 240;
 const isMobile = () => innerWidth < 760;
 
@@ -28,16 +28,25 @@ export function initWM(container) {
   layer = container;
   snapPreview = h('div', { class: 'snap-preview' });
   layer.append(snapPreview);
-  addEventListener('resize', () => {
+  const relayout = () => {
     for (const w of windows.values()) {
       if (w.maximized || isMobile()) applyMaximized(w);
       else clampToScreen(w);
     }
-  });
+  };
+  addEventListener('resize', relayout);
+  // Moving, resizing or hiding the dock changes the space windows can use.
+  onLayout(relayout);
 }
 
 function bounds() {
-  return { x: 0, y: TOP, w: innerWidth, h: innerHeight - TOP - (isMobile() ? 72 : DOCK) };
+  if (isMobile()) return { x: 0, y: TOP, w: innerWidth, h: innerHeight - TOP - 72 };
+  const { side, px } = dockReserve();
+  return {
+    x: side === 'left' ? px : 0, y: TOP,
+    w: innerWidth - (side === 'left' || side === 'right' ? px : 0),
+    h: innerHeight - TOP - (side === 'bottom' ? px : 4),
+  };
 }
 
 function loadGeometry(id) {
@@ -52,7 +61,7 @@ function cascade(width, height) {
   const b = bounds();
   const n = windows.size % 8;
   return {
-    x: Math.max(8, Math.round((b.w - width) / 2) - 120 + n * 32),
+    x: b.x + Math.max(8, Math.round((b.w - width) / 2) - 120 + n * 32),
     y: Math.max(b.y + 8, b.y + Math.round((b.h - height) / 2) - 60 + n * 28),
     w: width, h: height,
   };
@@ -68,7 +77,7 @@ function clampToScreen(w) {
   const g = w.geom;
   g.w = Math.min(g.w, b.w - 16);
   g.h = Math.min(g.h, b.h - 8);
-  g.x = Math.min(Math.max(g.x, -g.w + 120), b.w - 120);
+  g.x = Math.min(Math.max(g.x, b.x - g.w + 120), b.x + b.w - 120);
   g.y = Math.min(Math.max(g.y, b.y), b.y + b.h - 40);
   place(w);
 }
@@ -91,7 +100,7 @@ export function openApp(appId, opts = {}) {
 
   const size = app.size || [960, 640];
   const saved = !opts.key && loadGeometry(appId);
-  const geom = saved || cascade(Math.min(size[0], innerWidth - 40), Math.min(size[1], innerHeight - TOP - DOCK - 20));
+  const geom = saved || cascade(Math.min(size[0], bounds().w - 40), Math.min(size[1], bounds().h - 20));
 
   const titleEl = h('div', { class: 'window-title' }, opts.title || app.name);
   const btnMin = h('button', { class: 'wbtn wbtn-min', title: 'Minimise', html: icon.minimize });
@@ -135,7 +144,10 @@ export function openApp(appId, opts = {}) {
   btnClose.addEventListener('click', () => close(w));
   btnMin.addEventListener('click', () => minimize(w));
   btnMax.addEventListener('click', () => toggleMaximize(w));
-  titlebar.addEventListener('dblclick', (e) => { if (!e.target.closest('button, input, select')) toggleMaximize(w); });
+  titlebar.addEventListener('dblclick', (e) => {
+    if (e.target.closest('button, input, select')) return;
+    if (layout().dock.titleDoubleClick === 'minimize' && !isMobile()) minimize(w); else toggleMaximize(w);
+  });
   el.addEventListener('pointerdown', () => focus(w), true);
   enableDrag(w, titlebar);
   enableResize(w);
@@ -221,8 +233,8 @@ function snapZone(x, y) {
 function snapRect(zone) {
   const b = bounds();
   if (zone === 'max') return b;
-  if (zone === 'left') return { x: 0, y: b.y, w: Math.round(b.w / 2), h: b.h };
-  return { x: Math.round(b.w / 2), y: b.y, w: b.w - Math.round(b.w / 2), h: b.h };
+  if (zone === 'left') return { x: b.x, y: b.y, w: Math.round(b.w / 2), h: b.h };
+  return { x: b.x + Math.round(b.w / 2), y: b.y, w: b.w - Math.round(b.w / 2), h: b.h };
 }
 
 function enableDrag(w, handle) {

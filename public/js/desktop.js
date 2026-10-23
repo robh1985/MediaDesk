@@ -3,11 +3,14 @@
 import { h, clear, formatSpeed, formatBytes, timeOf, debounce, toast, toastError, contextMenu, timeAgo } from './ui.js';
 import { icon, appIcon } from './icons.js';
 import { radarr, sonarr, nzbget, jellyfin, isConfigured, serviceLink, portal, state, appPref } from './api.js';
-import { getApps, getApp, openApp, toggleApp, onChange, openWindows, focusedWindow, close as closeWindow } from './wm.js';
+import { getApps, getApp, openApp, onChange, openWindows, focusedWindow } from './wm.js';
 import { live, subscribe, markRead, markAllRead, clearNotifications, totalUnread, dismissSystemNotice } from './live.js';
 import { upcoming, posterUrl } from './apps/arr.js';
 import * as music from './apps/music-engine.js';
 import * as screensaver from './screensaver.js';
+import { startDock } from './dock.js';
+import { startDesktopIcons, desktopMenuItems } from './deskicons.js';
+import { PLACEABLE_EXCLUDE } from './layout.js';
 import { itemImage, searchJellyfin } from './apps/jellyfin.js';
 
 // ---------------------------------------------------------------------------
@@ -104,12 +107,11 @@ export function openWebView(svc) {
 // Boot the desktop
 // ---------------------------------------------------------------------------
 
-const DOCK_APPS = ['dashboard', 'radarr', 'sonarr', 'nzbget', 'jellyfin', 'music', 'files', 'notes', 'calculator'];
 
 export function startDesktop() {
   buildMenuBar();
-  buildDock();
-  buildDesktopIcons();
+  startDock({ openLauncher, openWebView });
+  startDesktopIcons();
   buildWidgets();
   setupShortcuts();
   document.getElementById('desktop').addEventListener('contextmenu', (e) => {
@@ -122,10 +124,12 @@ export function startDesktop() {
       { label: 'Overview', icon: icon.grid, action: () => openApp('dashboard') },
       { label: 'Search…', icon: icon.search, action: openLauncher },
       '-',
+      ...desktopMenuItems(),
+      '-',
       { label: 'Change wallpaper…', icon: icon.image, action: () => openApp('settings', { tab: 'appearance' }) },
       { label: 'Next wallpaper', icon: icon.refresh, action: () => applyAppearance({ ...a, wallpaper: keys[(keys.indexOf(a.wallpaper) + 1) % keys.length] }) },
       { label: a.widgets ? 'Hide widgets' : 'Show widgets', icon: icon.grid, action: () => applyAppearance({ ...a, widgets: !a.widgets }) },
-      { label: 'Settings…', icon: icon.sliders, action: () => openApp('settings') },
+      { label: 'Dock & Desktop settings…', icon: icon.sliders, action: () => openApp('settings', { tab: 'dock' }) },
     ]);
   });
 }
@@ -265,86 +269,6 @@ function toggleNotificationCenter() {
 }
 
 // ---------------------------------------------------------------------------
-// Dock
-// ---------------------------------------------------------------------------
-
-function buildDock() {
-  const dock = document.getElementById('dock');
-  const render = () => {
-    const running = new Set(openWindows().map((w) => w.appId));
-    const focused = focusedWindow()?.appId;
-    const item = (id, opts = {}) => {
-      const app = getApp(id);
-      const badgeCount = opts.badge ?? 0;
-      return h('button', {
-        class: `dock-item ${running.has(id) ? 'running' : ''} ${focused === id ? 'focused' : ''}`,
-        dataset: { app: id }, 'aria-label': app.name,
-        onclick: opts.onclick || (() => toggleApp(id)),
-        oncontextmenu: (e) => { e.preventDefault(); dockMenu(e, id); },
-      },
-      h('span', { class: 'dock-icon', html: opts.icon || app.icon }),
-      h('span', { class: 'dock-label' }, opts.label || app.name),
-      badgeCount ? h('span', { class: 'dock-badge', 'aria-label': `${badgeCount} unread` }, badgeCount > 99 ? '99+' : badgeCount) : null);
-    };
-    const webviews = openWindows().filter((w) => w.appId === 'webview');
-    clear(dock,
-      h('div', { class: 'dock-inner glass' },
-        item('launcher', { icon: appIcon.dashboard, label: 'Search', onclick: openLauncher }),
-        h('div', { class: 'dock-sep' }),
-        DOCK_APPS.map((id) => item(id, { badge: live.unread[id] || 0 })),
-        h('div', { class: 'dock-sep' }),
-        webviews.length ? item('webview', { label: `Web UI (${webviews.length})` }) : null,
-        item('settings')));
-    dock.querySelector('[data-app="launcher"] .dock-icon').innerHTML = `<span class="launcher-glyph">${icon.grid}</span>`;
-  };
-  onChange(render);
-  subscribe(debounce(render, 50));
-  render();
-}
-
-function dockMenu(e, id) {
-  const wins = openWindows().filter((w) => w.appId === id);
-  const items = [{ label: wins.length ? 'Show' : 'Open', icon: icon.external, action: () => toggleApp(id) }];
-  if (['radarr', 'sonarr', 'nzbget', 'jellyfin'].includes(id) && serviceLink(id)) items.push({ label: 'Open full web UI', icon: icon.globe, action: () => openWebView(id) });
-  if (wins.length) items.push('-', { label: wins.length > 1 ? `Close ${wins.length} windows` : 'Close', icon: icon.x, action: () => wins.forEach(closeWindow) });
-  contextMenu(e.clientX, e.clientY - 10, items);
-}
-
-// ---------------------------------------------------------------------------
-// Desktop icons
-// ---------------------------------------------------------------------------
-
-function buildDesktopIcons() {
-  const host = document.getElementById('desktop-icons');
-  const entries = [
-    ...DOCK_APPS.map((id) => ({ id, name: getApp(id).name, icon: getApp(id).icon, open: () => openApp(id) })),
-    { id: 'settings', name: 'Settings', icon: appIcon.settings, open: () => openApp('settings') },
-  ];
-  clear(host, entries.map((e) => {
-    const badge = h('span', { class: 'dock-badge desktop-badge', hidden: true });
-    const el = h('button', { class: 'desktop-icon', dataset: { app: e.id } },
-      h('span', { class: 'desktop-icon-img', html: e.icon }), badge, h('span', { class: 'desktop-icon-label' }, e.name));
-    subscribe((l) => {
-      const n = l.unread[e.id] || 0;
-      badge.hidden = !n;
-      badge.textContent = n > 99 ? '99+' : n;
-    });
-    el.addEventListener('click', () => {
-      host.querySelectorAll('.selected').forEach((x) => x.classList.remove('selected'));
-      el.classList.add('selected');
-      if (matchMedia('(pointer: coarse)').matches) e.open();
-    });
-    el.addEventListener('dblclick', e.open);
-    el.addEventListener('contextmenu', (ev) => { ev.preventDefault(); ev.stopPropagation(); dockMenu(ev, e.id); });
-    el.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') e.open(); });
-    return el;
-  }));
-  document.getElementById('desktop').addEventListener('pointerdown', (ev) => {
-    if (!ev.target.closest('.desktop-icon')) host.querySelectorAll('.selected').forEach((x) => x.classList.remove('selected'));
-  });
-}
-
-// ---------------------------------------------------------------------------
 // Widgets
 // ---------------------------------------------------------------------------
 
@@ -477,7 +401,7 @@ export function openLauncher() {
 
   const appsGrid = () => {
     rows = [];
-    const apps = [...DOCK_APPS, 'settings'].map((id) => getApp(id));
+    const apps = getApps().filter((a) => !PLACEABLE_EXCLUDE.has(a.id)).sort((a, b) => a.name.localeCompare(b.name));
     clear(results, h('div', { class: 'launcher-apps' }, apps.map((a) => {
       const r = { title: a.name, action: () => openApp(a.id) };
       r.el = h('button', { class: 'launcher-app', onclick: () => run(r) }, h('span', { html: a.icon }), h('span', {}, a.name), h('span', { class: 'small muted' }, a.description || ''));
