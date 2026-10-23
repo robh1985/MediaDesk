@@ -4,6 +4,7 @@ import { h, clear, formatBytes, formatDuration, debounce, toast, toastError, con
 import { icon, appIcon } from '../icons.js';
 import { state, appPref } from '../api.js';
 import { openApp } from '../wm.js';
+import { fromFiles } from './music-engine.js';
 
 // --- API -----------------------------------------------------------------------
 
@@ -436,6 +437,9 @@ class FileBrowser {
     contextMenu(ev.clientX, ev.clientY, [
       { label: e.dir ? 'Open' : 'Open / preview', icon: e.dir ? icon.folder : icon.eye, disabled: many, action: () => this.open(e) },
       !e.dir ? { label: 'Download', icon: icon.download, action: () => this.download() } : null,
+      ...(this.selectedAudio().length ? ['-',
+        { label: 'Play in Music', icon: icon.play, action: () => this.toMusic(true) },
+        { label: 'Add to Music playlist', icon: icon.plus, action: () => this.toMusic(false) }] : []),
       '-',
       { label: 'Cut', icon: ICON_CUT, action: () => this.toClipboard('move') },
       { label: 'Copy', icon: ICON_COPY, action: () => this.toClipboard('copy') },
@@ -444,6 +448,14 @@ class FileBrowser {
       '-',
       { label: many ? `Delete ${this.selected.size} items` : 'Delete', icon: icon.trash, action: () => this.remove() },
     ].filter(Boolean));
+  }
+
+  selectedAudio() {
+    return fromFiles(this.root, this.path, this.selectedEntries());
+  }
+  toMusic(play) {
+    const tracks = this.selectedAudio();
+    if (tracks.length) openApp('music', { tracks, play });
   }
 
   // ---- Actions ----
@@ -661,6 +673,7 @@ class FileBrowser {
     const body = h('div', { class: 'fm-preview-body' });
     const actions = h('div', { class: 'btn-row' },
       h('a', { class: 'btn', href: fileUrl(root, p), download: e.name }, h('span', { html: icon.download }), 'Download'),
+      kind === 'audio' ? h('button', { class: 'btn btn-primary', onclick: () => { close(); openApp('music', { tracks: fromFiles(root, this.path, [e]), play: true }); } }, h('span', { html: icon.play }), 'Play in Music') : null,
       ['image', 'pdf', 'video', 'audio', 'text'].includes(kind) ? h('a', { class: 'btn', href: fileUrl(root, p, true), target: '_blank', rel: 'noopener' }, h('span', { html: icon.external }), 'Open in new tab') : null);
     const sheet = h('div', { class: 'sheet fm-sheet' },
       h('div', { class: 'sheet-inner fm-preview' },

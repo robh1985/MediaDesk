@@ -6,6 +6,7 @@ import { radarr, sonarr, nzbget, jellyfin, isConfigured, serviceLink, portal, st
 import { getApps, getApp, openApp, toggleApp, onChange, openWindows, focusedWindow, close as closeWindow } from './wm.js';
 import { live, subscribe, markRead, markAllRead, clearNotifications, totalUnread, dismissSystemNotice } from './live.js';
 import { upcoming, posterUrl } from './apps/arr.js';
+import * as music from './apps/music-engine.js';
 import { itemImage, searchJellyfin } from './apps/jellyfin.js';
 
 // ---------------------------------------------------------------------------
@@ -52,7 +53,7 @@ export function openWebView(svc) {
 // Boot the desktop
 // ---------------------------------------------------------------------------
 
-const DOCK_APPS = ['dashboard', 'radarr', 'sonarr', 'nzbget', 'jellyfin', 'files'];
+const DOCK_APPS = ['dashboard', 'radarr', 'sonarr', 'nzbget', 'jellyfin', 'music', 'files'];
 
 export function startDesktop() {
   buildMenuBar();
@@ -61,7 +62,8 @@ export function startDesktop() {
   buildWidgets();
   setupShortcuts();
   document.getElementById('desktop').addEventListener('contextmenu', (e) => {
-    if (e.target.closest('.window, .widget, .desktop-icon')) return;
+    // Widget backgrounds count as desktop too: on phones the icons and widgets cover nearly all of it.
+    if (e.target.closest('.window, .desktop-icon, .widget button, .widget a, .widget input')) return;
     e.preventDefault();
     const a = appearance();
     const keys = Object.keys(WALLPAPERS);
@@ -98,6 +100,18 @@ function buildMenuBar() {
     ]);
   });
   const speed = h('button', { class: 'tray-item', title: 'NZBGet', onclick: () => openApp('nzbget') });
+  const nowPlaying = h('button', { class: 'tray-item tray-music', hidden: true, onclick: () => openApp('music') });
+  music.subscribe((p) => {
+    const t = music.current();
+    const show = t && (p.state === 'playing' || p.state === 'loading' || p.state === 'paused') && appPref('music', 'nowPlayingInMenuBar') !== false;
+    nowPlaying.hidden = !show;
+    if (!show) return;
+    const label = t.artist ? `${t.artist} – ${t.title}` : t.title;
+    if (nowPlaying.title !== label) {
+      nowPlaying.title = label;
+      clear(nowPlaying, h('span', { class: 'tray-glyph', html: p.state === 'paused' ? icon.pause : '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M9 18V6l11-2v11.5"/><circle cx="6.5" cy="18" r="2.8"/><circle cx="17.5" cy="15.5" r="2.8"/></svg>' }), h('span', { class: 'tray-word' }, label));
+    }
+  });
   const streams = h('button', { class: 'tray-item', title: 'Jellyfin streams', onclick: () => openApp('jellyfin', { section: 'sessions' }) });
   const bell = h('button', { class: 'tray-item tray-icon', title: 'Notifications', html: icon.bell, onclick: toggleNotificationCenter });
   const theme = h('button', { class: 'tray-item tray-icon', title: 'Toggle dark mode' });
@@ -116,7 +130,7 @@ function buildMenuBar() {
       appName,
       h('button', { class: 'menu-link', onclick: openLauncher }, 'Apps'),
       h('button', { class: 'menu-link', onclick: () => openApp('dashboard') }, 'Overview')),
-    h('div', { class: 'menu-right' }, speed, streams, bell, theme, clock));
+    h('div', { class: 'menu-right' }, nowPlaying, speed, streams, bell, theme, clock));
 
   onChange(() => {
     document.body.classList.toggle('has-window', openWindows().some((x) => !x.minimized));
@@ -266,6 +280,7 @@ function buildDesktopIcons() {
       if (matchMedia('(pointer: coarse)').matches) e.open();
     });
     el.addEventListener('dblclick', e.open);
+    el.addEventListener('contextmenu', (ev) => { ev.preventDefault(); ev.stopPropagation(); dockMenu(ev, e.id); });
     el.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') e.open(); });
     return el;
   }));

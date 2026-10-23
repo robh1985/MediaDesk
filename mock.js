@@ -256,6 +256,109 @@ series.forEach((s) => {
 ['Midnight Static', 'Golden Hour Tapes', 'Northern Lights EP', 'City of Echoes'].forEach((a, i) => jfItems.push({
   Id: `a${i}`, Name: a, Type: 'MusicAlbum', AlbumArtist: ['The Lanterns', 'Velvet Sea', 'Aurora Kid', 'Echo Park'][i], ParentId: 'lib-music', ProductionYear: 2020 + i, ServerId: SERVER_ID, ImageTags: { Primary: 'p' }, UserData: {}, DateCreated: iso(now - i * DAY),
 }));
+// --- Music: synthesised songs so the Music app and its visualizer have something to play ---
+
+const ALBUM_TRACKS = [
+  ['Neon Rain', 'Static Hearts', 'After Midnight', 'Glass Tower', 'Slow Signal'],
+  ['Sunbeam Cassette', 'Warm Tape', 'Porch Lights', 'Golden Hour', 'Last Light'],
+  ['Aurora', 'Polar Night', 'Frostbite', 'Northern Drift'],
+  ['Echo Chamber', 'Concrete Bloom', 'Subway Lights', 'Rooftops', 'City Hum'],
+];
+const ALBUMS = ['Midnight Static', 'Golden Hour Tapes', 'Northern Lights EP', 'City of Echoes'];
+const ARTISTS = ['The Lanterns', 'Velvet Sea', 'Aurora Kid', 'Echo Park'];
+const SONG_RATE = 22050;
+const songs = [];
+ALBUM_TRACKS.forEach((tracks, a) => tracks.forEach((name, t) => {
+  const seed = hash(name);
+  const seconds = 40 + (seed % 35);
+  songs.push({
+    Id: `t${a}_${t}`, Name: name, Type: 'Audio', ParentId: `a${a}`, AlbumId: `a${a}`, Album: ALBUMS[a], AlbumArtist: ARTISTS[a],
+    Artists: [ARTISTS[a]], ArtistItems: [{ Id: `ar${a}`, Name: ARTISTS[a] }], AlbumPrimaryImageTag: 'p', IndexNumber: t + 1, ParentIndexNumber: 1,
+    RunTimeTicks: seconds * 1e7, Container: 'wav', ServerId: SERVER_ID, ImageTags: {}, UserData: {}, DateCreated: iso(now - a * DAY),
+    MediaSources: [{ Container: 'wav', Bitrate: SONG_RATE * 16, MediaStreams: [{ Type: 'Audio', SampleRate: SONG_RATE, Channels: 1, Codec: 'pcm_s16le' }] }],
+    seed, seconds,
+  });
+}));
+jfItems.push(...songs);
+const jfPlaylists = [{ Id: 'pl1', Name: 'Late Night Drive', Type: 'Playlist', MediaType: 'Audio', ServerId: SERVER_ID, ImageTags: {}, ChildCount: 6, UserData: {},
+  items: ['t0_0', 't3_2', 't2_0', 't0_2', 't1_3', 't3_0'] }];
+jfItems.push(...jfPlaylists);
+
+// A small seeded synthesiser: drums, bass, chords and an arpeggio, different tempo/key per song.
+function synthSong(seed, seconds, rate = SONG_RATE) {
+  let r = seed || 1;
+  const rand = () => ((r = (r * 1664525 + 1013904223) >>> 0) / 4294967296);
+  const n = Math.floor(seconds * rate);
+  const out = new Float32Array(n);
+  const bpm = 88 + (seed % 48);
+  const beat = 60 / bpm;
+  const root = 40 + (seed % 12);                       // MIDI note of the key
+  const freq = (m) => 440 * 2 ** ((m - 69) / 12);
+  const prog = [[0, 4, 7], [7, 11, 14], [9, 12, 16], [5, 9, 12]].map((c) => c.map((x) => x + root + 12));
+  const bassLine = [0, 7, 9, 5];
+  const arpStyle = seed % 3;
+  const add = (start, len, fn) => {
+    const s0 = Math.floor(start * rate), s1 = Math.min(n, s0 + Math.floor(len * rate));
+    for (let i = s0; i < s1; i++) out[i] += fn((i - s0) / rate);
+  };
+  const bars = Math.ceil(seconds / (beat * 4));
+  for (let bar = 0; bar < bars; bar++) {
+    const chord = prog[bar % 4];
+    const t0 = bar * beat * 4;
+    const section = Math.floor(bar / 4) % 3;           // vary density through the song
+    for (let b = 0; b < 4; b++) {
+      const t = t0 + b * beat;
+      // kick
+      if (b % 2 === 0 || (section === 2 && b === 3)) add(t, 0.35, (x) => Math.sin(2 * Math.PI * (45 + 110 * Math.exp(-x * 25)) * x) * Math.exp(-x * 9) * 0.9);
+      // snare
+      if (b % 2 === 1) add(t, 0.22, (x) => ((rand() * 2 - 1) * 0.55 + Math.sin(2 * Math.PI * 190 * x) * 0.3) * Math.exp(-x * 18));
+      // hi-hats
+      for (let h = 0; h < (section === 0 ? 2 : 4); h++) add(t + h * beat / (section === 0 ? 2 : 4), 0.05, (x) => (rand() * 2 - 1) * 0.22 * Math.exp(-x * 90));
+      // bass
+      const bf = freq(root + bassLine[bar % 4]);
+      for (let e = 0; e < 2; e++) add(t + e * beat / 2, beat / 2 * 0.9, (x) => {
+        const env = Math.min(1, x * 200) * Math.exp(-x * 3);
+        return (Math.sin(2 * Math.PI * bf * x) + 0.4 * Math.sin(4 * Math.PI * bf * x) + 0.2 * Math.sin(6 * Math.PI * bf * x)) * 0.32 * env;
+      });
+      // arpeggio
+      if (section > 0) {
+        for (let k = 0; k < 4; k++) {
+          const note = chord[(arpStyle === 0 ? k : arpStyle === 1 ? 3 - k : (k * 2) % 3) % 3] + 12;
+          const f = freq(note);
+          add(t + k * beat / 4, beat / 4 * 0.8, (x) => (Math.sin(2 * Math.PI * f * x) > 0 ? 1 : -1) * 0.06 * Math.exp(-x * 7));
+        }
+      }
+    }
+    // chord pad across the bar
+    add(t0, beat * 4, (x) => {
+      const env = Math.min(1, x * 3) * Math.min(1, (beat * 4 - x) * 4);
+      return chord.reduce((a, m) => a + Math.sin(2 * Math.PI * freq(m) * x + Math.sin(2 * Math.PI * 0.3 * x)), 0) * 0.05 * env;
+    });
+  }
+  // fade in/out and normalise
+  let peak = 0;
+  for (let i = 0; i < n; i++) {
+    const t = i / rate;
+    out[i] *= Math.min(1, t / 1.5, (seconds - t) / 2.5);
+    peak = Math.max(peak, Math.abs(out[i]));
+  }
+  const pcm = Buffer.alloc(44 + n * 2);
+  pcm.write('RIFF', 0); pcm.writeUInt32LE(36 + n * 2, 4); pcm.write('WAVE', 8); pcm.write('fmt ', 12);
+  pcm.writeUInt32LE(16, 16); pcm.writeUInt16LE(1, 20); pcm.writeUInt16LE(1, 22); pcm.writeUInt32LE(rate, 24);
+  pcm.writeUInt32LE(rate * 2, 28); pcm.writeUInt16LE(2, 32); pcm.writeUInt16LE(16, 34); pcm.write('data', 36); pcm.writeUInt32LE(n * 2, 40);
+  const gain = 0.89 / (peak || 1);
+  for (let i = 0; i < n; i++) pcm.writeInt16LE(Math.max(-32767, Math.min(32767, Math.round(out[i] * gain * 32767))), 44 + i * 2);
+  return pcm;
+}
+const songCache = new Map();
+function songWav(song) {
+  if (!songCache.has(song.Id)) {
+    if (songCache.size > 6) songCache.delete(songCache.keys().next().value);
+    songCache.set(song.Id, synthSong(song.seed, song.seconds));
+  }
+  return songCache.get(song.Id);
+}
+
 const byId = Object.fromEntries(jfItems.map((i) => [i.Id, i]));
 const jfStart = Date.now();
 const jfSessions = [
@@ -319,10 +422,19 @@ function jellyfinRoute(method, rest, q, body) {
     return it?.UserData || {};
   }
   if (parts[0] === 'Users' && parts[2] === 'Items' && parts[3]) return byId[parts[3]] || jfViews.find((v) => v.Id === parts[3]) || null;
+  if (rest === 'Artists/AlbumArtists' || rest === 'Artists') {
+    return { Items: ARTISTS.map((name, i) => ({ Id: `ar${i}`, Name: name, Type: 'MusicArtist', ServerId: SERVER_ID, ImageTags: {} })), TotalRecordCount: ARTISTS.length };
+  }
+  if (parts[0] === 'Playlists' && parts[2] === 'Items') {
+    const pl = jfPlaylists.find((x) => x.Id === parts[1]);
+    return { Items: (pl?.items || []).map((id) => byId[id]).filter(Boolean), TotalRecordCount: pl?.items.length || 0 };
+  }
   if (parts[0] === 'Users' && parts[2] === 'Items') {
     let items = jfItems;
     const parent = q.get('ParentId');
     if (parent) items = items.filter((i) => i.ParentId === parent);
+    const artist = q.get('ArtistIds') || q.get('AlbumArtistIds');
+    if (artist) items = items.filter((i) => i.ArtistItems?.some((a) => a.Id === artist) || (i.Type === 'MusicAlbum' && `ar${ARTISTS.indexOf(i.AlbumArtist)}` === artist));
     const types = q.get('IncludeItemTypes');
     if (types) items = items.filter((i) => types.split(',').includes(i.Type));
     const term = (q.get('searchTerm') || '').toLowerCase();
@@ -414,6 +526,22 @@ function arrRoute(svc, method, rest, q, body) {
 // Entry point
 // ---------------------------------------------------------------------------
 
+function sendRange(req, res, buf, type) {
+  const m = /^bytes=(\d*)-(\d*)$/.exec(req.headers.range || '');
+  let start = 0, end = buf.length - 1, status = 200;
+  if (m) {
+    if (m[1] === '') start = Math.max(0, buf.length - Number(m[2]));
+    else { start = Number(m[1]); if (m[2] !== '') end = Math.min(end, Number(m[2])); }
+    if (start > end) { res.writeHead(416, { 'Content-Range': `bytes */${buf.length}` }); return res.end(); }
+    status = 206;
+  }
+  res.writeHead(status, {
+    'Content-Type': type, 'Content-Length': end - start + 1, 'Accept-Ranges': 'bytes',
+    ...(status === 206 ? { 'Content-Range': `bytes ${start}-${end}/${buf.length}` } : {}),
+  });
+  res.end(buf.subarray(start, end + 1));
+}
+
 async function handle(req, res, svc, rest, url, { readJson, sendJson }) {
   const imgMatch = rest.match(/^mock-image\/(\w+)\/(.+)\.svg$/) || (svc === 'jellyfin' && rest.match(/^Items\/([^/]+)\/Images\/(\w+)/));
   if (imgMatch) {
@@ -424,6 +552,13 @@ async function handle(req, res, svc, rest, url, { readJson, sendJson }) {
     } else { kind = imgMatch[1]; title = decodeURIComponent(imgMatch[2]); }
     res.writeHead(200, { 'Content-Type': 'image/svg+xml', 'Cache-Control': 'max-age=3600' });
     return res.end(posterSvg(title, kind));
+  }
+
+  const audio = svc === 'jellyfin' && rest.match(/^Audio\/([^/]+)\/(stream|universal)/);
+  if (audio) {
+    const song = byId[audio[1]];
+    if (!song || song.Type !== 'Audio') return sendJson(res, 404, { error: 'Not found' });
+    return sendRange(req, res, songWav(song), 'audio/wav');
   }
 
   const body = ['POST', 'PUT'].includes(req.method) ? await readJson(req).catch(() => ({})) : null;
@@ -471,6 +606,8 @@ function demoFileRoots() {
     put(`Media/TV/${s.title}/poster.svg`, posterSvg(s.title));
   }
   put('Media/Music/.hidden-cache', 'cache');
+  songs.filter((x) => x.AlbumId === 'a1').slice(0, 3).forEach((x) =>
+    put(`Media/Music/${x.AlbumArtist} - ${x.Album}/${String(x.IndexNumber).padStart(2, '0')} ${x.Name}.wav`, synthSong(x.seed, 20, 16000)));
   put('Downloads/complete/Velvet.Thunder.2025.1080p.WEB-DL/Velvet.Thunder.2025.1080p.WEB-DL.mkv', blob(900));
   put('Downloads/complete/Velvet.Thunder.2025.1080p.WEB-DL/Velvet.Thunder.2025.1080p.WEB-DL.nfo', 'Release notes for the demo download.\n');
   put('Downloads/incomplete/Ironclad.S04E02.2160p.WEB.h265.part', blob(300));

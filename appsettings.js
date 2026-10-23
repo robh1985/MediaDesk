@@ -28,6 +28,9 @@ const DEFAULTS = {
   files: {
     showHidden: false,
   },
+  music: {
+    visAutoSeconds: 20, visQuality: 'medium', nowPlayingInMenuBar: true,
+  },
 };
 
 const ALLOWED = {
@@ -36,6 +39,8 @@ const ALLOWED = {
   'radarr.calendarDays': [7, 14, 28, 60],
   'sonarr.calendarDays': [7, 14, 28, 60],
   'nzbget.defaultPriority': [-100, -50, 0, 50, 100, 900],
+  'music.visAutoSeconds': [0, 10, 20, 40, 60],
+  'music.visQuality': ['low', 'medium', 'high'],
 };
 
 // Stored settings merged over the defaults.

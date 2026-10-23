@@ -63,6 +63,7 @@ export const appIcon = {
   dashboard: tile('#8b8cff', '#4c3ad9', '<path d="M16 42a16 16 0 1 1 32 0"/><path d="M32 42l8-10"/><circle cx="32" cy="42" r="2.5" fill="#fff"/>'),
   settings: tile('#a9b3c4', '#5a6577', '<circle cx="32" cy="32" r="6"/><path d="M32 14v6M32 44v6M14 32h6M44 32h6M19.3 19.3l4.3 4.3M40.4 40.4l4.3 4.3M19.3 44.7l4.3-4.3M40.4 23.6l4.3-4.3"/>'),
   browser: tile('#6ec3ff', '#2563eb', '<circle cx="32" cy="32" r="16"/><path d="M16 32h32M32 16a24 24 0 0 1 0 32M32 16a24 24 0 0 0 0 32"/>'),
+  music: tile('#ffb347', '#e0245e', '<path d="M26 44V18l22-5v26"/><circle cx="20" cy="44" r="6" fill="#fff"/><circle cx="42" cy="39" r="6" fill="#fff"/>'),
   files: tile('#5eead4', '#0d7d74', '<path d="M13 21h11l4 4h14a3 3 0 0 1 3 3v13a3 3 0 0 1-3 3H16a3 3 0 0 1-3-3z"/><path d="M13 30h32"/>'),
   activity: tile('#ff8a8a', '#e0245e', '<path d="M14 34h9l4-10 8 18 4-8h11"/>'),
 };

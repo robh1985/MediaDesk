@@ -272,6 +272,8 @@ const HOP_HEADERS = new Set(['content-encoding', 'content-length', 'transfer-enc
 async function pipeUpstream(res, upstream) {
   const headers = {};
   upstream.headers.forEach((v, k) => { if (!HOP_HEADERS.has(k)) headers[k] = v; });
+  // fetch() only changes the body when it decompresses it; otherwise keep the length (media players need it to seek).
+  if (!upstream.headers.get('content-encoding') && upstream.headers.get('content-length')) headers['content-length'] = upstream.headers.get('content-length');
   res.writeHead(upstream.status, headers);
   if (upstream.body) Readable.fromWeb(upstream.body).pipe(res);
   else res.end();
@@ -284,6 +286,8 @@ async function proxyRest(req, res, svc, rest, search) {
 
   const headers = { Accept: req.headers.accept || 'application/json' };
   if (req.headers['content-type']) headers['Content-Type'] = req.headers['content-type'];
+  // Byte ranges let the browser seek within audio and video streams.
+  for (const name of ['range', 'if-range']) if (req.headers[name]) headers[name] = req.headers[name];
   if (svc === 'jellyfin') {
     headers['X-Emby-Token'] = c.apiKey;
     headers.Authorization = `MediaBrowser Client="MediaDesk", Device="MediaDesk", DeviceId="mediadesk", Version="1.0.0", Token="${c.apiKey}"`;

@@ -27,6 +27,7 @@ export const settingsApp = {
     const layout = sidebarLayout([
       page('general', 'General', icon.sliders, renderGeneral),
       ...Object.keys(SERVICES).map((svc) => page(svc, SERVICES[svc].name, appIconSmall(svc), (c) => renderApp(c, svc))),
+      page('music', 'Music', appIconSmall('music'), renderMusic),
       page('files', 'Files', appIconSmall('files'), renderFiles),
       page('appearance', 'Appearance', icon.image, renderAppearance),
       page('about', 'About', icon.heartPulse, renderAbout),
@@ -238,6 +239,23 @@ async function jellyfinPrefs(box) {
   desk = section('Desktop',
     toggle('jellyfin', 'nowPlayingWidget', 'Show the Now playing widget', null, () => desk));
   clear(box, browse, home, desk);
+}
+
+// ---------------------------------------------------------------------------
+// Music
+// ---------------------------------------------------------------------------
+
+function renderMusic(container) {
+  let vis, bar;
+  vis = section('Visualizer',
+    select('music', 'visAutoSeconds', 'Change preset every', [[0, 'Never (stay on one)'], [10, '10 seconds'], [20, '20 seconds'], [40, '40 seconds'], [60, '1 minute']], () => vis, { numeric: true }),
+    select('music', 'visQuality', 'Picture quality', [['low', 'Low (smoothest on slow devices)'], ['medium', 'Medium'], ['high', 'High (sharpest)']], () => vis,
+      { help: 'Takes effect the next time Music opens.' }));
+  bar = section('Menu bar', toggle('music', 'nowPlayingInMenuBar', 'Show the playing song in the menu bar', null, () => bar));
+  container.append(
+    h('div', { class: 'pane-header' }, h('span', { class: 'settings-app-icon', html: appIcon.music }), h('h2', {}, 'Music')),
+    h('p', { class: 'small muted' }, 'Music plays songs from your Jellyfin music library and from folders shared in Files. Your playlist, volume and equalizer are remembered on each device.'),
+    vis, bar);
 }
 
 // ---------------------------------------------------------------------------

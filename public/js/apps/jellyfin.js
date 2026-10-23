@@ -6,6 +6,8 @@ import { icon, appIcon } from '../icons.js';
 import { jellyfin, jellyfinUserId, jellyfinImage, serviceLink, isConfigured, appPref } from '../api.js';
 import { notConfigured } from './common.js';
 import { statCard } from './arr.js';
+import { openApp } from '../wm.js';
+import { fromJellyfin } from './music-engine.js';
 
 const TICKS = 1e7;
 const FIELDS = 'PrimaryImageAspectRatio,ProductionYear,Overview,Genres';
@@ -250,12 +252,34 @@ async function openItem(stub, ctx) {
           h('div', { class: 'chips' }, (item.Genres || []).slice(0, 4).map((g) => badge(g))),
           h('p', { class: 'overview' }, item.Overview || 'No overview available.'),
           h('div', { class: 'btn-row' },
-            link ? h('a', { class: 'btn btn-primary', href: `${link}/web/index.html#/details?id=${item.Id}&serverId=${item.ServerId}`, target: '_blank', rel: 'noopener' }, h('span', { html: icon.play }), 'Play in Jellyfin') : null,
+            MUSIC_TYPES.has(item.Type) ? [
+              h('button', { class: 'btn btn-primary', onclick: () => sendToMusic(item, true) }, h('span', { html: icon.play }), 'Play in Music'),
+              h('button', { class: 'btn', onclick: () => sendToMusic(item, false) }, h('span', { html: icon.plus }), 'Add to Music'),
+            ] : null,
+            link ? h('a', { class: `btn ${MUSIC_TYPES.has(item.Type) ? '' : 'btn-primary'}`, href: `${link}/web/index.html#/details?id=${item.Id}&serverId=${item.ServerId}`, target: '_blank', rel: 'noopener' }, h('span', { html: icon.play }), 'Play in Jellyfin') : null,
             playedBtn, favBtn,
             h('button', { class: 'btn', onclick: () => jellyfin.post(`Items/${item.Id}/Refresh`, null, { MetadataRefreshMode: 'FullRefresh', ImageRefreshMode: 'FullRefresh', ReplaceAllMetadata: false }).then(() => toast('Refreshing metadata', { body: item.Name, icon: appIcon.jellyfin })).catch(toastError) },
               h('span', { html: icon.refresh }), 'Refresh metadata')))),
       h('dl', { class: 'facts' }, facts.map(([k, v]) => [h('dt', {}, k), h('dd', {}, v)])));
   } catch (err) { clear(inner, h('button', { class: 'btn btn-icon sheet-close', html: icon.x, onclick: close }), errorState(err)); }
+}
+
+// Albums, songs, artists and playlists can be sent to the Music app.
+const MUSIC_TYPES = new Set(['MusicAlbum', 'Audio', 'Playlist', 'MusicArtist']);
+async function sendToMusic(item, play) {
+  try {
+    const uid = await jellyfinUserId();
+    const base = { IncludeItemTypes: 'Audio', Recursive: true, Fields: 'MediaSources' };
+    let items;
+    if (item.Type === 'Audio') items = [item];
+    else if (item.Type === 'Playlist') items = (await jellyfin.get(`Playlists/${item.Id}/Items`, { userId: uid, Fields: 'MediaSources' })).Items;
+    else if (item.Type === 'MusicArtist') items = (await jellyfin.get(`Users/${uid}/Items`, { ...base, ArtistIds: item.Id, SortBy: 'Album,ParentIndexNumber,IndexNumber' })).Items;
+    else items = (await jellyfin.get(`Users/${uid}/Items`, { ...base, ParentId: item.Id, SortBy: 'ParentIndexNumber,IndexNumber,SortName' })).Items
+      .sort((a, b) => ((a.ParentIndexNumber || 1) - (b.ParentIndexNumber || 1)) || ((a.IndexNumber || 0) - (b.IndexNumber || 0)));
+    const tracks = await fromJellyfin(items || []);
+    if (!tracks.length) return toast('No songs found', { type: 'error' });
+    openApp('music', { tracks, play, replace: play });
+  } catch (err) { toastError(err); }
 }
 
 // ---------------------------------------------------------------------------
