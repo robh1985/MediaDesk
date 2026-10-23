@@ -43,112 +43,167 @@ const rand = (a, b) => a + Math.random() * (b - a);
 const hsl = (h, s, l, a = 1) => `hsla(${((h % 360) + 360) % 360}, ${s}%, ${l}%, ${a})`;
 
 // ---------------------------------------------------------------------------
-// Flying Toasters (After Dark, 1989)
+// Flying Toasters (After Dark, 1989), in isometric 3D
 // ---------------------------------------------------------------------------
 
-function drawToaster(g, x, y, s, flap) {
-  g.save();
-  g.translate(x, y);
-  // back wing
-  drawWing(g, -0.05 * s, -0.18 * s, s, flap, -1);
-  // body
-  const body = g.createLinearGradient(0, -0.4 * s, 0, 0.4 * s);
-  body.addColorStop(0, '#fbfbfb'); body.addColorStop(0.35, '#c9ced6'); body.addColorStop(0.6, '#8d95a1'); body.addColorStop(1, '#dfe3e8');
-  g.fillStyle = body;
-  g.strokeStyle = '#3c4048';
-  g.lineWidth = Math.max(1, s * 0.03);
-  roundRect(g, -0.5 * s, -0.36 * s, s, 0.72 * s, 0.16 * s);
-  g.fill(); g.stroke();
-  // shine
-  g.fillStyle = 'rgba(255,255,255,.55)';
-  roundRect(g, -0.4 * s, -0.3 * s, 0.18 * s, 0.5 * s, 0.08 * s);
-  g.fill();
-  // slots
-  g.fillStyle = '#23262c';
-  roundRect(g, -0.32 * s, -0.42 * s, 0.26 * s, 0.1 * s, 0.03 * s); g.fill();
-  roundRect(g, 0.06 * s, -0.42 * s, 0.26 * s, 0.1 * s, 0.03 * s); g.fill();
-  // dial and lever
-  g.fillStyle = '#2b2e35';
-  g.beginPath(); g.arc(0.22 * s, 0.1 * s, 0.07 * s, 0, Math.PI * 2); g.fill();
-  g.fillStyle = '#e8e8e8';
-  roundRect(g, 0.46 * s, -0.12 * s, 0.12 * s, 0.07 * s, 0.03 * s); g.fill(); g.stroke();
-  // feet
-  g.fillStyle = '#2b2e35';
-  roundRect(g, -0.42 * s, 0.34 * s, 0.16 * s, 0.07 * s, 0.03 * s); g.fill();
-  roundRect(g, 0.26 * s, 0.34 * s, 0.16 * s, 0.07 * s, 0.03 * s); g.fill();
-  // front wing
-  drawWing(g, 0.05 * s, -0.12 * s, s, flap, 1);
-  g.restore();
+// World axes: x runs down-right on screen, y down-left and z up. The viewer looks along −(1, 1, 1),
+// so only faces pointing +x, +y or +z can be seen, and a larger x + y + z is nearer.
+const ISO_C = Math.cos(Math.PI / 6);
+const unit = (v) => { const l = Math.hypot(...v); return v.map((x) => x / l); };
+const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+const LIGHT = unit([0.35, 0.6, 1]);
+const VIEW = [1, 1, 1];
+
+const poly = (pts, n, color, more) => ({ pts, n, color, ...more });
+const lit = (c, n, twoSided, gain = 1) => {
+  let d = dot(n, LIGHT);
+  if (twoSided) d = Math.abs(d);
+  const k = (0.36 + 0.74 * Math.max(0, d)) * gain;
+  return `rgb(${Math.min(255, c[0] * k | 0)},${Math.min(255, c[1] * k | 0)},${Math.min(255, c[2] * k | 0)})`;
+};
+const ellipsePts = (cx, cy, rx, ry, n = 14) => Array.from({ length: n }, (_, i) => [cx + rx * Math.cos((i / n) * Math.PI * 2), cy + ry * Math.sin((i / n) * Math.PI * 2)]);
+
+// An axis-aligned box: only its three visible faces.
+function box(x0, y0, z0, dx, dy, dz, color, decals = {}, more = {}) {
+  const x1 = x0 + dx, y1 = y0 + dy, z1 = z0 + dz;
+  return [
+    poly([[x0, y0, z1], [x1, y0, z1], [x1, y1, z1], [x0, y1, z1]], [0, 0, 1], color, { decals: decals.top, ...more }),
+    poly([[x0, y1, z0], [x1, y1, z0], [x1, y1, z1], [x0, y1, z1]], [0, 1, 0], color, { decals: decals.front, ...more }),
+    poly([[x1, y0, z0], [x1, y1, z0], [x1, y1, z1], [x1, y0, z1]], [1, 0, 0], color, { decals: decals.side, ...more }),
+  ];
 }
 
-function drawWing(g, x, y, s, flap, side) {
-  g.save();
-  g.translate(x, y);
-  g.rotate(-0.6 - flap * 0.9);
-  g.scale(1, 0.55 + 0.45 * Math.cos(flap * 1.4));
-  g.fillStyle = side > 0 ? '#ffffff' : '#d9dde3';
-  g.strokeStyle = '#7a808a';
-  g.lineWidth = Math.max(1, s * 0.02);
-  for (let i = 0; i < 4; i++) {
-    g.beginPath();
-    g.ellipse(-0.1 * s - i * 0.13 * s, -0.08 * s + i * 0.05 * s, 0.32 * s - i * 0.05 * s, 0.09 * s, -0.25, 0, Math.PI * 2);
-    g.fill(); g.stroke();
+const CHROME = [206, 212, 222], DARK = [44, 47, 54], FEATHER = [250, 250, 252];
+const CRUST = [150, 88, 38], CRUMB = [238, 192, 118];
+
+// The toaster's body never changes; only its wings move.
+const TOASTER_BODY = (() => {
+  const W = 0.31, L = 0.5, H = 0.36, top = H + 0.001, side = W + 0.001;
+  const slot = (x) => ({ pts: [[x, -0.38, top], [x + 0.11, -0.38, top], [x + 0.11, 0.38, top], [x, 0.38, top]], color: '#1b1d22' });
+  const dial = { pts: ellipsePts(0.24, -0.06, 0.085, 0.085).map(([y, z]) => [side, y, z]), color: '#2a2d33' };
+  const leverSlot = { pts: [[side, -0.28, -0.22], [side, -0.23, -0.22], [side, -0.23, 0.24], [side, -0.28, 0.24]], color: '#1b1d22' };
+  const shine = (n) => ({ pts: n === 'front' ? [[-0.24, L + 0.001, -0.28], [-0.16, L + 0.001, -0.28], [-0.16, L + 0.001, 0.28], [-0.24, L + 0.001, 0.28]]
+    : [[side, 0.36, -0.28], [side, 0.42, -0.28], [side, 0.42, 0.28], [side, 0.36, 0.28]], color: 'rgba(255,255,255,.55)' });
+  const parts = box(-W, -L, -H, W * 2, L * 2, H * 2, CHROME, { top: [slot(-0.17), slot(0.06)], side: [shine('side'), leverSlot, dial], front: [shine('front')] }, { chrome: true });
+  parts.push(...box(W, -0.33, 0.1, 0.11, 0.14, 0.08, DARK));                       // lever knob
+  for (const [x, y] of [[-W, -L], [W - 0.1, -L], [-W, L - 0.1], [W - 0.1, L - 0.1]]) parts.push(...box(x, y, -H - 0.06, 0.1, 0.1, 0.06, DARK));
+  return parts;
+})();
+
+// Four overlapping feathers, hinged along the top edge of one side and flapping about the y axis.
+function wing(sgn, angle) {
+  const base = [sgn * 0.3, 0.02, 0.2];
+  const out = [sgn * Math.cos(angle), 0, Math.sin(angle)];
+  const n = [out[2] * sgn, 0, -out[0] * sgn];
+  const at = (u, v) => [base[0] + v * out[0], base[1] + u, base[2] + v * out[2]];
+  const depth = dot(at(0, 0.4), VIEW);
+  const dir = unit([-0.42, 1]), perp = [dir[1], -dir[0]];
+  const feathers = [];
+  for (let i = 3; i >= 0; i--) {
+    const uc = 0.3 - i * 0.15, len = 0.95 - i * 0.16, w = 0.12;
+    const pts = [];
+    for (let k = 0; k < 16; k++) {
+      const a = (k / 16) * Math.PI * 2, along = 0.5 * len * (1 - Math.cos(a)), across = w * Math.sin(a) * (1 - 0.35 * (1 - Math.cos(a)) / 2);
+      pts.push(at(uc + dir[0] * along + perp[0] * across, dir[1] * along + perp[1] * across));
+    }
+    feathers.push(poly(pts, n, FEATHER, { twoSided: true, depth: depth + (3 - i) * 1e-3, stroke: 'rgba(90,96,108,.9)' }));
   }
-  g.restore();
+  return feathers;
 }
 
-function drawToast(g, x, y, s, spin) {
-  g.save();
-  g.translate(x, y);
-  g.rotate(spin);
-  const w = 0.62 * s, h = 0.66 * s;
-  g.fillStyle = '#8a5523';
-  breadPath(g, w, h); g.fill();
-  const inner = g.createRadialGradient(0, 0.02 * s, 0.05 * s, 0, 0, 0.36 * s);
-  inner.addColorStop(0, '#f2c77c'); inner.addColorStop(1, '#c98b3f');
-  g.fillStyle = inner;
-  breadPath(g, w * 0.82, h * 0.8); g.fill();
-  g.restore();
+// A slice of toast seen edge-on, tumbling about the x axis.
+const TOAST_PROFILE = (() => {
+  const pts = [[0.3, -0.34], [0.3, 0.1]];
+  for (let i = 0; i <= 16; i++) { const a = -0.15 + (i / 16) * (Math.PI + 0.3); pts.push([0.36 * Math.cos(a), 0.15 + 0.22 * Math.sin(a)]); }
+  pts.push([-0.3, 0.1], [-0.3, -0.34]);
+  return pts;
+})();
+function toast(spin) {
+  const c = Math.cos(spin), s = Math.sin(spin), T = 0.055;
+  const rot = ([y, z]) => [y * c - z * s, y * s + z * c];
+  const prof = TOAST_PROFILE.map(rot);
+  const inner = TOAST_PROFILE.map(([y, z]) => rot([y * 0.8, (z + 0.03) * 0.8 - 0.03]));
+  const polys = [poly(prof.map(([y, z]) => [T, y, z]), [1, 0, 0], CRUST, { decals: [{ pts: inner.map(([y, z]) => [T + 0.001, y, z]), color: CRUMB, lit: true }] })];
+  for (let i = 0; i < prof.length; i++) {
+    const [y1, z1] = prof[i], [y2, z2] = prof[(i + 1) % prof.length];
+    let n = unit([0, z2 - z1, -(y2 - y1)]);
+    if (dot(n, [0, (y1 + y2) / 2, (z1 + z2) / 2]) < 0) n = n.map((v) => -v);
+    if (dot(n, VIEW) <= 0) continue;
+    polys.push(poly([[-T, y1, z1], [-T, y2, z2], [T, y2, z2], [T, y1, z1]], n, CRUST, { gain: 0.85 }));
+  }
+  return polys;
 }
-function breadPath(g, w, h) {
-  g.beginPath();
-  g.moveTo(-w / 2, h / 2);
-  g.lineTo(-w / 2, -h * 0.15);
-  g.bezierCurveTo(-w * 0.62, -h * 0.62, w * 0.62, -h * 0.62, w / 2, -h * 0.15);
-  g.lineTo(w / 2, h / 2);
-  g.closePath();
-}
-function roundRect(g, x, y, w, h, r) {
-  g.beginPath();
-  g.moveTo(x + r, y);
-  g.arcTo(x + w, y, x + w, y + h, r); g.arcTo(x + w, y + h, x, y + h, r);
-  g.arcTo(x, y + h, x, y, r); g.arcTo(x, y, x + w, y, r);
-  g.closePath();
+
+function drawModel(g, polys, sx, sy, S) {
+  const proj = ([x, y, z]) => [sx + (x - y) * ISO_C * S, sy + ((x + y) / 2 - z) * S];
+  const visible = polys.filter((p) => p.twoSided || dot(p.n, VIEW) > 0);
+  for (const p of visible) p.d = p.depth ?? p.pts.reduce((a, q) => a + q[0] + q[1] + q[2], 0) / p.pts.length;
+  visible.sort((a, b) => a.d - b.d);
+  g.lineJoin = 'round';
+  g.lineWidth = Math.max(1, S * 0.012);
+  for (const p of visible) {
+    const pts = p.pts.map(proj);
+    const path = () => { g.beginPath(); pts.forEach(([x, y], i) => (i ? g.lineTo(x, y) : g.moveTo(x, y))); g.closePath(); };
+    path();
+    if (p.chrome) {
+      // A brushed-metal sweep across each face.
+      const [a, , c] = pts, grad = g.createLinearGradient(a[0], a[1], c[0], c[1]);
+      grad.addColorStop(0, lit(p.color, p.n, false, 1.12)); grad.addColorStop(0.45, lit(p.color, p.n, false, 0.82));
+      grad.addColorStop(0.7, lit(p.color, p.n, false, 1.05)); grad.addColorStop(1, lit(p.color, p.n, false, 0.9));
+      g.fillStyle = grad;
+    } else g.fillStyle = lit(p.color, p.n, p.twoSided, p.gain);
+    g.fill();
+    g.strokeStyle = p.stroke || 'rgba(20,22,28,.75)';
+    g.stroke();
+    for (const d of p.decals || []) {
+      const dp = d.pts.map(proj);
+      g.beginPath(); dp.forEach(([x, y], i) => (i ? g.lineTo(x, y) : g.moveTo(x, y))); g.closePath();
+      g.fillStyle = d.lit ? lit(d.color, p.n) : d.color;
+      g.fill();
+    }
+  }
 }
 
 function flyingToasters(container) {
   const { ctx: g, size, dispose } = canvasIn(container);
-  const scale = Math.max(48, Math.min(size.w, size.h) / 9);
+  const S = Math.max(56, Math.min(size.w, size.h) / 7.5);
+  // Everything flies along +y while sinking a little, which reads as down and to the left.
+  const VX = -ISO_C, VY = 0.5 + 0.25;
+  const place = (o, X, Y) => {
+    // Pick a world position that lands on screen point (X, Y) at a random depth.
+    const D = rand(-6, 6), a = (Y / S + D) / 1.5, diff = X / (S * ISO_C);
+    o.x = (a + diff) / 2; o.y = (a - diff) / 2; o.z = D - a;
+  };
   const spawn = (o, initial) => {
-    o.speed = rand(50, 95) * (scale / 70);
-    if (initial) { o.x = rand(0, size.w * 1.3); o.y = rand(-size.h * 0.3, size.h); }
-    else if (Math.random() < 0.5) { o.x = size.w + scale; o.y = rand(-scale, size.h * 0.7); }
-    else { o.x = rand(size.w * 0.2, size.w + scale); o.y = -scale; }
+    o.speed = rand(0.75, 1.35);
+    o.size = rand(0.85, 1.1);
+    if (initial) place(o, rand(0, size.w * 1.2), rand(-size.h * 0.2, size.h));
+    else if (Math.random() < (size.h * ISO_C) / (size.h * ISO_C + size.w * VY)) place(o, size.w + S, rand(-S, size.h * 0.8));
+    else place(o, rand(size.w * 0.1, size.w + S), -S);
     return o;
   };
   const items = [];
-  const count = Math.round((size.w * size.h) / 70000) + 8;
-  for (let i = 0; i < count; i++) items.push(spawn({ toast: i % 4 === 3, phase: rand(0, 6), spin: rand(-0.3, 0.3) }, true));
-  const stop = loop((dt, t) => {
+  const count = Math.round((size.w * size.h) / 100000) + 6;
+  for (let i = 0; i < count; i++) items.push(spawn({ toast: i % 4 === 3, phase: rand(0, 6), spin: rand(0, 6), spinRate: rand(-1.4, 1.4) }, true));
+  const stop = loop((dt) => {
     g.fillStyle = '#000';
     g.fillRect(0, 0, size.w, size.h);
-    items.sort((a, b) => a.y - b.y);
     for (const o of items) {
-      o.x -= o.speed * dt;
-      o.y += o.speed * dt * 0.55;
-      if (o.x < -scale * 1.5 || o.y > size.h + scale * 1.5) spawn(o, false);
-      if (o.toast) drawToast(g, o.x, o.y, scale * 0.85, o.spin);
-      else drawToaster(g, o.x, o.y, scale, Math.sin(t * 7 + o.phase) * 0.5 + 0.5);
+      o.y += o.speed * dt;
+      o.z -= o.speed * dt * 0.25;
+      o.phase += dt * 6.5;
+      o.spin += o.spinRate * dt;
+      o.sx = (o.x - o.y) * ISO_C * S; o.sy = ((o.x + o.y) / 2 - o.z) * S;
+      if (o.sx < -S * 1.5 || o.sy > size.h + S * 1.5) spawn(o, false);
+    }
+    items.sort((a, b) => (a.x + a.y + a.z) - (b.x + b.y + b.z));
+    for (const o of items) {
+      const s = S * o.size;
+      if (o.toast) drawModel(g, toast(o.spin), o.sx, o.sy, s * 1.05);
+      else {
+        const flap = -0.45 + 1.6 * (0.5 + 0.5 * Math.sin(o.phase));
+        drawModel(g, [...TOASTER_BODY, ...wing(1, flap), ...wing(-1, flap)], o.sx, o.sy, s);
+      }
     }
   });
   return () => { stop(); dispose(); };
