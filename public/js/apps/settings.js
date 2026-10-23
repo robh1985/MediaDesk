@@ -1,9 +1,10 @@
 // Settings: a page per app (connection, notifications, preferences), plus general options.
 
-import { h, clear, toast, toastError, spinner, sidebarLayout } from '../ui.js';
+import { h, clear, toast, toastError, spinner, sidebarLayout, confirmDialog, contextMenu } from '../ui.js';
 import { icon, appIcon } from '../icons.js';
 import { portal, state, radarr, sonarr, nzbget, jellyfin, isConfigured } from '../api.js';
-import { applyAppearance, appearance, WALLPAPERS, ACCENTS } from '../desktop.js';
+import { applyAppearance, appearance, WALLPAPERS, ACCENTS, WALLPAPER_FITS, useCustomWallpaper, setWallpaperFromFile } from '../desktop.js';
+import { pickFile } from '../fileapi.js';
 import { SCREENSAVERS } from '../savers.js';
 import * as screensaver from '../screensaver.js';
 
@@ -342,8 +343,7 @@ function renderAppearance(container) {
     h('div', { class: 'swatches' }, Object.entries(ACCENTS).map(([k, v]) =>
       h('button', { class: `swatch ${a.accent === k ? 'active' : ''}`, title: k, style: { background: v }, onclick: () => set({ accent: k }) }))),
     h('h3', { class: 'section-title' }, 'Wallpaper'),
-    h('div', { class: 'wallpapers' }, Object.entries(WALLPAPERS).map(([k, w]) =>
-      h('button', { class: `wallpaper-opt ${a.wallpaper === k ? 'active' : ''}`, style: { background: w.css }, onclick: () => set({ wallpaper: k }) }, h('span', {}, w.name)))),
+    wallpaperPicker(a, set),
     h('h3', { class: 'section-title' }, 'Desktop'),
     h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: a.widgets, onchange: (e) => set({ widgets: e.target.checked }) }), ' Show widgets on the desktop'),
     h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: a.icons, onchange: (e) => set({ icons: e.target.checked }) }), ' Show desktop icons'),
@@ -352,6 +352,80 @@ function renderAppearance(container) {
       Object.keys(localStorage).filter((k) => k.startsWith('mediadesk.win.')).forEach((k) => localStorage.removeItem(k));
       toast('Window positions reset');
     } }, 'Reset window positions')));
+}
+
+// Built-in wallpapers, your own pictures, and how a picture fills the screen.
+function wallpaperPicker(a, set) {
+  const grid = h('div', { class: 'wallpapers' });
+  const fitRow = h('div', { class: 'wp-fit' });
+  const status = h('div', { class: 'small muted wp-status' });
+  const isImage = (e) => /\.(jpe?g|png|webp|gif|avif|bmp|svg)$/i.test(e.name);
+  let customs = [];
+
+  const upload = async (file) => {
+    status.textContent = `Uploading ${file.name}…`;
+    try {
+      const res = await fetch(`/portal/wallpapers/upload?${new URLSearchParams({ name: file.name })}`, {
+        method: 'POST', credentials: 'same-origin', headers: { 'X-MediaDesk': '1', 'Content-Type': file.type || 'application/octet-stream' }, body: file,
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      status.textContent = '';
+      await useCustomWallpaper(data);
+      set({});
+    } catch (err) { status.textContent = ''; toastError(err, 'Could not add the picture'); }
+  };
+  const fromDevice = () => {
+    const input = h('input', { type: 'file', accept: 'image/*', style: { display: 'none' } });
+    input.addEventListener('change', () => { if (input.files[0]) upload(input.files[0]); input.remove(); });
+    document.body.append(input);
+    input.click();
+  };
+  const fromServer = async () => {
+    const pick = await pickFile({ mode: 'open', title: 'Choose a picture', accept: isImage });
+    if (!pick) return;
+    status.textContent = `Adding ${pick.name}…`;
+    try { await setWallpaperFromFile(pick.root, pick.path); status.textContent = ''; set({}); }
+    catch (err) { status.textContent = ''; toastError(err, 'Could not use that picture'); }
+  };
+  const remove = async (w) => {
+    if (!(await confirmDialog({ title: 'Delete wallpaper?', message: `“${w.name}” will be removed from your wallpapers.`, confirm: 'Delete', danger: true }))) return;
+    try {
+      const res = await fetch('/portal/wallpapers/delete', { method: 'POST', credentials: 'same-origin', headers: { 'X-MediaDesk': '1', 'Content-Type': 'application/json' }, body: JSON.stringify({ id: w.id }) });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || `HTTP ${res.status}`);
+      const cur = appearance();
+      set(cur.wallpaper === 'custom' && cur.customWallpaper?.id === w.id ? { wallpaper: 'aurora', customWallpaper: null } : {});
+    } catch (err) { toastError(err, 'Could not delete'); }
+  };
+
+  const draw = () => {
+    clear(grid,
+      Object.entries(WALLPAPERS).map(([k, w]) =>
+        h('button', { class: `wallpaper-opt ${a.wallpaper === k ? 'active' : ''}`, style: { background: w.css }, onclick: () => set({ wallpaper: k }) }, h('span', {}, w.name))),
+      customs.map((w) => h('div', { class: `wallpaper-opt wp-custom ${a.wallpaper === 'custom' && a.customWallpaper?.id === w.id ? 'active' : ''}`, role: 'button', tabindex: '0', title: w.name,
+        onclick: async () => { await useCustomWallpaper(w); set({}); },
+        onkeydown: async (e) => { if (e.key === 'Enter') { await useCustomWallpaper(w); set({}); } } },
+      h('img', { src: w.url, alt: '', loading: 'lazy' }), h('span', {}, w.name),
+      h('button', { class: 'wp-delete', title: 'Delete', 'aria-label': `Delete ${w.name}`, html: icon.x, onclick: (e) => { e.stopPropagation(); remove(w); } }))),
+      h('button', { class: 'wallpaper-opt wp-add', onclick: (e) => {
+        const r = e.currentTarget.getBoundingClientRect();
+        contextMenu(r.left, r.bottom + 4, [
+          { label: 'From this device…', icon: icon.upload || icon.plus, action: fromDevice },
+          { label: 'From shared folders…', icon: icon.folder, disabled: !state.config.files?.enabled, action: fromServer },
+        ]);
+      } }, h('span', { class: 'wp-add-icon', html: icon.plus }), h('span', {}, 'Add picture…')));
+    fitRow.hidden = a.wallpaper !== 'custom';
+    clear(fitRow, h('span', { class: 'small muted' }, 'Picture position'),
+      h('div', { class: 'seg' }, Object.entries(WALLPAPER_FITS).map(([k, [label]]) =>
+        h('button', { class: `seg-btn ${(a.wallpaperFit || 'fill') === k ? 'active' : ''}`, onclick: () => set({ wallpaperFit: k }) }, label))));
+  };
+  draw();
+  fetch('/portal/wallpapers', { credentials: 'same-origin' }).then((r) => (r.ok ? r.json() : [])).then((list) => { customs = list; draw(); }).catch(() => {});
+  // Drop a picture onto the grid to add it.
+  grid.addEventListener('dragover', (e) => { if (e.dataTransfer?.types.includes('Files')) { e.preventDefault(); grid.classList.add('drop'); } });
+  grid.addEventListener('dragleave', () => grid.classList.remove('drop'));
+  grid.addEventListener('drop', (e) => { e.preventDefault(); grid.classList.remove('drop'); const f = [...(e.dataTransfer?.files || [])].find((x) => x.type.startsWith('image/')); if (f) upload(f); });
+  return h('div', {}, grid, fitRow, status, h('p', { class: 'small muted' }, 'Your pictures are stored on the MediaDesk server, so every device can use them.'));
 }
 
 function renderScreensaver(container) {

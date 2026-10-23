@@ -1,6 +1,6 @@
 FROM node:22-alpine
 WORKDIR /app
-COPY package.json server.js files.js appsettings.js notify.js mock.js ./
+COPY package.json server.js files.js appsettings.js notify.js mock.js wallpapers.js ./
 COPY public ./public
 ENV NODE_ENV=production PORT=8080 CONFIG_PATH=/config/config.json
 VOLUME /config

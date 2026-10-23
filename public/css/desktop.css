@@ -1350,3 +1350,22 @@ button.notes-st:hover { background: var(--hover); color: var(--text); }
   .fp-roots { width: auto; flex-direction: row; overflow-x: auto; flex: none; }
   .fp-root { flex: none; }
 }
+
+/* Custom wallpapers */
+.wp-custom { background: var(--surface-3); }
+.wp-custom img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.wp-custom::after { content: ""; position: absolute; inset: auto 0 0 0; height: 45%; background: linear-gradient(transparent, rgba(0, 0, 0, .45)); pointer-events: none; }
+.wp-custom span { z-index: 1; max-width: calc(100% - 16px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wp-delete { position: absolute; top: 5px; right: 5px; z-index: 2; width: 24px; height: 24px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 50%; background: rgba(0, 0, 0, .55); color: #fff; cursor: pointer; opacity: 0; transition: opacity .15s; }
+.wp-delete svg { width: 13px; height: 13px; }
+.wp-custom:hover .wp-delete, .wp-custom:focus-within .wp-delete { opacity: 1; }
+@media (pointer: coarse) { .wp-delete { opacity: 1; } }
+.wp-add { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; background: var(--surface-2); border: 2px dashed var(--border-strong); color: var(--text-muted); }
+.wp-add span { position: static; color: inherit; text-shadow: none; }
+.wp-add-icon svg { width: 22px; height: 22px; }
+.wp-add:hover { color: var(--accent); border-color: var(--accent); }
+.wallpapers.drop { outline: 2px dashed var(--accent); outline-offset: 4px; border-radius: 12px; }
+.wp-fit { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 12px 0 0; }
+.wp-fit[hidden] { display: none; }
+.wp-status:empty { display: none; }
+.wp-status { margin-top: 8px; }

@@ -21,6 +21,7 @@ applyAppearance();
 
 async function boot() {
   state.config = await portal.config();
+  applyAppearance();
   initWM(document.getElementById('windows'));
   startDesktop();
   startLive();

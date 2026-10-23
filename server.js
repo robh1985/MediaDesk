@@ -12,6 +12,7 @@ const { Readable } = require('node:stream');
 const files = require('./files');
 const appSettings = require('./appsettings');
 const { createNotifier } = require('./notify');
+const { createWallpapers } = require('./wallpapers');
 
 const ROOT = __dirname;
 
@@ -403,6 +404,7 @@ async function testService(svc) {
 // ---------------------------------------------------------------------------
 
 const mock = MOCK ? require('./mock') : null;
+const wallpapers = createWallpapers(MOCK ? path.join(require('node:os').tmpdir(), 'mediadesk-demo-wallpapers') : path.join(path.dirname(CONFIG_PATH), 'wallpapers'));
 
 // --- Notifications ------------------------------------------------------------
 
@@ -480,6 +482,16 @@ async function handle(req, res) {
   const lockedMusic = req.method === 'GET' && p.startsWith('/api/jellyfin/Audio/') && isAuthed(req, { ignoreLock: true });
   if (!isAuthed(req) && !lockedMusic) return sendJson(res, 401, { error: isLocked(req) ? 'MediaDesk is locked' : 'Not logged in', locked: isLocked(req) });
 
+  if (p === '/portal/wallpapers' || p.startsWith('/portal/wallpapers/')) {
+    return wallpapers.handle(req, res, url, {
+      sendJson, readJson,
+      resolveSharedFile: (root, rel) => {
+        const status = filesStatus();
+        if (!status.enabled) throw Object.assign(new Error('Shared folders are not set up'), { status: 403 });
+        return files.resolveShared(config, root, rel);
+      },
+    });
+  }
   if (p.startsWith('/portal/files/')) {
     const status = filesStatus();
     if (!status.enabled) {

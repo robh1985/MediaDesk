@@ -24,7 +24,10 @@ export const WALLPAPERS = {
   daylight: { name: 'Daylight', css: 'radial-gradient(at 15% 10%, #bae6fd 0, transparent 50%), radial-gradient(at 85% 20%, #fbcfe8 0, transparent 45%), radial-gradient(at 60% 90%, #c7d2fe 0, transparent 55%), #e0e7ff' },
 };
 export const ACCENTS = { blue: '#3b82f6', violet: '#8b5cf6', pink: '#ec4899', orange: '#f97316', green: '#22c55e', teal: '#14b8a6', graphite: '#64748b' };
-const DEFAULTS = { theme: 'auto', accent: 'blue', wallpaper: 'aurora', widgets: true, icons: true, reduceMotion: false };
+const DEFAULTS = { theme: 'auto', accent: 'blue', wallpaper: 'aurora', wallpaperFit: 'fill', customWallpaper: null, widgets: true, icons: true, reduceMotion: false };
+// How a custom picture fills the screen, as in Windows: [background-size, background-repeat].
+export const WALLPAPER_FITS = { fill: ['Fill', 'cover', 'no-repeat'], fit: ['Fit', 'contain', 'no-repeat'], stretch: ['Stretch', '100% 100%', 'no-repeat'], center: ['Centre', 'auto', 'no-repeat'], tile: ['Tile', 'auto', 'repeat'] };
+const THUMB_KEY = 'mediadesk.wallpaperThumb';
 
 export function appearance() {
   try { return { ...DEFAULTS, ...JSON.parse(localStorage.getItem('mediadesk.appearance') || '{}') }; } catch { return { ...DEFAULTS }; }
@@ -40,10 +43,57 @@ export function applyAppearance(a = appearance()) {
   root.classList.toggle('hide-widgets', !a.widgets);
   root.classList.toggle('hide-icons', !a.icons);
   const wp = document.getElementById('wallpaper');
-  if (wp) wp.style.background = (WALLPAPERS[a.wallpaper] || WALLPAPERS.aurora).css;
+  if (wp) paintWallpaper(wp, a);
   document.querySelector('meta[name="theme-color"]')?.setAttribute('content', dark ? '#111827' : '#f8fafc');
 }
 matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => applyAppearance());
+
+function paintWallpaper(wp, a) {
+  const custom = a.wallpaper === 'custom' && a.customWallpaper?.url;
+  if (!custom) { wp.removeAttribute('style'); wp.style.background = (WALLPAPERS[a.wallpaper] || WALLPAPERS.aurora).css; return; }
+  const [, size, repeat] = WALLPAPER_FITS[a.wallpaperFit] || WALLPAPER_FITS.fill;
+  let thumb = null;
+  try { const t = JSON.parse(localStorage.getItem(THUMB_KEY)); if (t?.id === a.customWallpaper.id) thumb = t; } catch { /* none */ }
+  // The small saved copy sits underneath, so the picture still shows on the lock screen before
+  // signing in (when the full-size file can't be fetched yet).
+  const under = thumb && (size === 'cover' || size === '100% 100%');
+  wp.style.background = '';
+  wp.style.backgroundColor = thumb?.color || '#16181d';
+  wp.style.backgroundImage = `url("${a.customWallpaper.url}")${under ? `, url("${thumb.data}")` : ''}`;
+  wp.style.backgroundSize = under ? `${size}, ${size}` : size;
+  wp.style.backgroundRepeat = under ? `${repeat}, ${repeat}` : repeat;
+  wp.style.backgroundPosition = 'center';
+}
+
+// Use an uploaded picture ({ id, url }) as the wallpaper.
+export async function useCustomWallpaper(entry, fit) {
+  try {
+    const img = new Image();
+    img.src = entry.url;
+    await img.decode();
+    const w = 480, hgt = Math.max(1, Math.round((img.naturalHeight / Math.max(1, img.naturalWidth)) * w)) || 270;
+    const c = Object.assign(document.createElement('canvas'), { width: w, height: hgt });
+    const g = c.getContext('2d');
+    g.drawImage(img, 0, 0, w, hgt);
+    const px = g.getImageData(0, 0, w, hgt).data;
+    let r = 0, gr = 0, b = 0, n = 0;
+    for (let i = 0; i < px.length; i += 4 * 97) { r += px[i]; gr += px[i + 1]; b += px[i + 2]; n++; }
+    const color = `rgb(${Math.round(r / n)}, ${Math.round(gr / n)}, ${Math.round(b / n)})`;
+    localStorage.setItem(THUMB_KEY, JSON.stringify({ id: entry.id, data: c.toDataURL('image/jpeg', 0.72), color }));
+  } catch { /* the wallpaper still works without a thumbnail */ }
+  applyAppearance({ ...appearance(), wallpaper: 'custom', customWallpaper: { id: entry.id, url: entry.url }, ...(fit ? { wallpaperFit: fit } : {}) });
+}
+
+// Copy a picture from a shared folder into the wallpapers and use it.
+export async function setWallpaperFromFile(root, path) {
+  const res = await fetch('/portal/wallpapers/from-file', {
+    method: 'POST', credentials: 'same-origin', headers: { 'X-MediaDesk': '1', 'Content-Type': 'application/json' }, body: JSON.stringify({ root, path }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+  await useCustomWallpaper(data);
+  return data;
+}
 
 export function openWebView(svc) {
   if (!serviceLink(svc)) return toast('No URL configured for this service', { type: 'error' });
@@ -72,7 +122,8 @@ export function startDesktop() {
       { label: 'Overview', icon: icon.grid, action: () => openApp('dashboard') },
       { label: 'Search…', icon: icon.search, action: openLauncher },
       '-',
-      { label: 'Next wallpaper', icon: icon.image, action: () => applyAppearance({ ...a, wallpaper: keys[(keys.indexOf(a.wallpaper) + 1) % keys.length] }) },
+      { label: 'Change wallpaper…', icon: icon.image, action: () => openApp('settings', { tab: 'appearance' }) },
+      { label: 'Next wallpaper', icon: icon.refresh, action: () => applyAppearance({ ...a, wallpaper: keys[(keys.indexOf(a.wallpaper) + 1) % keys.length] }) },
       { label: a.widgets ? 'Hide widgets' : 'Show widgets', icon: icon.grid, action: () => applyAppearance({ ...a, widgets: !a.widgets }) },
       { label: 'Settings…', icon: icon.sliders, action: () => openApp('settings') },
     ]);

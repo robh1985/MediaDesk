@@ -455,4 +455,13 @@ async function validateRoots(list) {
   return { roots: [...new Set(out)], errors };
 }
 
-module.exports = { handle, rootList, validateRoots };
+// For other modules (e.g. wallpapers): the absolute path of an existing file inside a shared folder.
+async function resolveShared(config, rootId, rel) {
+  try {
+    const abs = await resolveIn(getRoot(config, rootId), rel);
+    if (!(await fsp.stat(abs)).isFile()) throw new FileError(400, 'That is not a file');
+    return abs;
+  } catch (err) { throw toFileError(err); }
+}
+
+module.exports = { handle, rootList, validateRoots, resolveShared };

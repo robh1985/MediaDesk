@@ -5,6 +5,7 @@ import { icon, appIcon } from '../icons.js';
 import { state, appPref } from '../api.js';
 import { openApp } from '../wm.js';
 import { fromFiles } from './music-engine.js';
+import { setWallpaperFromFile } from '../desktop.js';
 
 // --- API -----------------------------------------------------------------------
 
@@ -438,6 +439,7 @@ class FileBrowser {
       { label: e.dir ? 'Open' : 'Open / preview', icon: e.dir ? icon.folder : icon.eye, disabled: many, action: () => this.open(e) },
       !e.dir ? { label: 'Download', icon: icon.download, action: () => this.download() } : null,
       !e.dir ? { label: 'Open in Notes', icon: appIcon.notes, disabled: many, action: () => openApp('notes', { root: this.root, path: join(this.path, e.name) }) } : null,
+      kindOf(e) === 'image' && extOf(e.name) !== 'ico' && extOf(e.name) !== 'tbn' ? { label: 'Set as desktop wallpaper', icon: icon.image, disabled: many, action: () => this.setWallpaper(e) } : null,
       ...(this.selectedAudio().length ? ['-',
         { label: 'Play in Music', icon: icon.play, action: () => this.toMusic(true) },
         { label: 'Add to Music playlist', icon: icon.plus, action: () => this.toMusic(false) }] : []),
@@ -449,6 +451,13 @@ class FileBrowser {
       '-',
       { label: many ? `Delete ${this.selected.size} items` : 'Delete', icon: icon.trash, action: () => this.remove() },
     ].filter(Boolean));
+  }
+
+  async setWallpaper(e) {
+    try {
+      await setWallpaperFromFile(this.root, join(this.path, e.name));
+      toast('Wallpaper changed', { body: e.name, type: 'success', icon: appIcon.files, timeout: 2500 });
+    } catch (err) { toastError(err, 'Could not set the wallpaper'); }
   }
 
   selectedAudio() {
