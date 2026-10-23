@@ -54,7 +54,7 @@ export function openWebView(svc) {
 // Boot the desktop
 // ---------------------------------------------------------------------------
 
-const DOCK_APPS = ['dashboard', 'radarr', 'sonarr', 'nzbget', 'jellyfin', 'music', 'files', 'calculator'];
+const DOCK_APPS = ['dashboard', 'radarr', 'sonarr', 'nzbget', 'jellyfin', 'music', 'files', 'notes', 'calculator'];
 
 export function startDesktop() {
   buildMenuBar();
@@ -507,7 +507,7 @@ function setupShortcuts() {
   document.addEventListener('keydown', (e) => {
     const typing = e.target.closest('input, textarea, select, [contenteditable]');
     if ((e.ctrlKey || e.metaKey) && (e.code === 'Space' || e.key.toLowerCase() === 'k')) { e.preventDefault(); openLauncher(); }
-    else if (e.key === '/' && !typing) { e.preventDefault(); openLauncher(); }
+    else if (e.key === '/' && !typing && !e.ctrlKey && !e.metaKey && !e.altKey) { e.preventDefault(); openLauncher(); }
     else if (e.altKey && e.key.toLowerCase() === 'w') { const w = focusedWindow(); if (w) { e.preventDefault(); w.close(); } }
   });
 }

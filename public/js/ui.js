@@ -1,6 +1,7 @@
 // Small DOM + formatting helpers shared by every app.
 
 import { state } from './api.js';
+import { icon } from './icons.js';
 
 export function h(tag, attrs = {}, ...children) {
   const el = document.createElement(tag);
@@ -133,8 +134,9 @@ export function contextMenu(x, y, items) {
   const menu = h('div', { class: 'context-menu' },
     items.map((it) => it === '-' ? h('div', { class: 'menu-sep' }) :
       h('button', { class: 'menu-item', disabled: it.disabled, onclick: () => { closeMenu(); it.action(); } },
-        it.icon ? h('span', { class: 'menu-icon', html: it.icon }) : h('span', { class: 'menu-icon' }),
-        it.label)),
+        it.icon || it.checked ? h('span', { class: 'menu-icon', html: it.checked ? icon.check : it.icon }) : h('span', { class: 'menu-icon' }),
+        h('span', { class: 'menu-label' }, it.label),
+        it.shortcut ? h('span', { class: 'menu-shortcut' }, it.shortcut) : null)),
   );
   document.body.append(menu);
   const r = menu.getBoundingClientRect();

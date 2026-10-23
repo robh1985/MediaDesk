@@ -437,6 +437,7 @@ class FileBrowser {
     contextMenu(ev.clientX, ev.clientY, [
       { label: e.dir ? 'Open' : 'Open / preview', icon: e.dir ? icon.folder : icon.eye, disabled: many, action: () => this.open(e) },
       !e.dir ? { label: 'Download', icon: icon.download, action: () => this.download() } : null,
+      !e.dir ? { label: 'Open in Notes', icon: appIcon.notes, disabled: many, action: () => openApp('notes', { root: this.root, path: join(this.path, e.name) }) } : null,
       ...(this.selectedAudio().length ? ['-',
         { label: 'Play in Music', icon: icon.play, action: () => this.toMusic(true) },
         { label: 'Add to Music playlist', icon: icon.plus, action: () => this.toMusic(false) }] : []),
@@ -668,6 +669,7 @@ class FileBrowser {
     const kind = kindOf(e);
     const p = join(this.path, e.name);
     const root = this.root;
+    if (kind === 'text') { openApp('notes', { root, path: p }); return; }
     this.win.body.querySelector('.sheet')?.remove();
     const close = () => { sheet.classList.add('leaving'); setTimeout(() => sheet.remove(), 200); this.list.focus({ preventScroll: true }); };
     const body = h('div', { class: 'fm-preview-body' });

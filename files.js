@@ -11,7 +11,7 @@ const crypto = require('node:crypto');
 const { Transform } = require('node:stream');
 const { pipeline } = require('node:stream/promises');
 
-const TEXT_LIMIT = 2 * 1024 * 1024;
+const TEXT_LIMIT = 10 * 1024 * 1024;
 const TEXT_EXT = new Set(['.txt', '.nfo', '.srt', '.ass', '.ssa', '.sub', '.vtt', '.log', '.md', '.json', '.xml', '.yml', '.yaml',
   '.ini', '.conf', '.cfg', '.config', '.csv', '.tsv', '.sh', '.bat', '.cmd', '.ps1', '.py', '.js', '.ts', '.css', '.html', '.htm',
   '.env', '.properties', '.toml', '.m3u', '.m3u8', '.cue', '.sfv', '.nzb', '.gitignore', '.dockerfile']);
@@ -191,7 +191,7 @@ async function readText(root, rel) {
   const abs = await resolveIn(root, rel);
   const st = await fsp.stat(abs);
   if (st.isDirectory()) throw new FileError(400, 'That is a folder');
-  if (st.size > TEXT_LIMIT) throw new FileError(413, 'File is too large to edit here (limit 2 MB)');
+  if (st.size > TEXT_LIMIT) throw new FileError(413, 'File is too large to edit here (limit 10 MB)');
   const buf = await fsp.readFile(abs);
   if (buf.subarray(0, 8000).includes(0)) throw new FileError(415, 'This looks like a binary file');
   return { text: buf.toString('utf8').replace(/^\uFEFF/, ''), modified: st.mtimeMs, bom: buf[0] === 0xef && buf[1] === 0xbb && buf[2] === 0xbf };
@@ -206,6 +206,21 @@ async function writeText(root, rel, text, expectedModified, bom) {
   // Write in place so the file keeps its permissions, owner and any hard links.
   await fsp.writeFile(abs, (bom ? '\uFEFF' : '') + String(text));
   return { modified: (await fsp.stat(abs)).mtimeMs };
+}
+
+// Save As: write a new text file (or replace one when asked).
+async function createText(root, rel, name, text, overwrite) {
+  checkName(name);
+  const dir = await resolveIn(root, rel);
+  const relPath = path.posix.join(rel || '', name);
+  let dest = path.join(dir, name);
+  if (await exists(dest)) {
+    if (!overwrite) throw Object.assign(new FileError(409, 'A file with that name already exists'), { code: 'exists' });
+    dest = await resolveIn(root, relPath);
+    if ((await fsp.stat(dest)).isDirectory()) throw new FileError(400, 'That is a folder');
+  }
+  await fsp.writeFile(dest, String(text));
+  return { path: relPath, modified: (await fsp.stat(dest)).mtimeMs };
 }
 
 async function upload(req, res, root, rel, name, overwrite) {
@@ -410,6 +425,7 @@ async function handle(req, res, url, { config, sendJson, readJson }) {
     const root = getRoot(config, b.root);
     switch (route) {
       case 'text': return sendJson(res, 200, await writeText(root, b.path, b.text, b.modified, b.bom));
+      case 'text/create': return sendJson(res, 200, await createText(root, b.path, b.name, b.text, Boolean(b.overwrite)));
       case 'mkdir': return sendJson(res, 200, await mkdir(root, b.path, b.name));
       case 'rename': return sendJson(res, 200, await rename(root, b.path, b.name));
       case 'delete': return sendJson(res, 200, await remove(root, b.paths || []));
@@ -420,7 +436,7 @@ async function handle(req, res, url, { config, sendJson, readJson }) {
   } catch (err) {
     const e = toFileError(err);
     if (res.headersSent) return res.end();
-    return sendJson(res, e.status, { error: e.message, ...(err.received !== undefined ? { received: err.received } : {}) });
+    return sendJson(res, e.status, { error: e.message, ...(err.code === 'exists' ? { code: 'exists' } : {}), ...(err.received !== undefined ? { received: err.received } : {}) });
   }
 }
 
