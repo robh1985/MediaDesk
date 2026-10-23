@@ -111,6 +111,15 @@ export function openApp(appId, opts = {}) {
     key, appId, el, body, geom, maximized: false, minimized: false,
     titlebarExtra: titlebar.querySelector('.titlebar-extra'),
     setTitle: (t) => { titleEl.textContent = t; emit(); },
+    // Apps may resize their own window (e.g. Calculator switching modes); ignored when maximised.
+    setSize: (width, height) => {
+      if (w.maximized || isMobile()) return;
+      const cx = w.geom.x + w.geom.w / 2;
+      w.geom.w = Math.max(MIN_W, width); w.geom.h = Math.max(MIN_H, height);
+      w.geom.x = Math.round(cx - w.geom.w / 2);
+      clampToScreen(w);
+      saveGeometry(w);
+    },
     close: () => close(w),
     on: (evt, fn) => { (handlers[evt] = handlers[evt] || []).push(fn); },
   };

@@ -65,5 +65,8 @@ export const appIcon = {
   browser: tile('#6ec3ff', '#2563eb', '<circle cx="32" cy="32" r="16"/><path d="M16 32h32M32 16a24 24 0 0 1 0 32M32 16a24 24 0 0 0 0 32"/>'),
   music: tile('#ffb347', '#e0245e', '<path d="M26 44V18l22-5v26"/><circle cx="20" cy="44" r="6" fill="#fff"/><circle cx="42" cy="39" r="6" fill="#fff"/>'),
   files: tile('#5eead4', '#0d7d74', '<path d="M13 21h11l4 4h14a3 3 0 0 1 3 3v13a3 3 0 0 1-3 3H16a3 3 0 0 1-3-3z"/><path d="M13 30h32"/>'),
+  calculator: tile('#f6a54a', '#e2571e', '<rect x="18" y="12" width="28" height="40" rx="4"/><rect x="23" y="17" width="18" height="8" rx="1.5" fill="#fff" stroke-width="1"/><path d="M24 33h.01M32 33h.01M40 33h.01M24 40h.01M32 40h.01M40 40h.01M24 47h.01M32 47h8" stroke-width="4.4"/>'),
+  notes: tile('#9be15d', '#1f9d55', '<path d="M20 12h17l9 9v31H20z"/><path d="M37 12v9h9M25 30h16M25 37h16M25 44h10"/>'),
+  preview: tile('#7dd3fc', '#4f46e5', '<rect x="13" y="15" width="38" height="34" rx="4"/><path d="m19 41 8-9 6 6 4-4 8 7"/><circle cx="25" cy="24" r="3" fill="#fff"/>'),
   activity: tile('#ff8a8a', '#e0245e', '<path d="M14 34h9l4-10 8 18 4-8h11"/>'),
 };
