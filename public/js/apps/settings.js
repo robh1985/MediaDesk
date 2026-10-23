@@ -4,6 +4,8 @@ import { h, clear, toast, toastError, spinner, sidebarLayout } from '../ui.js';
 import { icon, appIcon } from '../icons.js';
 import { portal, state, radarr, sonarr, nzbget, jellyfin, isConfigured } from '../api.js';
 import { applyAppearance, appearance, WALLPAPERS, ACCENTS } from '../desktop.js';
+import { SCREENSAVERS } from '../savers.js';
+import * as screensaver from '../screensaver.js';
 
 const SERVICES = {
   radarr: { name: 'Radarr', port: 7878, hint: 'Radarr → Settings → General → Security → API Key' },
@@ -30,6 +32,7 @@ export const settingsApp = {
       page('music', 'Music', appIconSmall('music'), renderMusic),
       page('files', 'Files', appIconSmall('files'), renderFiles),
       page('appearance', 'Appearance', icon.image, renderAppearance),
+      page('screensaver', 'Screensaver', icon.moon, renderScreensaver),
       page('about', 'About', icon.heartPulse, renderAbout),
     ], { initial: opts.tab });
     win.body.append(h('div', { class: 'settings' }, layout.root));
@@ -349,6 +352,47 @@ function renderAppearance(container) {
       Object.keys(localStorage).filter((k) => k.startsWith('mediadesk.win.')).forEach((k) => localStorage.removeItem(k));
       toast('Window positions reset');
     } }, 'Reset window positions')));
+}
+
+function renderScreensaver(container) {
+  const p = prefs('screensaver');
+  const canLock = screensaver.passwordAvailable();
+  let main, pick, opts;
+  const enabled = h('input', { type: 'checkbox', checked: p.enabled });
+  enabled.addEventListener('change', () => { savePref('screensaver', { enabled: enabled.checked }, main.status); refreshDisabled(); });
+  const timeout = select('screensaver', 'timeoutMin', 'Start after', [1, 2, 3, 5, 10, 15, 20, 30, 45, 60].map((m) => [m, m === 1 ? '1 minute' : m === 60 ? '1 hour' : `${m} minutes`]), () => main, { numeric: true });
+  const lockBox = h('input', { type: 'checkbox', checked: p.requirePassword && canLock, disabled: !canLock });
+  lockBox.addEventListener('change', () => savePref('screensaver', { requirePassword: lockBox.checked }, main.status));
+  main = section('Screensaver',
+    h('label', { class: 'pref-row' }, enabled, h('span', {}, h('span', {}, 'Use a screensaver'),
+      h('span', { class: 'small muted pref-help' }, 'Starts when MediaDesk hasn’t been used for a while. Move the mouse, tap or press a key to return.'))),
+    timeout,
+    h('label', { class: `pref-row ${canLock ? '' : 'disabled'}` }, lockBox, h('span', {}, h('span', {}, 'Require password to return'),
+      h('span', { class: 'small muted pref-help' }, canLock
+        ? 'Locks MediaDesk in every tab on this browser until the portal password is entered. Jellyfin music keeps playing.'
+        : 'Needs a portal password. On Windows, run install-windows.cmd again to set one; otherwise set PORTAL_PASSWORD.'))));
+  const refreshDisabled = () => { [timeout, lockBox.closest('.pref-row')].forEach((el) => el.classList.toggle('dimmed', !enabled.checked)); };
+
+  const current = () => prefs('screensaver').saver;
+  const card = (id, name, origin) => h('button', { class: `ss-card ${current() === id ? 'active' : ''}`, dataset: { id }, onclick: () => choose(id) },
+    h('span', { class: `ss-thumb ss-thumb-${id}` }), h('strong', {}, name), h('span', { class: 'small muted' }, origin));
+  const grid = h('div', { class: 'ss-grid' }, card('random', 'Random', 'A different one each time'), SCREENSAVERS.map((s) => card(s.id, s.name, s.origin)));
+  const choose = async (id) => {
+    await savePref('screensaver', { saver: id }, pick.status);
+    grid.querySelectorAll('.ss-card').forEach((c) => c.classList.toggle('active', c.dataset.id === id));
+  };
+  pick = section('Choose a screensaver', grid,
+    h('div', { class: 'btn-row' }, h('button', { class: 'btn btn-primary', onclick: () => screensaver.start({ id: current(), preview: true }) }, h('span', { html: icon.play }), 'Preview')));
+
+  const text = h('input', { class: 'input', value: p.text || '', maxlength: 40, placeholder: 'MediaDesk' });
+  text.addEventListener('change', () => savePref('screensaver', { text: text.value.trim() || 'MediaDesk' }, opts.status));
+  opts = section('Options',
+    toggle('screensaver', 'skipVideo', 'Don’t start while a video is playing', null, () => opts),
+    h('label', { class: 'pref-row pref-select' }, h('span', {}, h('span', {}, '3D Text message'), h('span', { class: 'small muted pref-help' }, 'The words shown by the 3D Text screensaver.')), text));
+
+  container.append(h('div', { class: 'pane-header' }, h('h2', {}, 'Screensaver')), main, pick, opts,
+    h('p', { class: 'small muted' }, 'Tip: the MediaDesk menu (top left) can start the screensaver or lock the screen at any time.'));
+  refreshDisabled();
 }
 
 function renderAbout(container) {

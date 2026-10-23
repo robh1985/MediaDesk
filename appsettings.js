@@ -31,6 +31,9 @@ const DEFAULTS = {
   music: {
     visAutoSeconds: 20, visQuality: 'medium', nowPlayingInMenuBar: true,
   },
+  screensaver: {
+    enabled: false, timeoutMin: 10, saver: 'toasters', requirePassword: false, skipVideo: true, text: 'MediaDesk',
+  },
 };
 
 const ALLOWED = {
@@ -41,6 +44,8 @@ const ALLOWED = {
   'nzbget.defaultPriority': [-100, -50, 0, 50, 100, 900],
   'music.visAutoSeconds': [0, 10, 20, 40, 60],
   'music.visQuality': ['low', 'medium', 'high'],
+  'screensaver.timeoutMin': [1, 2, 3, 5, 10, 15, 20, 30, 45, 60],
+  'screensaver.saver': ['random', 'toasters', 'maze', 'pipes', 'starfield', 'mystify', 'text3d', 'bubbles', 'ribbons', 'flurry', 'hello'],
 };
 
 // Stored settings merged over the defaults.

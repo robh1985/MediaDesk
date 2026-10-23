@@ -1,7 +1,8 @@
 import { portal, state } from './api.js';
 import { initWM, registerApp, openApp } from './wm.js';
 import { applyAppearance, startDesktop, showLockScreen } from './desktop.js';
-import { startLive, addSystemNotice } from './live.js';
+import { initScreensaver } from './screensaver.js';
+import { startLive, addSystemNotice, refreshNotifications } from './live.js';
 import { makeArrApp } from './apps/arr.js';
 import { nzbgetApp } from './apps/nzbget.js';
 import { jellyfinApp } from './apps/jellyfin.js';
@@ -21,6 +22,7 @@ async function boot() {
   initWM(document.getElementById('windows'));
   startDesktop();
   startLive();
+  initScreensaver({ onLock: showLocked });
   document.body.classList.add('ready');
 
   const anyConfigured = Object.values(state.config.services).some((s) => s.configured);
@@ -33,7 +35,20 @@ async function boot() {
   if (state.config.mock) addSystemNotice({ id: 'demo', title: 'Demo mode', body: 'Showing sample data — no real servers are being contacted.' });
 }
 
-addEventListener('mediadesk:logout', () => location.reload());
+// Locked by the screensaver (here or in another tab): show the lock screen over the desktop, keeping
+// everything (music included) running underneath. Logging in again unlocks.
+function showLocked() {
+  state.locked = true;
+  showLockScreen(() => { state.locked = false; refreshNotifications(); });
+}
+addEventListener('mediadesk:logout', async () => {
+  if (state.locked) return showLocked();
+  try {
+    const s = await portal.session();
+    if (s.locked) return showLocked();
+  } catch { /* fall through */ }
+  location.reload();
+});
 
 // After MediaDesk is updated, pages that were already open are still running the old code.
 // Notice that (by comparing the server's build fingerprint) and offer a reload.

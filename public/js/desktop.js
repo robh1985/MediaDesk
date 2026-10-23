@@ -7,6 +7,7 @@ import { getApps, getApp, openApp, toggleApp, onChange, openWindows, focusedWind
 import { live, subscribe, markRead, markAllRead, clearNotifications, totalUnread, dismissSystemNotice } from './live.js';
 import { upcoming, posterUrl } from './apps/arr.js';
 import * as music from './apps/music-engine.js';
+import * as screensaver from './screensaver.js';
 import { itemImage, searchJellyfin } from './apps/jellyfin.js';
 
 // ---------------------------------------------------------------------------
@@ -96,7 +97,10 @@ function buildMenuBar() {
       { label: 'Search & apps', icon: icon.search, action: openLauncher },
       { label: 'Overview', icon: icon.grid, action: () => openApp('dashboard') },
       { label: 'Settings', icon: icon.sliders, action: () => openApp('settings') },
-      ...(state.config?.auth ? ['-', { label: 'Log out', icon: icon.lock, action: logOut }] : []),
+      { label: 'Start screensaver', icon: icon.image, action: () => screensaver.start() },
+      ...(state.config?.auth ? ['-',
+        { label: 'Lock screen', icon: icon.lock, action: () => screensaver.lockNow() },
+        { label: 'Log out', icon: icon.power, action: logOut }] : []),
     ]);
   });
   const speed = h('button', { class: 'tray-item', title: 'NZBGet', onclick: () => openApp('nzbget') });
@@ -513,6 +517,7 @@ function setupShortcuts() {
 // ---------------------------------------------------------------------------
 
 export function showLockScreen(onUnlock) {
+  if (document.querySelector('.lock')) return;
   const time = h('div', { class: 'lock-time' });
   const date = h('div', { class: 'lock-date' });
   const tick = () => { const d = new Date(); time.textContent = timeOf(d); date.textContent = d.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' }); };

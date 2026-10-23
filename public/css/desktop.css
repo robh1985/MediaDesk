@@ -1080,3 +1080,53 @@ body { -webkit-touch-callout: none; }
   .wa-lib-album-head { flex-direction: column; align-items: flex-start; }
   .wa-lib-art { width: 110px; height: 110px; }
 }
+
+/* ---------------------------------------------------------------------------
+   Screensaver
+   --------------------------------------------------------------------------- */
+.ss-overlay { position: fixed; inset: 0; z-index: 20000; background: #000; cursor: none; overflow: hidden; outline: none; animation: ss-in .6s ease both; touch-action: none; user-select: none; -webkit-user-select: none; }
+.ss-overlay.ss-transparent { background: transparent; }
+.ss-overlay.leaving { animation: ss-out .25s ease both; pointer-events: none; }
+@keyframes ss-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes ss-out { to { opacity: 0; } }
+.ss-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.ss-pixelated { image-rendering: pixelated; image-rendering: crisp-edges; }
+
+.ss-3dtext { position: absolute; inset: 0; perspective: 900px; overflow: hidden; }
+.ss-3dtext-obj { position: absolute; left: 50%; top: 50%; transform-style: preserve-3d; white-space: nowrap; font: 900 12vw/1 "Arial Black", "Helvetica Neue", Arial, sans-serif; letter-spacing: -.02em; }
+.ss-3dtext-obj span { position: absolute; left: 0; top: 0; transform: translate(-50%, -50%); }
+.ss-3dtext-obj .side { color: #7a5a12; }
+.ss-3dtext-obj .face { background: linear-gradient(180deg, #fff6c9 0%, #f3c64a 35%, #a8740f 55%, #f7d978 75%, #fff2b8 100%); -webkit-background-clip: text; background-clip: text; color: transparent; }
+
+.ss-hello { position: absolute; inset: 0; display: grid; place-items: center; background: radial-gradient(circle at 30% 30%, hsl(var(--hue, 210) 80% 55%), hsl(calc(var(--hue, 210) + 40) 70% 25%)); transition: background 2s ease; }
+.ss-hello svg { width: min(90vw, 1100px); height: auto; overflow: visible; }
+.ss-hello-word { font: 400 150px "Snell Roundhand", "Segoe Script", "Brush Script MT", "Apple Chancery", cursive; fill: transparent; stroke: #fff; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 2400; stroke-dashoffset: 2400; animation: ss-hello 5.2s ease-in-out both; }
+@keyframes ss-hello {
+  0% { stroke-dashoffset: 2400; fill: rgba(255,255,255,0); opacity: 1; }
+  55% { stroke-dashoffset: 0; fill: rgba(255,255,255,0); }
+  72% { stroke-dashoffset: 0; fill: rgba(255,255,255,1); opacity: 1; }
+  90% { opacity: 1; }
+  100% { stroke-dashoffset: 0; fill: rgba(255,255,255,1); opacity: 0; }
+}
+
+/* Settings → Screensaver */
+.pref-row.disabled { cursor: default; opacity: .6; }
+.pref-row.dimmed { opacity: .5; }
+.pref-select input.input { flex: none; width: 220px; max-width: 50%; }
+.ss-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; margin-bottom: 10px; }
+.ss-card { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 8px; border: 2px solid transparent; border-radius: 12px; background: var(--surface-2); color: inherit; text-align: left; cursor: pointer; font: inherit; }
+.ss-card:hover { background: var(--hover); }
+.ss-card.active { border-color: var(--accent); }
+.ss-card strong { font-size: 13px; margin-top: 4px; }
+.ss-thumb { display: block; width: 100%; aspect-ratio: 16 / 10; border-radius: 8px; background: #000; margin-bottom: 2px; }
+.ss-thumb-random { background: conic-gradient(from 45deg, #ff6b6b, #ffd93d, #6bcb77, #4d96ff, #b06bff, #ff6b6b); }
+.ss-thumb-toasters { background: radial-gradient(circle at 30% 40%, #d9d9d9 0 9%, transparent 10%), radial-gradient(circle at 65% 65%, #c9a26b 0 7%, transparent 8%), radial-gradient(circle at 75% 25%, #d9d9d9 0 8%, transparent 9%), #000; }
+.ss-thumb-maze { background: linear-gradient(90deg, #8a3a24 0 30%, transparent 30% 70%, #6c2d1c 70%), linear-gradient(180deg, #1e3a7a 0 50%, #5a5a60 50%); }
+.ss-thumb-pipes { background: linear-gradient(90deg, transparent 20%, #3aa0ff 20% 28%, transparent 28%), linear-gradient(180deg, transparent 55%, #ff5a3a 55% 63%, transparent 63%), linear-gradient(90deg, transparent 62%, #52d36a 62% 69%, transparent 69%), #000; }
+.ss-thumb-starfield { background: radial-gradient(1px 1px at 20% 30%, #fff, transparent), radial-gradient(1.5px 1.5px at 70% 60%, #fff, transparent), radial-gradient(1px 1px at 45% 80%, #fff, transparent), radial-gradient(2px 2px at 85% 20%, #fff, transparent), radial-gradient(1px 1px at 10% 70%, #fff, transparent), radial-gradient(1px 1px at 55% 40%, #fff, transparent), #000; }
+.ss-thumb-mystify { background: linear-gradient(135deg, transparent 45%, #4dd0ff 46% 48%, transparent 49%), linear-gradient(35deg, transparent 50%, #ff4dd8 51% 53%, transparent 54%), #000; }
+.ss-thumb-text3d { background: linear-gradient(180deg, transparent 38%, #f3c64a 38% 62%, transparent 62%), #000; }
+.ss-thumb-bubbles { background: radial-gradient(circle at 30% 45%, transparent 0 16%, rgba(160,220,255,.9) 17% 19%, transparent 20%), radial-gradient(circle at 68% 58%, transparent 0 11%, rgba(255,180,240,.9) 12% 14%, transparent 15%), linear-gradient(135deg, #2a6fdb, #0b2a66); }
+.ss-thumb-ribbons { background: linear-gradient(160deg, transparent 40%, #ff3d7f 42% 48%, transparent 52%), linear-gradient(20deg, transparent 45%, #3dd2ff 47% 52%, transparent 55%), #000; }
+.ss-thumb-flurry { background: radial-gradient(ellipse at 50% 50%, rgba(255,255,255,.9) 0 3%, rgba(120,90,255,.7) 10%, rgba(255,80,160,.35) 25%, transparent 45%), #000; }
+.ss-thumb-hello { background: radial-gradient(circle at 30% 30%, #3e8bff, #142a66); }

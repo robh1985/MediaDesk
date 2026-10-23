@@ -182,8 +182,20 @@ function parseCookies(req) {
   return out;
 }
 
-function isAuthed(req) {
+// Sessions locked by the screensaver ("require password to return"). Unlocking means logging in
+// again, which issues a new, unlocked session cookie. Every tab using the locked cookie sees the lock.
+const lockedSessions = new Map();     // session token -> its expiry time
+const sessionToken = (req) => parseCookies(req).mediadesk_session || '';
+function isLocked(req) {
+  const exp = lockedSessions.get(sessionToken(req));
+  if (!exp) return false;
+  if (exp < Date.now()) { lockedSessions.delete(sessionToken(req)); return false; }
+  return true;
+}
+
+function isAuthed(req, { ignoreLock = false } = {}) {
   if (!config.portalPassword) return true;
+  if (!ignoreLock && isLocked(req)) return false;
   const internal = req.headers['x-mediadesk-internal'];
   if (internal && internal.length === INTERNAL_TOKEN.length && crypto.timingSafeEqual(Buffer.from(internal), Buffer.from(INTERNAL_TOKEN))) return true;
   const token = parseCookies(req).mediadesk_session || '';
@@ -450,11 +462,23 @@ async function handle(req, res) {
   if (p === '/portal/logout' && req.method === 'POST') {
     return sendJson(res, 200, { ok: true }, { 'Set-Cookie': 'mediadesk_session=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0' });
   }
-  if (p === '/portal/session') return sendJson(res, 200, { authed: isAuthed(req), auth: Boolean(config.portalPassword), build: BUILD_ID });
+  if (p === '/portal/session') {
+    return sendJson(res, 200, { authed: isAuthed(req), locked: isLocked(req) && isAuthed(req, { ignoreLock: true }), auth: Boolean(config.portalPassword), build: BUILD_ID });
+  }
+  if (p === '/portal/lock' && req.method === 'POST') {
+    if (!config.portalPassword) return sendJson(res, 400, { error: 'Set a portal password to lock MediaDesk' });
+    if (!isAuthed(req)) return sendJson(res, 401, { error: 'Not logged in' });
+    const now = Date.now();
+    for (const [t, exp] of lockedSessions) if (exp < now) lockedSessions.delete(t);
+    lockedSessions.set(sessionToken(req), Number(sessionToken(req).split('.')[0]) || now + SESSION_DAYS * 864e5);
+    return sendJson(res, 200, { locked: true });
+  }
 
   const isApi = p.startsWith('/api/') || p.startsWith('/portal/');
   if (!isApi) return serveStatic(req, res, p);
-  if (!isAuthed(req)) return sendJson(res, 401, { error: 'Not logged in' });
+  // While locked, music that's already playing from Jellyfin may keep streaming; nothing else works.
+  const lockedMusic = req.method === 'GET' && p.startsWith('/api/jellyfin/Audio/') && isAuthed(req, { ignoreLock: true });
+  if (!isAuthed(req) && !lockedMusic) return sendJson(res, 401, { error: isLocked(req) ? 'MediaDesk is locked' : 'Not logged in', locked: isLocked(req) });
 
   if (p.startsWith('/portal/files/')) {
     const status = filesStatus();
