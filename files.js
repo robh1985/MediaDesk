@@ -7,6 +7,8 @@
 const fs = require('node:fs');
 const fsp = require('node:fs/promises');
 const path = require('node:path');
+const crypto = require('node:crypto');
+const { Transform } = require('node:stream');
 const { pipeline } = require('node:stream/promises');
 
 const TEXT_LIMIT = 2 * 1024 * 1024;
@@ -132,6 +134,7 @@ async function listDir(root, rel, showHidden) {
   if (!st.isDirectory()) throw new FileError(400, 'That is not a folder');
   const dirents = await fsp.readdir(abs, { withFileTypes: true });
   const entries = await Promise.all(dirents
+    .filter((d) => !d.name.endsWith('.mdpart'))   // unfinished uploads
     .filter((d) => showHidden || !d.name.startsWith('.'))
     .map(async (d) => {
       const full = path.join(abs, d.name);
@@ -223,6 +226,95 @@ async function upload(req, res, root, rel, name, overwrite) {
   return { name, size: st.size };
 }
 
+// --- Uploads in pieces ------------------------------------------------------------
+// Large files are sent as a series of small requests rather than one long one, so a slow or
+// briefly interrupted connection only has to resend the current piece, and no single request
+// runs into HTTP timeouts. Pieces are written to a hidden "<name>.<id>.mdpart" file that is
+// renamed into place once every byte has arrived.
+
+const MAX_CHUNK = 64 * 1024 * 1024;
+const UPLOAD_IDLE_MS = 6 * 3600e3;
+const uploads = new Map();
+
+setInterval(() => {
+  for (const [id, u] of uploads) {
+    if (Date.now() - u.lastActive > UPLOAD_IDLE_MS) { uploads.delete(id); fsp.rm(u.tmp, { force: true }).catch(() => {}); }
+  }
+}, 10 * 60e3).unref();
+
+async function uploadStart(root, rel, name, size, overwrite) {
+  checkName(name);
+  size = Number(size);
+  if (!Number.isSafeInteger(size) || size < 0) throw new FileError(400, 'Invalid file size');
+  const dir = await resolveIn(root, rel);
+  if (!(await fsp.stat(dir)).isDirectory()) throw new FileError(400, 'That is not a folder');
+  const dest = await resolveIn(root, path.posix.join(rel || '', name));
+  if (path.dirname(dest) !== dir) throw new FileError(400, 'Invalid name');
+  if (!overwrite && await exists(dest)) throw new FileError(409, `“${name}” already exists`);
+  const space = await diskSpace(dir);
+  if (space && space.free < size) {
+    throw new FileError(507, `Not enough free space: “${name}” needs ${fmtBytes(size)} but only ${fmtBytes(space.free)} is free`);
+  }
+  const id = crypto.randomBytes(12).toString('hex');
+  const tmp = `${dest}.${id}.mdpart`;
+  await fsp.writeFile(tmp, '', { flag: 'wx' });
+  uploads.set(id, { rootPath: root.path, dest, tmp, name, size, received: 0, overwrite, lastActive: Date.now() });
+  return { id, received: 0 };
+}
+
+function getUpload(id, root) {
+  const u = uploads.get(String(id));
+  if (!u || norm(u.rootPath) !== norm(root.path)) throw new FileError(404, 'This upload expired or MediaDesk restarted. Start the upload again.');
+  u.lastActive = Date.now();
+  return u;
+}
+
+async function uploadChunk(req, root, id, offset) {
+  const u = getUpload(id, root);
+  offset = Number(offset);
+  // Pieces must arrive in order; tell the browser where to carry on from if they don't.
+  if (offset !== u.received) throw Object.assign(new FileError(409, 'Out of sequence'), { received: u.received });
+  let count = 0;
+  const counter = new Transform({
+    transform(chunk, _enc, cb) {
+      count += chunk.length;
+      if (count > MAX_CHUNK || offset + count > u.size) return cb(new FileError(413, 'Upload piece is too large'));
+      cb(null, chunk);
+    },
+  });
+  // Drop anything left over from an earlier, interrupted attempt at this piece.
+  await fsp.truncate(u.tmp, offset);
+  await pipeline(req, counter, fs.createWriteStream(u.tmp, { flags: 'r+', start: offset }));
+  u.received = offset + count;
+  u.lastActive = Date.now();
+  return { received: u.received };
+}
+
+async function uploadFinish(root, id) {
+  const u = getUpload(id, root);
+  if (u.received !== u.size) throw new FileError(400, `Upload incomplete (${u.received} of ${u.size} bytes)`);
+  if (!u.overwrite && await exists(u.dest)) throw new FileError(409, `“${u.name}” already exists`);
+  await fsp.rename(u.tmp, u.dest);
+  uploads.delete(String(id));
+  return { name: u.name, size: u.size };
+}
+
+async function uploadCancel(root, id) {
+  const u = uploads.get(String(id));
+  if (u && norm(u.rootPath) === norm(root.path)) {
+    uploads.delete(String(id));
+    await fsp.rm(u.tmp, { force: true });
+  }
+  return { cancelled: true };
+}
+
+function fmtBytes(n) {
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  let i = 0;
+  while (n >= 1024 && i < units.length - 1) { n /= 1024; i++; }
+  return `${n.toFixed(i ? 1 : 0)} ${units[i]}`;
+}
+
 async function mkdir(root, rel, name) {
   checkName(name);
   const dest = await resolveIn(root, path.posix.join(rel || '', name));
@@ -298,6 +390,18 @@ async function handle(req, res, url, { config, sendJson, readJson }) {
     if (route === 'list') return sendJson(res, 200, await listDir(getRoot(config, q.get('root')), q.get('path'), q.get('hidden') === '1'));
     if (route === 'download') return await sendFile(req, res, getRoot(config, q.get('root')), q.get('path'), q.get('inline') === '1');
     if (route === 'text' && req.method === 'GET') return sendJson(res, 200, await readText(getRoot(config, q.get('root')), q.get('path')));
+    if (route === 'upload/chunk' && req.method === 'POST') {
+      return sendJson(res, 200, await uploadChunk(req, getRoot(config, q.get('root')), q.get('id'), q.get('offset')));
+    }
+    if (route.startsWith('upload/') && req.method === 'POST') {
+      const b = await readJson(req);
+      const root = getRoot(config, b.root);
+      if (route === 'upload/start') return sendJson(res, 200, await uploadStart(root, b.path, b.name, b.size, Boolean(b.overwrite)));
+      if (route === 'upload/finish') return sendJson(res, 200, await uploadFinish(root, b.id));
+      if (route === 'upload/cancel') return sendJson(res, 200, await uploadCancel(root, b.id));
+      throw new FileError(404, 'Unknown upload action');
+    }
+    // Single-request upload, kept for pages loaded before chunked uploads existed.
     if (route === 'upload' && req.method === 'POST') {
       return sendJson(res, 200, await upload(req, res, getRoot(config, q.get('root')), q.get('path'), q.get('name'), q.get('overwrite') === '1'));
     }
@@ -316,7 +420,7 @@ async function handle(req, res, url, { config, sendJson, readJson }) {
   } catch (err) {
     const e = toFileError(err);
     if (res.headersSent) return res.end();
-    return sendJson(res, e.status, { error: e.message });
+    return sendJson(res, e.status, { error: e.message, ...(err.received !== undefined ? { received: err.received } : {}) });
   }
 }
 

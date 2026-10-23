@@ -1,6 +1,6 @@
 // Files: a file manager for the folders shared in Settings → Files.
 
-import { h, clear, formatBytes, debounce, toast, toastError, confirmDialog, contextMenu, spinner, emptyState, errorState, progressBar, isTouch } from '../ui.js';
+import { h, clear, formatBytes, formatDuration, debounce, toast, toastError, confirmDialog, contextMenu, spinner, emptyState, errorState, progressBar, isTouch } from '../ui.js';
 import { icon, appIcon } from '../icons.js';
 import { state, appPref } from '../api.js';
 import { openApp } from '../wm.js';
@@ -20,6 +20,8 @@ async function call(route, { method = 'GET', params, body } = {}) {
   return data;
 }
 const fileUrl = (root, p, inline) => `/portal/files/download?${new URLSearchParams({ root, path: p, ...(inline ? { inline: 1 } : {}) })}`;
+const UPLOAD_CHUNK = 8 * 1024 * 1024;
+const UPLOAD_RETRIES = 6;
 const join = (dir, name) => (dir ? `${dir}/${name}` : name);
 const parentOf = (p) => p.split('/').slice(0, -1).join('/');
 
@@ -544,49 +546,109 @@ class FileBrowser {
     if (!fileList.length) return;
     const root = this.root, path = this.path;
     this.uploads.hidden = false;
-    for (const file of fileList) {
-      await this.uploadOne(file, root, path, false);
-    }
+    const release = await keepAwake();
+    try {
+      for (const file of fileList) {
+        await this.uploadOne(file, root, path, false);
+      }
+    } finally { release(); }
     if (!this.uploads.querySelector('.fm-upload')) this.uploads.hidden = true;
     if (root === this.root && path === this.path) this.refresh();
     this.loadRootsQuiet();
   }
 
-  uploadOne(file, root, path, overwrite) {
-    return new Promise((resolve) => {
-      const bar = progressBar(0);
-      const label = h('span', { class: 'small muted' }, `0 of ${formatBytes(file.size)}`);
-      const xhr = new XMLHttpRequest();
-      const cancel = h('button', { class: 'btn btn-icon btn-sm', title: 'Cancel', html: icon.x, onclick: () => xhr.abort() });
-      const item = h('div', { class: 'fm-upload' }, h('span', { class: 'fm-icon', html: fileIcon(kindOf({ name: file.name })) }),
-        h('div', { class: 'grow' }, h('div', { class: 'fm-upload-name' }, file.name), bar, label), cancel);
-      this.uploads.append(item);
-      const done = () => { item.remove(); resolve(); };
-      xhr.open('POST', `/portal/files/upload?${new URLSearchParams({ root, path, name: file.name, ...(overwrite ? { overwrite: 1 } : {}) })}`);
-      xhr.setRequestHeader('X-MediaDesk', '1');
-      xhr.upload.onprogress = (e) => {
-        if (!e.lengthComputable) return;
-        bar.firstChild.style.width = `${(e.loaded / e.total) * 100}%`;
-        label.textContent = `${formatBytes(e.loaded)} of ${formatBytes(e.total)}`;
-      };
-      xhr.onload = async () => {
-        if (xhr.status === 409 && !overwrite) {
+  // Sends the file in pieces. A piece that fails (Wi-Fi drop, server restart, phone asleep) is
+  // retried with increasing waits before the upload gives up, and nothing has to start over.
+  async uploadOne(file, root, path, overwrite) {
+    const bar = progressBar(0);
+    const label = h('span', { class: 'small muted fm-upload-status' }, 'Starting…');
+    let cancelled = false;
+    let xhr = null;
+    let id = null;
+    const cancelBtn = h('button', { class: 'btn btn-icon btn-sm', title: 'Cancel upload', html: icon.x, onclick: () => { cancelled = true; xhr?.abort(); } });
+    const item = h('div', { class: 'fm-upload' }, h('span', { class: 'fm-icon', html: fileIcon(kindOf({ name: file.name })) }),
+      h('div', { class: 'grow' }, h('div', { class: 'fm-upload-name' }, file.name), bar, label), cancelBtn);
+    this.uploads.append(item);
+    const setBar = (pct) => { bar.firstChild.style.width = `${pct}%`; };
+
+    try {
+      try {
+        ({ id } = await call('upload/start', { method: 'POST', body: { root, path, name: file.name, size: file.size, overwrite } }));
+      } catch (err) {
+        if (err.status === 409 && !overwrite) {
           item.remove();
           const ok = await confirmDialog({ title: `Replace “${file.name}”?`, message: 'A file with this name already exists in this folder.', confirm: 'Replace', danger: true });
           if (ok) await this.uploadOne(file, root, path, true);
-          return resolve();
+          return;
         }
-        if (xhr.status >= 400) {
-          let msg = `HTTP ${xhr.status}`;
-          try { msg = JSON.parse(xhr.responseText).error || msg; } catch { /* ignore */ }
-          toastError(new Error(msg), `Upload failed: ${file.name}`);
-        }
-        done();
+        throw err;
+      }
+
+      // Speed is averaged over the last few seconds for a steady time-left estimate.
+      const samples = [[performance.now(), 0]];
+      const showProgress = (sent) => {
+        const now = performance.now();
+        samples.push([now, sent]);
+        while (samples.length > 2 && now - samples[0][0] > 8000) samples.shift();
+        const [t0, b0] = samples[0];
+        const rate = now > t0 ? ((sent - b0) / (now - t0)) * 1000 : 0;
+        setBar(file.size ? (sent / file.size) * 100 : 100);
+        const left = rate > 0 ? ` · ${formatDuration((file.size - sent) / rate)} left` : '';
+        label.textContent = `${formatBytes(sent)} of ${formatBytes(file.size)}${rate > 0 ? ` · ${formatBytes(rate)}/s` : ''}${left}`;
       };
-      xhr.onerror = () => { toastError(new Error('Connection lost'), `Upload failed: ${file.name}`); done(); };
-      xhr.onabort = () => { toast(`Upload cancelled: ${file.name}`); done(); };
-      xhr.send(file);
-    });
+
+      let offset = 0;
+      let failures = 0;
+      let chunkSize = UPLOAD_CHUNK;
+      while (offset < file.size) {
+        if (cancelled) throw Object.assign(new Error('cancelled'), { cancelled: true });
+        const piece = file.slice(offset, offset + chunkSize);
+        try {
+          const r = await new Promise((resolve, reject) => {
+            xhr = new XMLHttpRequest();
+            xhr.open('POST', `/portal/files/upload/chunk?${new URLSearchParams({ root, id, offset })}`);
+            xhr.setRequestHeader('X-MediaDesk', '1');
+            xhr.upload.onprogress = (e) => showProgress(offset + e.loaded);
+            xhr.onload = () => {
+              let data = {};
+              try { data = JSON.parse(xhr.responseText); } catch { /* ignore */ }
+              if (xhr.status >= 400) reject(Object.assign(new Error(data.error || `HTTP ${xhr.status}`), { status: xhr.status, data }));
+              else resolve(data);
+            };
+            xhr.onerror = () => reject(Object.assign(new Error('Connection lost'), { status: 0 }));
+            xhr.onabort = () => reject(Object.assign(new Error('cancelled'), { cancelled: true }));
+            xhr.send(piece);
+          });
+          offset = r.received;
+          failures = 0;
+          showProgress(offset);
+        } catch (err) {
+          if (err.cancelled || cancelled) throw Object.assign(new Error('cancelled'), { cancelled: true });
+          // The server says where it got to; carry on from there.
+          if (err.status === 409 && typeof err.data?.received === 'number') { offset = err.data.received; continue; }
+          // A reverse proxy in front of MediaDesk may cap request size (nginx defaults to 1 MB): use smaller pieces.
+          if (err.status === 413 && chunkSize > 256 * 1024) { chunkSize = Math.max(256 * 1024, Math.floor(chunkSize / 4)); continue; }
+          // Retry network problems and server hiccups; anything else (full disk, expired upload) is final.
+          const retryable = err.status === 0 || (err.status >= 500 && err.status !== 507);
+          if (!retryable || ++failures > UPLOAD_RETRIES) throw err;
+          const wait = Math.min(30, 2 ** failures);
+          for (let s = wait; s > 0 && !cancelled; s--) {
+            label.textContent = `Connection problem — retrying in ${s}s (attempt ${failures} of ${UPLOAD_RETRIES})`;
+            await new Promise((r) => setTimeout(r, 1000));
+          }
+        }
+      }
+
+      label.textContent = 'Finishing…';
+      setBar(100);
+      await call('upload/finish', { method: 'POST', body: { root, id } });
+      item.remove();
+    } catch (err) {
+      item.remove();
+      if (id) call('upload/cancel', { method: 'POST', body: { root, id } }).catch(() => {});
+      if (err.cancelled) toast(`Upload cancelled: ${file.name}`);
+      else toastError(err, `Upload failed: ${file.name}`);
+    }
   }
 
   // ---- Preview ----
@@ -657,6 +719,34 @@ class FileBrowser {
     clear(body, area);
   }
 }
+
+// While uploading: ask the browser to keep the screen on (phones suspend pages when the screen
+// locks) and warn before the tab is closed. Returns a function that undoes both.
+let activeUploads = 0;
+let wakeLock = null;
+const warnBeforeLeaving = (e) => { e.preventDefault(); e.returnValue = ''; };
+async function keepAwake() {
+  if (activeUploads++ === 0) {
+    addEventListener('beforeunload', warnBeforeLeaving);
+    try { wakeLock = await navigator.wakeLock?.request('screen'); } catch { wakeLock = null; }
+  }
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    if (--activeUploads === 0) {
+      removeEventListener('beforeunload', warnBeforeLeaving);
+      wakeLock?.release().catch(() => {});
+      wakeLock = null;
+    }
+  };
+}
+// A wake lock is dropped when the page is hidden; take it again when it's visible.
+document.addEventListener('visibilitychange', async () => {
+  if (activeUploads && !document.hidden && (!wakeLock || wakeLock.released)) {
+    try { wakeLock = await navigator.wakeLock?.request('screen'); } catch { /* not supported */ }
+  }
+});
 
 function promptName(title, label, value, selectStem = false) {
   return new Promise((resolve) => {

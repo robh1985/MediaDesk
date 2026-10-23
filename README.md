@@ -102,6 +102,7 @@ The Files app only works with folders you've shared in **Settings → Files**, w
 
 - **Password required:** anyone who can open Files can change or delete anything in the shared folders, so Files stays switched off until a portal password is set.
 - **Contained to shared folders:** paths can't escape the shared folders, including through symlinks or Windows junctions.
+- **Large uploads:** files of any size upload in 8 MB pieces. If the connection drops, the current piece is retried automatically, so a big upload doesn't start over. Free space is checked before anything is sent. While an upload is running, phones keep the screen awake (where the browser supports it), and closing the tab asks for confirmation first.
 - **Permanent deletes:** deleting is permanent. Nothing goes to the Recycle Bin.
 - **Whole folders can't be downloaded:** you can download files, but not a folder in one go.
 - **Network shares on Windows:** the startup task runs as the SYSTEM account, which can't see mapped drive letters such as `Z:`. Use the share's full address, such as `\\NAS\Media`, and make sure the share allows the PC's computer account.
