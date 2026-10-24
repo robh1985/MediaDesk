@@ -324,7 +324,7 @@ class Notes {
       const text = r.text.replace(/\r\n?/g, '\n');
       Object.assign(d, { text, saved: text, modified: r.modified, bom: r.bom, eol, loading: false, error: null });
       if (!d.langSet) d.lang = detectLanguage(d.name, text);
-      if (d === this.doc) { this.ta.value = text; this.ta.setSelectionRange(...clampSel(d.cursor, text)); this.render(); }
+      if (d === this.doc) { this.ta.value = text; this.ta.readOnly = false; this.ta.setSelectionRange(...clampSel(d.cursor, text)); this.render(); }
     } catch (err) {
       d.loading = false;
       if (d.text === null) {

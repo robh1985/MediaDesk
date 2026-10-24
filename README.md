@@ -4,7 +4,9 @@ One web portal for **Radarr, Sonarr, NZBGet and Jellyfin**, laid out like a desk
 
 ## Features
 
-- **Desktop shell**: windows that snap to screen edges (drag to the left/right edge, or the top to maximise), minimise to the dock, and remember their positions. Includes a light/dark theme, wallpapers, accent colours, and a mobile layout.
+- **Desktop shell**: windows that snap to screen edges (drag to the left/right edge, or the top to maximise), minimise to the dock, and remember their positions. Includes a light/dark theme, accent colours, built-in wallpapers or your own pictures (Fill, Fit, Stretch, Centre or Tile), and a mobile layout.
+- **Dock, like macOS**: choose its size, magnification and screen edge (left, bottom or right), hide it automatically, and show or hide open-app dots. Drag apps to reorder them, drag one off the dock to remove it, or use *Keep in Dock* on an open app. Settings → Dock & Desktop.
+- **Arrange the desktop**: drag icons anywhere. Drop one app onto another to make a named group, like folders on Android; tap a group to open it, rename it, or drag apps back out. Drop a desktop icon onto the dock to add it. On phones, hold an icon and then drag it.
 - **Launcher**: press `Ctrl+Space`, `Ctrl+K` or `/` to search apps, your Radarr/Sonarr libraries and Jellyfin in one place, run commands ("pause", "scan", "missing"), or type `add <title>` to add a movie or show.
 - **Overview**: library counts, download speed, active streams, health warnings, what's airing this week, the download queue and recently added items.
 - **Radarr / Sonarr**: browse and filter the library, see movie or series details (including seasons and episodes), search, monitor or unmonitor, refresh, delete, add new titles, manage the queue, and view the calendar, health and disk space.
@@ -13,8 +15,11 @@ One web portal for **Radarr, Sonarr, NZBGet and Jellyfin**, laid out like a desk
 - **Notification badges**: when a download finishes or fails, a movie or episode is imported, or Radarr/Sonarr report a problem, a number appears on that app's icon instead of a pop-up. Opening the app clears it, and the bell lists everything. The server keeps watching even when no browser is open.
 - **Settings for each app**: connection details, which events to count, and preferences such as the default quality profile and root folder for new titles, Sonarr's monitoring choice, the calendar range, the NZBGet category and priority, which Jellyfin user to browse as, and which home rows to show.
 - **Music**: a Winamp-style player for your Jellyfin music library and the audio files in your shared folders. It has a green LCD display with a spectrum analyser, a 10-band equalizer with Winamp's presets, balance, shuffle/repeat, and a playlist editor. Its visualizer works like MilkDrop: GPU-rendered feedback warps react to bass, mids, treble and beats, with presets that blend into one another, and it can go full screen. Phones get lock-screen and headphone controls. Albums, songs and audio files can be sent to it from Jellyfin and Files.
+- **Calculator**: basic, scientific (trigonometry in degrees, radians or gradians, powers, roots, logs, factorials, memory and history) and graphing (up to eight functions, with pan, zoom and tracing).
+- **Notes**: a text and code editor like Notepad++, with tabs, syntax colours for about 40 languages and formats (code, config, logs, subtitles, CSV and more), line numbers, word wrap, find and replace with regular expressions, line tools (duplicate, move, sort, comment) and control over line endings and the BOM. It opens and saves files in your shared folders or on your device, and remembers open tabs, including unsaved ones.
+- **Preview**: opens files from Files. You can flick through pictures in a folder, zoom and rotate them, and see TIFF, HEIC and PSD files. Video and audio play in any format, converted on the server while they play when the browser can't handle them, with audio-track choice. PDFs have selectable text. Word, Excel and PowerPoint files open too. See [Preview helpers](#preview-helpers).
 - **Screensaver**: ten classics: Flying Toasters (in isometric 3D), 3D Maze (Windows 98), 3D Pipes, Starfield, Mystify, 3D Text, Bubbles, Ribbons, Flurry and Hello (macOS), or a random one each time. Turn it on and pick the delay in Settings → Screensaver. With *Require password to return* on, it locks MediaDesk in every tab until the portal password is entered again; music from Jellyfin keeps playing. The MediaDesk menu can also start the screensaver or lock the screen right away.
-- **Files**: a file manager for folders you choose on the MediaDesk server. You can browse, upload (drag and drop, any size), download, create folders, rename, cut/copy/paste, drag files between folders, delete, preview images, play video and audio, and edit text files such as `.nfo` and `.srt`.
+- **Files**: a file manager for folders you choose on the MediaDesk server. You can browse, upload (drag and drop, any size), download, create folders, rename, cut/copy/paste, drag files between folders and delete. Pictures, video, PDFs and Office files open in Preview, text files open in Notes, and any picture can become the wallpaper.
 - **Web UI windows**: open any service's own interface inside a window for anything MediaDesk doesn't cover.
 
 Your API keys stay on the MediaDesk server. The browser only talks to MediaDesk, which adds the credentials when it forwards each request. This also avoids CORS problems.
@@ -110,6 +115,21 @@ The Files app only works with folders you've shared in **Settings → Files**, w
 - **Network shares on Windows:** the startup task runs as the SYSTEM account, which can't see mapped drive letters such as `Z:`. Use the share's full address, such as `\\NAS\Media`, and make sure the share allows the PC's computer account.
 - **Docker:** Files only sees folders mounted into the container. Add each one under `volumes:` in `docker-compose.yml` (for example `- /mnt/media:/media`), then share the container path (`/media`).
 
+### Preview helpers
+
+Preview handles pictures, PDFs, most Office files and the video and audio formats your browser supports by itself. Two free programs on the MediaDesk computer let it do more. **Settings → Files** shows whether each one was found and how to install it.
+
+| Program | Adds | Install |
+| --- | --- | --- |
+| **ffmpeg** | Any video or audio format (AVI, WMV, FLV, MPEG-TS, HEVC or AC3 in MKV, WMA, APE, …), plus TIFF/HEIC/PSD pictures. Video already in H.264 is passed through without re-encoding, so it uses little CPU. | Windows: `winget install Gyan.FFmpeg`, then run `restart-windows.cmd`. Linux: `sudo apt install ffmpeg`. Included in the Docker image. |
+| **LibreOffice** | Word, Excel and PowerPoint files shown exactly as they print, including old `.doc`, `.xls` and `.ppt` files. Converted documents are cached for a few days. | Windows: `winget install TheDocumentFoundation.LibreOffice`. Linux: `sudo apt install libreoffice-core libreoffice-writer libreoffice-calc libreoffice-impress`. Docker: build with `--build-arg WITH_OFFICE=true`. |
+
+Without LibreOffice, `.docx`, `.xlsx` and `.pptx` files are shown by libraries in the browser (see `public/vendor/README.md`). They run in an isolated worker, so a damaged or hostile file can't affect MediaDesk. If a program is installed somewhere unusual, set its path under *Installed somewhere unusual?* in Settings → Files.
+
+## Custom wallpapers
+
+In Settings → Appearance, choose **Add picture…** to upload one from your device or pick one from the shared folders. You can also right-click a picture in Files and choose **Set as desktop wallpaper**. Pictures are kept in a `wallpapers` folder next to `config.json` (up to 24 pictures, 40 MB each), so every device can use them.
+
 ## Security notes
 
 - Logging in to MediaDesk gives full API access to every connected service. Treat the portal password like an admin password.
@@ -130,6 +150,7 @@ Everything works on touch screens too:
 - **Same features:** phones and tablets get every feature desktop has, including the widgets (which appear under the desktop icons on phones) and every value in the download queues (shown as labelled cards).
 - **Long-press = right-click:** press and hold anywhere you'd right-click with a mouse (files, dock icons, the wallpaper) to open the same menu. Holding an icon-only button shows its name.
 - **Selecting in Files:** use the checkboxes, or **Select all** in the header. Once something is selected, tapping other items adds them to the selection; with nothing selected, a tap opens the item. To move files, use Cut and Paste, since dragging isn't available on touch screens.
+- **Arranging icons:** hold a desktop icon for a moment, then drag it. Drop it on another icon to make a group, or on the dock to add it. Swiping without holding still scrolls the page.
 - **Windows:** on phones every app fills the screen. Switch between apps with the dock.
 
 ## Keyboard shortcuts
@@ -139,7 +160,10 @@ Everything works on touch screens too:
 | `Ctrl+Space`, `Ctrl+K`, `/` | Open the launcher / search |
 | `Alt+W` | Close the focused window |
 | `Esc` | Close the launcher, dialog or menu |
-| Double-click a title bar | Maximise or restore |
+| Double-click a title bar | Maximise or restore (or minimise, in Settings → Dock & Desktop) |
+| `Ctrl+S`, `Ctrl+O`, `Ctrl+F`, `Ctrl+H`, `Ctrl+G`, `F3` | In Notes: save, open, find, replace, go to line, find next |
+| `Ctrl+D`, `Alt+↑/↓`, `Ctrl+/`, `Alt+Z`, `Alt+N` | In Notes: duplicate line, move line, comment, word wrap, new tab |
+| `←` `→`, `+` `−` `0` | In Preview: previous/next picture, zoom, fit |
 
 ## Troubleshooting
 
