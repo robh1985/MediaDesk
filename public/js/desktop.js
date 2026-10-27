@@ -12,6 +12,7 @@ import { startDock } from './dock.js';
 import { startDesktopIcons, desktopMenuItems } from './deskicons.js';
 import { PLACEABLE_EXCLUDE } from './layout.js';
 import { itemImage, searchJellyfin } from './apps/jellyfin.js';
+import { SYSTEMS as GAME_SYSTEMS } from './apps/console/systems.js';
 
 // ---------------------------------------------------------------------------
 // Appearance
@@ -364,6 +365,14 @@ function buildWidgets() {
 // ---------------------------------------------------------------------------
 
 const libCache = {};
+// The Game Console's library, for the launcher (only when a games folder is set).
+let gamesCache = null;
+async function cachedGames() {
+  if (gamesCache && Date.now() - gamesCache.at < 5 * 60e3) return gamesCache.games;
+  const lib = await (await fetch('/portal/games/library', { credentials: 'same-origin' })).json();
+  gamesCache = { at: Date.now(), games: lib.configured ? lib.games || [] : [] };
+  return gamesCache.games;
+}
 async function cachedLibrary(svc) {
   const c = libCache[svc];
   if (c && Date.now() - c.at < 5 * 60e3) return c.items;
@@ -463,13 +472,16 @@ export function openLauncher() {
         title: m.type === 'episode' ? `${m.grandparentTitle} — ${m.title}` : m.title, sub: `${m.type[0].toUpperCase()}${m.type.slice(1)}${m.year ? ' · ' + m.year : ''}`,
         poster: plexImage(m.type === 'episode' ? m.grandparentThumb || m.thumb : m.thumb, 120), kind: 'Plex', action: () => openApp('plexviewer', { ratingKey: m.ratingKey }),
       }))).catch(() => []) : [],
+      cachedGames().then((games) => games.filter((g) => g.title.toLowerCase().includes(term)).slice(0, 8).map((g) => ({
+        title: g.title, sub: GAME_SYSTEMS[g.system]?.name || g.system, icon: appIcon.console, kind: 'Game', action: () => openApp('console', { game: g.id }),
+      }))).catch(() => []),
     ]);
     if (mine !== seq) return;
     const wanted = !libs[0].length && !libs[1].length && !addHits.length ? [
       isConfigured('radarr') && { title: `Add movie “${input.value.trim()}”`, sub: 'Search Radarr', icon: appIcon.radarr, kind: 'Radarr', action: () => openApp('radarr', { section: 'add', term: input.value.trim() }) },
       isConfigured('sonarr') && { title: `Add series “${input.value.trim()}”`, sub: 'Search Sonarr', icon: appIcon.sonarr, kind: 'Sonarr', action: () => openApp('sonarr', { section: 'add', term: input.value.trim() }) },
     ].filter(Boolean) : [];
-    renderGroups([...groups, { title: 'Movies', items: libs[0] }, { title: 'Series', items: libs[1] }, { title: 'In Jellyfin', items: libs[2] }, { title: 'In Plex', items: libs[3] }, { title: 'Not in your library', items: wanted }]);
+    renderGroups([...groups, { title: 'Movies', items: libs[0] }, { title: 'Series', items: libs[1] }, { title: 'In Jellyfin', items: libs[2] }, { title: 'In Plex', items: libs[3] }, { title: 'Games', items: libs[4] }, { title: 'Not in your library', items: wanted }]);
   }, 160);
 
   input.addEventListener('input', search);

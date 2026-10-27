@@ -122,6 +122,10 @@ async function start() {
       api('/portal/games/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ played: gameId, start: true }) }).catch(() => {});
       post({ type: 'console-started' });
       assignPads();
+      // Touch screens have no Esc or Home button: give them one for the game menu.
+      if (matchMedia('(pointer: coarse)').matches || navigator.maxTouchPoints > 0) {
+        document.body.append(h('button', { class: 'menu-btn', 'aria-label': 'Game menu', onclick: openMenu }, 'Menu'));
+      }
       addEventListener('gamepadconnected', () => setTimeout(assignPads, 100));
       setInterval(assignPads, 2000);
       hint();

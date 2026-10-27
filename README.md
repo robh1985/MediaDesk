@@ -15,6 +15,7 @@ One web portal for **Radarr, Sonarr, NZBGet, Jellyfin and Plex**, laid out like 
 - **Notification badges**: when a download finishes or fails, a movie or episode is imported, or Radarr/Sonarr report a problem, a number appears on that app's icon instead of a pop-up. Opening the app clears it, and the bell lists everything. The server keeps watching even when no browser is open.
 - **Plex**: manage your Plex Media Server: an overview (version, Plex Pass, library sizes, running activity), *Now Playing* with direct play / direct stream / transcode details, hardware transcoding, bandwidth and local or remote, plus *Stop stream* with a message to the viewer (Plex Pass). Also library scans, metadata refresh, empty trash, a library browser with item details (mark watched, refresh, delete), watch history, scheduled tasks you can run now, and maintenance (clean bundles, optimise the database, check for updates).
 - **Plex Viewer**: watch Plex in the browser. A home screen with Continue watching, On deck and Recently added; library grids with sort, genre and unwatched filters; search; show pages with seasons and episodes. The player resumes where you left off, reports progress back to Plex (so it carries over to your other Plex apps), has quality, audio and subtitle choices, and plays the next episode automatically. Plex converts the video when the browser can't play it as is.
+- **The Game Console**: an all-in-one game console for the games in a folder on your server: NES, Super NES, N64, Game Boy / Color / Advance, DS, Virtual Boy, Genesis / Mega Drive, Master System, Sega CD, 32X, Game Gear, Saturn, PlayStation, PSP, TurboGrafx-16, Atari 2600 / 5200 / 7800 / Lynx / Jaguar, Neo Geo Pocket, WonderSwan, ColecoVision, 3DO and arcade. Play with the keyboard or any USB or Bluetooth controller, remap every button per console and per player (up to four), and pick from ten looks: a 1980s–90s living-room entertainment centre, one inspired by Apple TV, and eight more inspired by easy console and TV menus. Saves, save states (with pictures) and *Continue where you left off* are kept on the server, so they follow you between devices. Each console has its own settings: emulator, BIOS, screen filter (including CRT looks), rewind, fast-forward and on-screen touch controls.
 - **Settings for each app**: connection details, which events to count, and preferences such as the default quality profile and root folder for new titles, Sonarr's monitoring choice, the calendar range, the NZBGet category and priority, which Jellyfin user to browse as, and which home rows to show.
 - **Music**: a Winamp-style player for your Jellyfin music library and the audio files in your shared folders. It has a green LCD display with a spectrum analyser, a 10-band equalizer with Winamp's presets, balance, shuffle/repeat, and a playlist editor. Its visualizer works like MilkDrop: GPU-rendered feedback warps react to bass, mids, treble and beats, with presets that blend into one another, and it can go full screen. Phones get lock-screen and headphone controls. Albums, songs and audio files can be sent to it from Jellyfin and Files.
 - **Calculator**: basic, scientific (trigonometry in degrees, radians or gradians, powers, roots, logs, factorials, memory and history) and graphing (up to eight functions, with pan, zoom and tracing).
@@ -100,6 +101,7 @@ You can configure MediaDesk in three ways. Environment variables override the co
 | `JELLYFIN_URL`, `JELLYFIN_API_KEY` | Jellyfin → *Dashboard → API Keys → +* |
 | `PLEX_URL`, `PLEX_TOKEN` | Easier: *Settings → Plex → Sign in with Plex*. Otherwise the server address (`http://<ip>:32400`) and an `X-Plex-Token` |
 | `FILE_ROOTS` | Optional. Folders the Files app may manage (also settable in *Settings → Files*) |
+| `GAMES_DIR` | Optional. The Game Console's games folder (also settable in *Settings → The Game Console*) |
 | `JELLYFIN_USER_ID` | Optional. Which user's view to browse (defaults to the first admin) |
 | `*_PUBLIC_URL` | Optional. The browser-facing URL used for "Open in…" links and Web UI windows, if it differs from the server-side URL |
 | `PORT`, `HOST`, `CONFIG_PATH` | Server settings (defaults: `8080`, `0.0.0.0`, `./config/config.json`). The port can also be set as `"port"` in the config file. |
@@ -131,6 +133,17 @@ Without LibreOffice, `.docx`, `.xlsx` and `.pptx` files are shown by libraries i
 
 On Windows, MediaDesk runs as the SYSTEM account, which doesn't share your PATH. It therefore looks for ffmpeg in every user's winget, Scoop and Chocolatey folders, and for LibreOffice in Program Files. After installing, run `restart-windows.cmd` (or press **Check again** in Settings → Files). The startup log line `Preview helpers: …` shows where each program was found.
 
+## The Game Console
+
+Choose the folder that holds your games in **Settings → The Game Console** (or set `GAMES_DIR`). MediaDesk only reads it. It works out each game's console from its file type, the folder it's in and, for disc images, the disc itself; sub-folders named after the consoles (`NES`, `SNES`, `N64`, `Genesis`, `PlayStation`, `Game Boy`, …) settle anything ambiguous, such as `.bin` files. Zipped games work. Multi-file discs work as `.cue` (with their `.bin` tracks), `.m3u` playlists or, best, a single `.chd` per disc — browsers have to load the whole disc into memory, so compressed images help.
+
+- **BIOS files:** consoles that need one (Sega CD, Saturn, 3DO, Lynx, ColecoVision, Atari 5200, and the PlayStation for the more accurate emulator) look for it in a `BIOS` sub-folder; pick it in the app under *Settings → Consoles*.
+- **Box art:** a picture with the same name as the game (next to it, or in a `boxart` / `covers` folder) is used first. Otherwise the server fetches covers from the libretro-thumbnails project when it can reach the internet, and draws one when it can't.
+- **Emulators:** games run in your browser with [EmulatorJS](https://emulatorjs.org) (GPL-3.0) and the libretro cores it packages. MediaDesk doesn't include them: the first time a console is played, the server downloads its emulator from the npm registry (`NPM_REGISTRY` changes where) into its config folder, so it needs internet access once per console. *Settings → Consoles → Download emulator now* fetches one ahead of time.
+- **Controllers:** any controller the browser sees as a standard gamepad works (Xbox, PlayStation, Switch Pro, 8BitDo…). Press a button on it once so the browser notices it. In a game, **Home** or **Select + Start** (or **Esc** on the keyboard) opens the game menu: save and load states, restart, change disc, full screen, and quit.
+- **Not playable here:** Dreamcast games are listed, but no Dreamcast emulator runs in a browser yet. PSP games open in their own tab, because their emulator needs a page to itself.
+- **Docker:** mount your games folder into the container (for example `- /mnt/games:/games:ro`) and set `GAMES_DIR=/games`.
+
 ## Custom wallpapers
 
 In Settings → Appearance, choose **Add picture…** to upload one from your device or pick one from the shared folders. You can also right-click a picture in Files and choose **Set as desktop wallpaper**. Pictures are kept in a `wallpapers` folder next to `config.json` (up to 24 pictures, 40 MB each), so every device can use them.
@@ -147,6 +160,7 @@ In Settings → Appearance, choose **Add picture…** to upload one from your de
 - Radarr v3+ and Sonarr v3/v4 (API v3)
 - NZBGet v18+ and nzbget-ng
 - Jellyfin 10.8+
+- The Game Console: a recent Chrome, Edge, Firefox or Safari (WebAssembly and WebGL 2)
 - Plex Media Server 1.30+ (Stop stream and full watch history need Plex Pass on the server owner's account)
 
 ## Phones and tablets
@@ -181,5 +195,7 @@ To see what a touch screen is doing, open MediaDesk with `?touchdebug` at the en
 - **A Web UI window is blank**: the service may block being embedded in a frame, or your browser can't reach the public URL. Use "Open in new tab".
 - **Plex sign-in finds the server but it won't connect**: pick an address the *MediaDesk server* can reach (usually the `local` one), or type one such as `http://192.168.1.20:32400`. If Plex requires secure connections, choose the `https://…plex.direct` address.
 - **Plex video stutters**: lower the quality in the player (⚙) or in *Settings → Plex*.
+- **A game says it couldn't load the emulator**: the MediaDesk server couldn't download it from `registry.npmjs.org`. Check the server's internet access (or set `NPM_REGISTRY` to a mirror), then try again.
+- **A game is under the wrong console**: move it into a folder named after the right console, then *Settings → Games & storage → Look for new games* in The Game Console.
 - **Deleting in Plex fails**: turn on *Allow media deletion* in Plex → *Settings → Library*.
 - **Jellyfin shows the wrong user's watch state**: set `JELLYFIN_USER_ID` (or the field in Settings) to your own user ID.

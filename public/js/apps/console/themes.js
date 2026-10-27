@@ -324,7 +324,7 @@ function bigPicture(root, model, app) {
   const grid = h('div', { class: 'bp-grid' }, col?.games.length ? col.games.map((g) => app.gameTile(g, { cls: 'bp-tile' })) : emptyRow(model));
   root.append(h('div', { class: 'bp' },
     h('div', { class: 'bp-top' }, h('span', { class: 'bp-lb' }, 'LB'), h('div', { class: 'bp-tabs' }, cols.map((c) => colButton(app, id, c, `bp-tab ${c.id === col?.id ? 'on' : ''}`, [c.short, h('span', { class: 'bp-n' }, c.games.length)]))), h('span', { class: 'bp-lb' }, 'RB'), h('div', { class: 'bp-chrome' }, app.chrome())),
-    h('div', { class: 'bp-head' }, h('h1', {}, col?.name || 'Library'), h('span', {}, `${col?.games.length || 0} games`)),
+    h('div', { class: 'bp-head' }, h('h1', {}, col?.name || 'Library'), h('span', {}, `${col?.games.length || 0} game${col?.games.length === 1 ? '' : 's'}`)),
     grid,
     h('div', { class: 'bp-hints' }, h('span', {}, h('b', { class: 'a' }, 'A'), 'Select'), h('span', {}, h('b', { class: 'b' }, 'B'), 'Back'), h('span', {}, h('b', { class: 'y' }, 'Y'), 'Favorite'), h('span', {}, h('b', {}, '☰'), 'Settings'))));
   return { onTab: (d) => cycleCol(app, id, model, d) };

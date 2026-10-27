@@ -7,6 +7,7 @@ services:
       - "8080:8080"
     volumes:
       - ./config:/config
+      # - /mnt/games:/games:ro   # The Game Console: your games folder (then set GAMES_DIR below)
       # Folders for the Files app: mount them here, then add the container path (e.g. /media) in Settings > Files.
       # - /mnt/media:/media
     environment:
@@ -24,5 +25,6 @@ services:
       # JELLYFIN_API_KEY: ""
       # PLEX_URL: "http://plex:32400"   # or use Settings → Plex → Sign in with Plex
       # PLEX_TOKEN: ""
+      # GAMES_DIR: "/games"
       # Optional browser-facing URLs for "Open in …" links, if different from the URLs above:
       # RADARR_PUBLIC_URL: "https://radarr.example.com"
