@@ -1563,3 +1563,16 @@ button.notes-st:hover { background: var(--hover); color: var(--text); }
 .dock-apps-name { display: flex; align-items: center; gap: 10px; }
 .dock-apps-icon { width: 26px; height: 26px; display: inline-flex; }
 .dock-apps-icon svg { width: 100%; height: 100%; }
+
+/* Files on phones: the whole pane scrolls as one page (folder buttons and toolbar scroll away,
+   the column header sticks to the top, the status bar to the bottom), so a swipe anywhere scrolls. */
+@media (max-width: 760px) {
+  .app-layout.fm { overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; display: block; }
+  .app-layout.fm > .app-sidebar { flex: none; }
+  .app-layout.fm > .fm-main { display: block; min-height: 100%; }
+  .app-layout.fm .fm-list { overflow: visible; min-height: 50vh; }
+  .app-layout.fm .fm-head { top: 0; }
+  .app-layout.fm .fm-status { position: sticky; bottom: 0; z-index: 2; }
+  .app-layout.fm .fm-uploads { position: fixed; left: 12px; right: 12px; width: auto; bottom: 90px; }
+  .app-layout.fm .fm-drop { position: fixed; }
+}
