@@ -266,20 +266,41 @@ const MIME = {
   '.md': 'text/plain; charset=utf-8',
 };
 
+// The page loads its scripts and styles from /v/<build>/…, so every update uses new addresses.
+// Caches in between (a Cloudflare tunnel keeps .js and .css files for hours whatever the server
+// says) then can't hand out old code with a new page. Those files never change at a given address,
+// so they may be kept for a long time; the page itself is never cached.
+let indexHtml = null;
+function serveIndex(req, res) {
+  if (!indexHtml) {
+    indexHtml = fs.readFileSync(path.join(PUBLIC_DIR, 'index.html'), 'utf8')
+      .replace(/(href|src)="(css|js)\//g, `$1="v/${BUILD_ID}/$2/`);
+  }
+  res.writeHead(200, {
+    'Content-Type': 'text/html; charset=utf-8',
+    'Cache-Control': 'no-store, max-age=0',
+    'CDN-Cache-Control': 'no-store',
+  });
+  res.end(req.method === 'HEAD' ? undefined : indexHtml);
+}
+
 function serveStatic(req, res, pathname) {
   let rel = decodeURIComponent(pathname);
-  if (rel === '/') rel = '/index.html';
+  const versioned = /^\/v\/[A-Za-z0-9_-]{1,64}(\/.*)$/.exec(rel);
+  if (versioned) rel = versioned[1];
+  if (rel === '/' || rel === '/index.html') return serveIndex(req, res);
   const file = path.normalize(path.join(PUBLIC_DIR, rel));
   if (!file.startsWith(PUBLIC_DIR + path.sep)) return sendJson(res, 403, { error: 'Forbidden' });
   fs.stat(file, (err, st) => {
     if (err || !st.isFile()) return sendJson(res, 404, { error: 'Not found' });
     // Let browsers re-use unchanged files (the PDF viewer alone is several MB).
     const etag = `"${st.size.toString(36)}-${Math.floor(st.mtimeMs).toString(36)}"`;
-    if (req.headers['if-none-match'] === etag) { res.writeHead(304, { ETag: etag, 'Cache-Control': 'no-cache' }); return res.end(); }
+    const cache = versioned ? 'public, max-age=31536000, immutable' : 'no-cache';
+    if (req.headers['if-none-match'] === etag) { res.writeHead(304, { ETag: etag, 'Cache-Control': cache }); return res.end(); }
     res.writeHead(200, {
       'Content-Type': MIME[path.extname(file)] || 'application/octet-stream',
       'Content-Length': st.size,
-      'Cache-Control': 'no-cache',
+      'Cache-Control': cache,
       ETag: etag,
     });
     if (req.method === 'HEAD') return res.end();

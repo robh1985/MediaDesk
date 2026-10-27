@@ -7,7 +7,7 @@ import { h, clear } from '../ui.js';
 
 export function runOfficeWorker(kind, buffer, timeout = 90e3) {
   return new Promise((resolve, reject) => {
-    const worker = new Worker('/js/apps/office-worker.js');
+    const worker = new Worker(new URL('./office-worker.js', import.meta.url));
     const timer = setTimeout(() => { worker.terminate(); reject(new Error('The document took too long to open')); }, timeout);
     worker.onmessage = (e) => { clearTimeout(timer); worker.terminate(); if (e.data.error) reject(new Error(e.data.error)); else resolve(e.data); };
     worker.onerror = (e) => { clearTimeout(timer); worker.terminate(); reject(new Error(e.message || 'Could not read the document')); };

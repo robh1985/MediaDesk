@@ -169,6 +169,10 @@ Everything works on touch screens too:
 
 ## Troubleshooting
 
+**Behind Cloudflare or another proxy/CDN:** MediaDesk loads its scripts and styles from addresses that include the build (`/v/<build>/…`), and the page itself is never cached, so updates reach every device even when a proxy caches `.js` and `.css` files. After updating from a version older than this, clear MediaDesk's site data once on each phone (Chrome: ⋮ → Settings → Site settings → All sites → your MediaDesk address → Delete data), or wait a few hours for the old copies to expire. In Cloudflare you can also set **Caching → Configuration → Browser Cache TTL** to *Respect Existing Headers*.
+
+To see what a touch screen is doing, open MediaDesk with `?touchdebug` at the end of the address. A panel then logs each swipe, and **Copy log** copies it.
+
 - **"Could not reach radarr: ECONNREFUSED"**: the URL is wrong *from the MediaDesk server's point of view*. Inside Docker, `localhost` means the MediaDesk container itself, so use the host's LAN IP or the container name instead.
 - **A Web UI window is blank**: the service may block being embedded in a frame, or your browser can't reach the public URL. Use "Open in new tab".
 - **Jellyfin shows the wrong user's watch state**: set `JELLYFIN_USER_ID` (or the field in Settings) to your own user ID.
