@@ -17,6 +17,11 @@ import { previewApp } from './apps/preview.js';
 
 applyAppearance();
 
+// Troubleshooting: add ?touchdebug to the address to log what each swipe does.
+if (/[?&#]touchdebug\b/.test(location.href)) {
+  import('./touchdebug.js').then((m) => m.startTouchDebug());
+}
+
 [dashboardApp, makeArrApp('radarr'), makeArrApp('sonarr'), nzbgetApp, jellyfinApp, musicApp, filesApp, notesApp, previewApp, calculatorApp, settingsApp, webviewApp,
   { id: 'launcher', name: 'Search', icon: '', open() {} }].forEach(registerApp);
 

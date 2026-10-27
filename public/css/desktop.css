@@ -1,6 +1,7 @@
 /* MediaDesk — desktop shell & app styles */
 
 :root {
+  --css-rev: "touch-4";
   --accent: #3b82f6;
   --radarr: #f5a300;
   --sonarr: #2a8fe8;
