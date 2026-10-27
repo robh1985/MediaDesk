@@ -758,6 +758,10 @@ button.health-item { cursor: pointer; }
   .table .tr.th { display: none; }
   /* Phone windows fill the screen; hide the desktop behind them so it can't show through the dock. */
   body.has-window #desktop-icons, body.has-window #widgets { visibility: hidden; }
+  /* …and stop the desktop behind it being a scroll area at all. Android Chrome picks which area a
+     swipe scrolls on the GPU and could otherwise choose the hidden desktop under the window. */
+  body.has-window #desktop { overflow: hidden; }
+  body.has-window #windows { pointer-events: auto; }
   .nzb-header { grid-template-columns: 1fr; gap: 10px; }
   .nzb-controls { flex-direction: row; align-items: center; }
   .dash-grid { grid-template-columns: 1fr; }
