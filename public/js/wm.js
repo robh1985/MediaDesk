@@ -1,6 +1,6 @@
 // Window manager: draggable, resizable, snappable windows with minimise/maximise.
 
-import { h } from './ui.js';
+import { h, touchScrollFallback } from './ui.js';
 import { icon } from './icons.js';
 import { dockReserve, layout, onLayout } from './layout.js';
 
@@ -26,6 +26,8 @@ export const focusedWindow = () => [...windows.values()].find((w) => w.el.classL
 
 export function initWM(container) {
   layer = container;
+  // Make sure swipes scroll app content on phones whose browsers don't do it by themselves.
+  touchScrollFallback(layer);
   snapPreview = h('div', { class: 'snap-preview' });
   layer.append(snapPreview);
   const relayout = () => {

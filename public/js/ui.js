@@ -206,6 +206,69 @@ document.addEventListener('click', (e) => {
 
 export const isTouch = () => matchMedia('(pointer: coarse)').matches;
 
+// A safety net for touch scrolling. If a vertical swipe hasn't made the browser scroll anything
+// after a short distance (some phone browsers don't pass swipes to scroll areas inside fixed
+// layers), scroll the area under the finger by hand, with momentum. While the browser is scrolling by itself its
+// touchmove events can't be cancelled, so this stays out of the way.
+// `host` listens; the area scrolled is the nearest vertical scroll area around the touch, unless
+// something on the way handles touch itself (canvases, sliders, zoomable pictures).
+function scrollAreaFor(target, host) {
+  for (let n = target; n && n !== host.parentElement; n = n.parentElement) {
+    if (!(n instanceof Element)) continue;
+    const st = getComputedStyle(n);
+    if (!['auto', 'manipulation', 'pan-y', 'pan-x pan-y'].includes(st.touchAction) || n.matches('canvas, input[type="range"], textarea, select')) return null;
+    if ((st.overflowY === 'auto' || st.overflowY === 'scroll') && n.scrollHeight > n.clientHeight + 1) return n;
+  }
+  return null;
+}
+
+export function touchScrollFallback(host) {
+  let s = null, raf = 0, el = null;
+  host.addEventListener('touchstart', (e) => {
+    cancelAnimationFrame(raf);
+    el = e.touches.length === 1 ? scrollAreaFor(e.target, host) : null;
+    if (!el) { s = null; return; }
+    const t = e.touches[0];
+    s = { x: t.clientX, y: t.clientY, top: el.scrollTop, last: t.clientY, at: performance.now(), v: 0, manual: false };
+  }, { passive: true });
+  host.addEventListener('touchmove', (e) => {
+    if (!s || e.touches.length !== 1) return;
+    const t = e.touches[0];
+    if (!s.manual) {
+      // The browser took over (or scrolled something): nothing to do.
+      if (!e.cancelable || el.scrollTop !== s.top) { s = null; return; }
+      const dy = t.clientY - s.y, dx = t.clientX - s.x;
+      if (Math.abs(dy) < 24 || Math.abs(dy) < Math.abs(dx) * 1.2) return;
+      s.manual = true;
+      s.last = t.clientY;
+    }
+    e.preventDefault();
+    const now = performance.now();
+    const step = t.clientY - s.last;
+    el.scrollTop -= step;
+    s.v = 0.8 * (step / Math.max(1, now - s.at)) + 0.2 * s.v;
+    s.last = t.clientY;
+    s.at = now;
+  }, { passive: false });
+  const end = () => {
+    if (s?.manual && Math.abs(s.v) > 0.05) {
+      let v = s.v * 16, prev = performance.now();
+      const area = el;
+      const glide = (now) => {
+        const dt = Math.min(48, now - prev) / 16;
+        prev = now;
+        area.scrollTop -= v * dt;
+        v *= Math.pow(0.95, dt);
+        if (Math.abs(v) > 0.3) raf = requestAnimationFrame(glide);
+      };
+      raf = requestAnimationFrame(glide);
+    }
+    s = null;
+  };
+  host.addEventListener('touchend', end, { passive: true });
+  host.addEventListener('touchcancel', end, { passive: true });
+}
+
 // ---------------------------------------------------------------------------
 // Common view pieces
 // ---------------------------------------------------------------------------

@@ -15,8 +15,9 @@
   <main id="desktop">
     <div id="desktop-icons"></div>
     <aside id="widgets"></aside>
-    <div id="windows"></div>
   </main>
+  <!-- Outside #desktop: on phones #desktop scrolls, and windows mustn't sit inside a scroll area. -->
+  <div id="windows"></div>
   <nav id="dock"></nav>
   <div id="toasts" aria-live="polite"></div>
   <script type="module" src="js/main.js"></script>
