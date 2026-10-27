@@ -124,7 +124,9 @@ Preview handles pictures, PDFs, most Office files and the video and audio format
 | **ffmpeg** | Any video or audio format (AVI, WMV, FLV, MPEG-TS, HEVC or AC3 in MKV, WMA, APE, …), plus TIFF/HEIC/PSD pictures. Video already in H.264 is passed through without re-encoding, so it uses little CPU. | Windows: `winget install Gyan.FFmpeg`, then run `restart-windows.cmd`. Linux: `sudo apt install ffmpeg`. Included in the Docker image. |
 | **LibreOffice** | Word, Excel and PowerPoint files shown exactly as they print, including old `.doc`, `.xls` and `.ppt` files. Converted documents are cached for a few days. | Windows: `winget install TheDocumentFoundation.LibreOffice`. Linux: `sudo apt install libreoffice-core libreoffice-writer libreoffice-calc libreoffice-impress`. Docker: build with `--build-arg WITH_OFFICE=true`. |
 
-Without LibreOffice, `.docx`, `.xlsx` and `.pptx` files are shown by libraries in the browser (see `public/vendor/README.md`). They run in an isolated worker, so a damaged or hostile file can't affect MediaDesk. If a program is installed somewhere unusual, set its path under *Installed somewhere unusual?* in Settings → Files.
+Without LibreOffice, `.docx`, `.xlsx` and `.pptx` files are shown by libraries in the browser (see `public/vendor/README.md`). They run in an isolated worker, so a damaged or hostile file can't affect MediaDesk. If a program is installed somewhere unusual, set its path (or its folder) under *Installed somewhere unusual?* in Settings → Files.
+
+On Windows, MediaDesk runs as the SYSTEM account, which doesn't share your PATH. It therefore looks for ffmpeg in every user's winget, Scoop and Chocolatey folders, and for LibreOffice in Program Files. After installing, run `restart-windows.cmd` (or press **Check again** in Settings → Files). The startup log line `Preview helpers: …` shows where each program was found.
 
 ## Custom wallpapers
 

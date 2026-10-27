@@ -574,7 +574,11 @@ server.on('error', (err) => {
 server.listen(PORT, HOST, () => {
   console.log(`MediaDesk ${VERSION} starting`);
   notifier.start();
-  media.detect(config).then((t) => console.log(`Preview helpers: ffmpeg ${t.ffmpeg ? 'found' : 'not found'}, LibreOffice ${t.office ? 'found' : 'not found'}`));
+  media.detect(config).then((t) => {
+    const w = media.where();
+    console.log(`Preview helpers: ffmpeg ${t.ffmpeg ? `found (${w.ffmpeg})` : w.ffmpeg ? 'found but ffprobe is missing' : 'not found'}, LibreOffice ${t.office ? `found (${w.soffice})` : 'not found'}`);
+    if (!t.ffmpeg || !t.office) console.log('  Install the missing ones (see Settings -> Files), or enter their location there under "Installed somewhere unusual?".');
+  });
   console.log(`MediaDesk running at http://${HOST === '0.0.0.0' ? 'localhost' : HOST}:${PORT}${MOCK ? '  (demo mode, fake data)' : ''}`);
   if (!MOCK) {
     const missing = SERVICES.filter((s) => !isConfigured(s));

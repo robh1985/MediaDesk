@@ -33,30 +33,82 @@ function run(cmd, args, { timeout = 20e3, maxBytes = 4 * 1024 * 1024 } = {}) {
 }
 
 async function firstWorking(list, args) {
-  for (const cmd of list.filter(Boolean)) {
+  for (const cmd of [...new Set(list.filter(Boolean))]) {
     const r = await run(cmd, args, { timeout: 15e3 });
     if (r.code === 0) return cmd;
   }
   return null;
 }
 
+const exists = (p) => { try { return fs.statSync(p).isFile(); } catch { return false; } };
+const subdirs = (p) => { try { return fs.readdirSync(p, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => path.join(p, d.name)); } catch { return []; } };
+
+// A configured path may be the program itself or the folder it is in.
+function expand(p, names) {
+  if (!p) return [];
+  const clean = String(p).trim().replace(/^"(.*)"$/, '$1');
+  if (!clean) return [];
+  try { if (fs.statSync(clean).isDirectory()) return names.map((n) => path.join(clean, n)); } catch { /* not a folder */ }
+  return [clean];
+}
+
+// On Windows MediaDesk usually runs as the SYSTEM account (see install-windows.cmd), which doesn't
+// have your PATH. winget, Scoop and Chocolatey install ffmpeg per user, so look in every profile.
+function windowsFfmpegPlaces(exe) {
+  const out = [];
+  const users = path.join(process.env.SystemDrive || 'C:', '\\Users');
+  for (const home of subdirs(users)) {
+    const winget = path.join(home, 'AppData', 'Local', 'Microsoft', 'WinGet');
+    out.push(path.join(winget, 'Links', exe));
+    for (const pkg of subdirs(path.join(winget, 'Packages')).filter((d) => /ffmpeg/i.test(path.basename(d)))) {
+      out.push(path.join(pkg, 'bin', exe));
+      for (const build of subdirs(pkg)) out.push(path.join(build, 'bin', exe));
+    }
+    out.push(path.join(home, 'scoop', 'shims', exe), path.join(home, 'scoop', 'apps', 'ffmpeg', 'current', 'bin', exe));
+  }
+  const pf = [process.env.ProgramFiles, process.env.ProgramW6432, 'C:\\Program Files'].filter(Boolean);
+  for (const base of pf) out.push(path.join(base, 'WinGet', 'Links', exe), path.join(base, 'ffmpeg', 'bin', exe));
+  out.push(path.join(process.env.ProgramData || 'C:\\ProgramData', 'chocolatey', 'bin', exe), 'C:\\ffmpeg\\bin\\' + exe);
+  return out.filter(exists);
+}
+
+function windowsOfficePlaces() {
+  const out = [];
+  for (const base of [process.env.ProgramFiles, process.env.ProgramW6432, process.env['ProgramFiles(x86)'], 'C:\\Program Files', 'C:\\Program Files (x86)'].filter(Boolean)) {
+    for (const dir of [path.join(base, 'LibreOffice', 'program'), ...subdirs(base).filter((d) => /^LibreOffice/i.test(path.basename(d))).map((d) => path.join(d, 'program'))]) {
+      // soffice.com is the console version: it prints its version and waits for conversions to finish.
+      out.push(path.join(dir, 'soffice.com'), path.join(dir, 'soffice.exe'));
+    }
+  }
+  return [...new Set(out)].filter(exists);
+}
+
 // Look for the programs (a configured path first, then the usual places).
 async function detect(config = {}) {
   const env = process.env;
-  const winLinks = env.LOCALAPPDATA ? path.join(env.LOCALAPPDATA, 'Microsoft', 'WinGet', 'Links', 'ffmpeg.exe') : null;
-  tools.ffmpeg = await firstWorking([config.ffmpegPath, env.FFMPEG_PATH, 'ffmpeg', isWin && winLinks, isWin && 'C:\\ffmpeg\\bin\\ffmpeg.exe', !isWin && '/usr/local/bin/ffmpeg', !isWin && '/opt/homebrew/bin/ffmpeg'], ['-version']);
+  const ff = isWin ? ['ffmpeg.exe'] : ['ffmpeg'];
+  tools.ffmpeg = await firstWorking([...expand(config.ffmpegPath, ff), ...expand(env.FFMPEG_PATH, ff), 'ffmpeg',
+    ...(isWin ? windowsFfmpegPlaces('ffmpeg.exe') : ['/usr/local/bin/ffmpeg', '/opt/homebrew/bin/ffmpeg', '/usr/bin/ffmpeg'])], ['-version']);
   tools.ffprobe = null;
   if (tools.ffmpeg) {
     const dir = path.dirname(tools.ffmpeg);
     const sibling = dir && dir !== '.' ? path.join(dir, isWin ? 'ffprobe.exe' : 'ffprobe') : null;
-    tools.ffprobe = await firstWorking([sibling, env.FFPROBE_PATH, 'ffprobe'], ['-version']);
+    tools.ffprobe = await firstWorking([sibling, ...expand(env.FFPROBE_PATH, [isWin ? 'ffprobe.exe' : 'ffprobe']), 'ffprobe',
+      ...(isWin ? windowsFfmpegPlaces('ffprobe.exe') : [])], ['-version']);
   }
-  tools.soffice = await firstWorking([config.libreOfficePath, env.SOFFICE_PATH, 'soffice', 'libreoffice',
-    isWin && 'C:\\Program Files\\LibreOffice\\program\\soffice.exe', isWin && 'C:\\Program Files (x86)\\LibreOffice\\program\\soffice.exe',
-    process.platform === 'darwin' && '/Applications/LibreOffice.app/Contents/MacOS/soffice'], ['--version']);
+  const so = isWin ? ['soffice.com', 'soffice.exe'] : ['soffice'];
+  const configured = [...expand(config.libreOfficePath, so), ...expand(env.SOFFICE_PATH, so)]
+    .map((p) => (isWin && /soffice\.exe$/i.test(p) && exists(p.replace(/\.exe$/i, '.com')) ? p.replace(/\.exe$/i, '.com') : p));
+  const places = isWin ? windowsOfficePlaces() : process.platform === 'darwin' ? ['/Applications/LibreOffice.app/Contents/MacOS/soffice'] : [];
+  tools.soffice = await firstWorking([...configured, 'soffice', 'libreoffice', ...places], ['--version']);
+  // LibreOffice may not answer a quick version check (e.g. setting up its profile on first run under
+  // the SYSTEM account); if it is installed where we expect, use it anyway.
+  if (!tools.soffice) tools.soffice = [...configured, ...places].find(exists) || null;
   tools.checked = true;
   return status();
 }
+
+const where = () => ({ ffmpeg: tools.ffmpeg, ffprobe: tools.ffprobe, soffice: tools.soffice });
 
 const status = () => ({ ffmpeg: Boolean(tools.ffmpeg && tools.ffprobe), office: Boolean(tools.soffice), checked: tools.checked });
 
@@ -240,4 +292,4 @@ async function sendPdf(req, res, file) {
   fs.createReadStream(file).pipe(res);
 }
 
-module.exports = { detect, status, probe, stream, toJpeg, convertToPdf, sendPdf, MediaError, OFFICE };
+module.exports = { detect, status, where, probe, stream, toJpeg, convertToPdf, sendPdf, MediaError, OFFICE };
