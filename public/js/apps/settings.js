@@ -36,6 +36,7 @@ export const settingsApp = {
       ...Object.keys(SERVICES).map((svc) => page(svc, SERVICES[svc].name, appIconSmall(svc), (c) => renderApp(c, svc))),
       page('music', 'Music', appIconSmall('music'), renderMusic),
       page('files', 'Files', appIconSmall('files'), renderFiles),
+      page('console', 'The Game Console', appIconSmall('console'), renderConsole),
       page('appearance', 'Appearance', icon.image, renderAppearance),
       page('dock', 'Dock & Desktop', icon.grid, renderDockPage),
       page('screensaver', 'Screensaver', icon.moon, renderScreensaver),
@@ -367,6 +368,35 @@ function renderMusic(container) {
 // ---------------------------------------------------------------------------
 // Files
 // ---------------------------------------------------------------------------
+
+function renderConsole(container) {
+  const cfg = state.config;
+  const input = h('input', { class: 'input', value: cfg.games?.folder || '', disabled: cfg.mock, spellcheck: 'false', placeholder: 'For example D:\\Games or /mnt/games' });
+  const save = h('button', { class: 'btn btn-primary', disabled: cfg.mock }, h('span', { html: icon.check }), 'Save folder');
+  const status = h('div', { class: 'small muted' });
+  container.append(h('div', { class: 'pane-header' }, h('span', { class: 'settings-app-icon', html: appIcon.console }), h('h2', {}, 'The Game Console')));
+  if (cfg.mock) container.append(h('div', { class: 'notice' }, 'Demo mode: The Game Console shows sample games plus a small test cartridge that MediaDesk makes itself, and the folder can’t be changed.'));
+  container.append(
+    section('Games folder',
+      h('p', { class: 'muted small' }, 'The folder on the computer running MediaDesk that holds your games (ROMs and disc images), as a full path. MediaDesk only reads it. Sub-folders named after each console help it tell games apart — for example “NES”, “SNES”, “N64”, “Genesis”, “PlayStation”, “Game Boy”. Put BIOS files in a “BIOS” sub-folder.'),
+      h('label', { class: 'field' }, h('span', {}, 'Folder'), input),
+      status,
+      h('div', { class: 'btn-row' }, save, h('button', { class: 'btn', onclick: () => import('../wm.js').then((wm) => wm.openApp('console')) }, h('span', { html: icon.external }), 'Open The Game Console'))),
+    section('Emulators',
+      h('p', { class: 'muted small' }, 'Games run in your browser with EmulatorJS. The MediaDesk server downloads each console’s emulator from npm the first time it’s needed and keeps it with its settings, so the server needs internet access once per console. Themes, controller mappings and each console’s options are in the app itself (Start / Menu button, or the ⚙ button).')));
+  fetch('/portal/games/library', { credentials: 'same-origin' }).then((r) => r.json()).then((lib) => {
+    if (lib.configured) status.textContent = `${lib.games.length} game${lib.games.length === 1 ? '' : 's'} found${lib.bios?.length ? `, ${lib.bios.length} BIOS file${lib.bios.length === 1 ? '' : 's'}` : ''}.`;
+  }).catch((err) => { status.textContent = err.message; });
+  save.onclick = async () => {
+    save.disabled = true;
+    try {
+      state.config = await portal.saveConfig({ gamesFolder: input.value.trim() });
+      toast('Games folder saved', { type: 'success', icon: appIcon.console });
+      clear(container);
+      renderConsole(container);
+    } catch (err) { toastError(err, 'Could not save the folder'); save.disabled = false; }
+  };
+}
 
 function renderFiles(container) {
   const cfg = state.config;

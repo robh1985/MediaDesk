@@ -14,6 +14,7 @@ const appSettings = require('./appsettings');
 const { createNotifier } = require('./notify');
 const { createWallpapers } = require('./wallpapers');
 const media = require('./media');
+const { createGames } = require('./games');
 
 const ROOT = __dirname;
 
@@ -119,6 +120,7 @@ function loadConfig() {
   if (env.PORTAL_PASSWORD) cfg.portalPassword = env.PORTAL_PASSWORD;
   if (env.FILE_ROOTS) cfg.fileRoots = env.FILE_ROOTS.split(path.delimiter).filter(Boolean);
   if (MOCK) cfg.fileRoots = require('./mock').demoFileRoots();
+  if (env.GAMES_DIR) cfg.gamesFolder = env.GAMES_DIR;
   return cfg;
 }
 
@@ -156,6 +158,7 @@ function publicConfig() {
   return {
     services, mock: MOCK, auth: Boolean(config.portalPassword), files: filesStatus(), version: VERSION, appSettings: appSettings.resolve(config.appSettings),
     media: { ...media.status(), ffmpegPath: config.ffmpegPath || '', libreOfficePath: config.libreOfficePath || '' },
+    games: { folder: MOCK ? '(demo games)' : config.gamesFolder || '' },
   };
 }
 
@@ -305,6 +308,8 @@ function serveStatic(req, res, pathname) {
       'Content-Length': st.size,
       'Cache-Control': cache,
       ETag: etag,
+      // The Game Console's player: emulators that use threads (PSP) need an isolated page.
+      ...(rel === '/console-player.html' ? { 'Cross-Origin-Opener-Policy': 'same-origin', 'Cross-Origin-Embedder-Policy': 'require-corp' } : {}),
     });
     if (req.method === 'HEAD') return res.end();
     fs.createReadStream(file).pipe(res);
@@ -436,6 +441,15 @@ async function updateConfig(req, res) {
     if (errors.length) return sendJson(res, 400, { error: `Check these folders: ${errors.join('; ')}` });
     next.fileRoots = roots;
   }
+  if (typeof body.gamesFolder === 'string') {
+    const folder = body.gamesFolder.trim();
+    if (folder) {
+      const { roots, errors } = await files.validateRoots([folder]);
+      if (errors.length) return sendJson(res, 400, { error: `Games folder: ${errors[0]}` });
+      next.gamesFolder = roots[0];
+    } else delete next.gamesFolder;
+    games.invalidate();
+  }
   let toolsChanged = false;
   for (const key of ['ffmpegPath', 'libreOfficePath']) {
     if (typeof body[key] === 'string' && body[key].trim() !== (next[key] || '')) { next[key] = body[key].trim(); toolsChanged = true; }
@@ -557,6 +571,12 @@ async function plexSignIn(req, res, p) {
 // ---------------------------------------------------------------------------
 
 const mock = MOCK ? require('./mock') : null;
+const games = createGames({
+  dataDir: MOCK ? path.join(require('node:os').tmpdir(), 'mediadesk-demo-data') : path.dirname(CONFIG_PATH),
+  getFolder: () => config.gamesFolder || '',
+  mock: MOCK,
+  sample: MOCK ? require('./mock-games').createSample() : null,
+});
 const wallpapers = createWallpapers(MOCK ? path.join(require('node:os').tmpdir(), 'mediadesk-demo-wallpapers') : path.join(path.dirname(CONFIG_PATH), 'wallpapers'));
 
 // --- Notifications ------------------------------------------------------------
@@ -658,7 +678,7 @@ async function handle(req, res) {
     if (MOCK) {
       // Demo mode: app preferences can be tried out (kept in memory); connections can't change.
       const body = await readJson(req);
-      if (body.services || body.fileRoots) return sendJson(res, 400, { error: 'Connections and folders are read-only in demo mode' });
+      if (body.services || body.fileRoots || typeof body.gamesFolder === 'string') return sendJson(res, 400, { error: 'Connections and folders are read-only in demo mode' });
       if (body.appSettings) config.appSettings = appSettings.merge(config.appSettings, body.appSettings);
       if (body.recheckTools) await media.detect(config);
       return sendJson(res, 200, publicConfig());
@@ -681,6 +701,7 @@ async function handle(req, res) {
   }
 
   if (p.startsWith('/portal/plex/')) return plexSignIn(req, res, p);
+  if (p.startsWith('/portal/games/')) return games.handle(req, res, url, { sendJson, readJson });
 
   const m = p.match(/^\/api\/(radarr|sonarr|nzbget|jellyfin|plex)(?:\/(.*))?$/);
   if (!m) return sendJson(res, 404, { error: 'Unknown endpoint' });
