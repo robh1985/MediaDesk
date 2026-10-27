@@ -19,6 +19,7 @@ const DOCK_DEFAULTS = {
   autohide: false,
   indicators: true,       // dots under open apps
   showOpen: true,         // open apps that aren't kept in the dock appear after a divider
+  onlyOpen: true,         // show just Search & apps, the open apps and Settings (no kept apps)
   titleDoubleClick: 'zoom',
 };
 

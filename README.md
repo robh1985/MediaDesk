@@ -5,7 +5,7 @@ One web portal for **Radarr, Sonarr, NZBGet and Jellyfin**, laid out like a desk
 ## Features
 
 - **Desktop shell**: windows that snap to screen edges (drag to the left/right edge, or the top to maximise), minimise to the dock, and remember their positions. Includes a light/dark theme, accent colours, built-in wallpapers or your own pictures (Fill, Fit, Stretch, Centre or Tile), and a mobile layout.
-- **Dock, like macOS**: choose its size, magnification and screen edge (left, bottom or right), hide it automatically, and show or hide open-app dots. Drag apps to reorder them, drag one off the dock to remove it, or use *Keep in Dock* on an open app. Settings → Dock & Desktop.
+- **Dock, like macOS**: by default it shows Search & apps, the apps you have open, and Settings. Turn off *Show only open apps* in Settings → Dock & Desktop to keep your chosen apps in it instead; then you can drag apps to reorder them, drag one off to remove it, or use *Keep in Dock* on an open app. You can also choose its size, magnification and screen edge (left, bottom or right), hide it automatically, and show or hide open-app dots.
 - **Arrange the desktop**: drag icons anywhere. Drop one app onto another to make a named group, like folders on Android; tap a group to open it, rename it, or drag apps back out. Drop a desktop icon onto the dock to add it. On phones, hold an icon and then drag it.
 - **Launcher**: press `Ctrl+Space`, `Ctrl+K` or `/` to search apps, your Radarr/Sonarr libraries and Jellyfin in one place, run commands ("pause", "scan", "missing"), or type `add <title>` to add a movie or show.
 - **Overview**: library counts, download speed, active streams, health warnings, what's airing this week, the download queue and recently added items.

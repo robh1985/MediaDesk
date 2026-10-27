@@ -51,14 +51,21 @@ function renderDock() {
     h('span', { class: 'dock-icon', html: opts.icon || app.icon }),
     h('span', { class: 'dock-label' }, opts.label || (webviews ? `Web UI (${webviews})` : app.name)),
     n ? h('span', { class: 'dock-badge', 'aria-label': `${n} unread` }, n > 99 ? '99+' : n) : null);
-    if (id !== 'launcher') makeDraggable(el, id);
+    if (id !== 'launcher' && !d.onlyOpen) makeDraggable(el, id);
     return el;
   };
-  inner = h('div', { class: 'dock-inner glass' },
-    item('launcher', { icon: `<span class="launcher-glyph">${icon.grid}</span>`, label: 'Search & apps', onclick: hooks.openLauncher }),
-    h('div', { class: 'dock-sep' }),
-    pinned.map((id) => item(id, { pinned: true })),
-    extra.length ? [h('div', { class: 'dock-sep' }), extra.map((id) => item(id))] : null);
+  const launcher = item('launcher', { icon: `<span class="launcher-glyph">${icon.grid}</span>`, label: 'Search & apps', onclick: hooks.openLauncher });
+  if (d.onlyOpen) {
+    // Search & apps, whatever is open (in the order it was opened), then Settings.
+    const open = [...running].filter((id) => id !== 'launcher' && id !== 'settings' && getApp(id));
+    inner = h('div', { class: 'dock-inner glass' }, launcher, h('div', { class: 'dock-sep' }),
+      open.map((id) => item(id)), open.length ? h('div', { class: 'dock-sep' }) : null, item('settings'));
+  } else {
+    inner = h('div', { class: 'dock-inner glass' }, launcher,
+      h('div', { class: 'dock-sep' }),
+      pinned.map((id) => item(id, { pinned: true })),
+      extra.length ? [h('div', { class: 'dock-sep' }), extra.map((id) => item(id))] : null);
+  }
   clear(dockEl, inner);
 }
 
@@ -71,9 +78,13 @@ export function appMenu(e, id, more = []) {
   const items = [{ label: wins.length ? 'Show' : 'Open', icon: icon.external, action: () => toggleApp(id) }];
   if (['radarr', 'sonarr', 'nzbget', 'jellyfin'].includes(id) && serviceLink(id)) items.push({ label: 'Open full web UI', icon: icon.globe, action: () => hooks.openWebView(id) });
   if (placeable) {
-    items.push('-', inDock
-      ? { label: 'Remove from Dock', icon: icon.minimize, action: () => updateDock({ apps: d.apps.filter((x) => x !== id) }) }
-      : { label: 'Keep in Dock', icon: icon.plus, action: () => addToDock(id) });
+    items.push('-');
+    // With "only open apps" the dock has nothing to keep, so there's nothing to add or remove.
+    if (!d.onlyOpen) {
+      items.push(inDock
+        ? { label: 'Remove from Dock', icon: icon.minimize, action: () => updateDock({ apps: d.apps.filter((x) => x !== id) }) }
+        : { label: 'Keep in Dock', icon: icon.plus, action: () => addToDock(id) });
+    }
     const onDesk = layout().desktop.items.some((it) => (it.type === 'app' && it.id === id) || (it.type === 'group' && it.apps.includes(id)));
     if (!onDesk) items.push({ label: 'Add to desktop', icon: icon.grid, action: () => updateDesktop((dk) => { dk.items.push({ type: 'app', id }); }) });
   }
@@ -90,6 +101,7 @@ export function addToDock(id, index) {
 
 // Where in the dock a point falls: the index among kept apps, or -1 when not over the dock.
 export function dockDropIndex(x, y) {
+  if (layout().dock.onlyOpen) return -1;
   const r = inner?.getBoundingClientRect();
   if (!r || x < r.left - 20 || x > r.right + 20 || y < r.top - 30 || y > r.bottom + 20) return -1;
   const vertical = !dockEl.classList.contains('dock-bottom');

@@ -492,8 +492,9 @@ function renderDockPage(container) {
     h('div', { class: `pref-row pref-select ${phone ? 'dimmed' : ''}` }, h('span', {}, h('span', {}, 'Position on screen')),
       seg([['left', 'Left'], ['bottom', 'Bottom'], ['right', 'Right']], d.position, (v) => set({ position: v }), phone)),
     check('Automatically hide and show the Dock', 'autohide', 'Windows get the whole screen; move the pointer to the edge to bring the dock back.', phone),
+    check('Show only open apps', 'onlyOpen', 'The Dock holds Search & apps, the apps you have open, and Settings. Turn off to keep your chosen apps in it.'),
     check('Show indicators for open apps', 'indicators'),
-    check('Show open apps that aren’t kept in the Dock', 'showOpen'),
+    d.onlyOpen ? null : check('Show open apps that aren’t kept in the Dock', 'showOpen'),
     h('div', { class: 'pref-row pref-select' }, h('span', {}, h('span', {}, 'Double-click a window’s title bar to')),
       seg([['zoom', 'Zoom'], ['minimize', 'Minimise']], d.titleDoubleClick, (v) => set({ titleDoubleClick: v }))));
 
@@ -504,7 +505,7 @@ function renderDockPage(container) {
     h('div', { class: 'dock-apps-head small muted' }, h('span', {}, 'App'), h('span', {}, 'In Dock'), h('span', {}, 'On desktop')),
     apps.map((a) => h('div', { class: 'dock-apps-row' },
       h('span', { class: 'dock-apps-name' }, h('span', { class: 'dock-apps-icon', html: a.icon }), a.name),
-      h('input', { type: 'checkbox', 'aria-label': `${a.name} in Dock`, checked: d.apps.includes(a.id), onchange: (e) => set({ apps: e.target.checked ? [...d.apps, a.id] : d.apps.filter((x) => x !== a.id) }) }),
+      h('input', { type: 'checkbox', 'aria-label': `${a.name} in Dock`, checked: d.apps.includes(a.id), disabled: d.onlyOpen, onchange: (e) => set({ apps: e.target.checked ? [...d.apps, a.id] : d.apps.filter((x) => x !== a.id) }) }),
       h('input', { type: 'checkbox', 'aria-label': `${a.name} on desktop`, checked: onDesktop(a.id), onchange: (e) => {
         updateDesktop((dk) => {
           if (e.target.checked) dk.items.push({ type: 'app', id: a.id });
@@ -515,7 +516,9 @@ function renderDockPage(container) {
         });
         rerender();
       } }))));
-  const appsSec = section('Apps', h('p', { class: 'small muted' }, 'You can also drag apps in the Dock to reorder them, drag them off to remove them, and drag desktop icons onto the Dock. Drop one desktop icon onto another to make a group.'),
+  const appsSec = section('Apps', h('p', { class: 'small muted' }, d.onlyOpen
+    ? 'The Dock shows only open apps, so “In Dock” applies when “Show only open apps” is off. Drop one desktop icon onto another to make a group.'
+    : 'You can also drag apps in the Dock to reorder them, drag them off to remove them, and drag desktop icons onto the Dock. Drop one desktop icon onto another to make a group.'),
     list,
     h('div', { class: 'btn-row' },
       h('button', { class: 'btn', onclick: () => { resetLayout('dock'); rerender(); toast('Dock reset'); } }, 'Reset Dock'),
