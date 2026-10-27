@@ -33,6 +33,12 @@ const plexPassBadge = (info) => (info.myPlexSubscription ? badge('Plex Pass', 'p
 const needsPass = (info, what) => (info.myPlexSubscription ? null
   : h('div', { class: 'notice' }, `${what} needs Plex Pass on the server owner’s account.`));
 
+// Plex refuses Now Playing, history and tasks unless MediaDesk has the owner's token.
+const needsOwner = (err) => h('div', { class: 'empty error' },
+  h('div', { class: 'empty-title' }, 'Plex won’t share this with MediaDesk'),
+  h('div', {}, err.message),
+  h('button', { class: 'btn btn-primary', onclick: () => openApp('settings', { tab: 'plex' }) }, 'Open Settings → Plex'));
+
 // ---------------------------------------------------------------------------
 // Overview
 // ---------------------------------------------------------------------------
@@ -113,7 +119,7 @@ function renderSessions(container) {
       clear(body,
         h('div', { class: 'muted small plex-bw' }, `${list.length} stream${list.length === 1 ? '' : 's'} · ${(bandwidth / 1000).toFixed(1)} Mbps total`),
         h('div', { class: 'sessions' }, list.map((s) => sessionCard(s, info, draw))));
-    } catch (err) { clear(body, errorState(err, draw)); }
+    } catch (err) { clear(body, err.status === 401 || err.status === 403 ? needsOwner(err) : errorState(err, draw)); }
   };
   return poll(container, draw, 4000);
 }
@@ -336,7 +342,7 @@ function renderHistory(container, ctx) {
           h('div', { 'data-label': 'Who' }, names[String(x.accountID)] || `Account ${x.accountID ?? '?'}`),
           h('div', { 'data-label': 'When', class: 'muted' }, timeAgo(x.viewedAt * 1000)))))
         : emptyState('Nothing watched yet'));
-  })().catch((err) => clear(body, errorState(err)));
+  })().catch((err) => clear(body, err.status === 401 || err.status === 403 ? needsOwner(err) : errorState(err)));
 }
 
 // ---------------------------------------------------------------------------
@@ -356,7 +362,7 @@ function renderTasks(container) {
       h('div', {}),
       h('button', { class: 'btn btn-sm', onclick: () => plex.post(`butler/${t.name}`).then(() => toast(`Started: ${t.title || t.name}`, { icon: appIcon.plex })).catch(toastError) }, h('span', { html: icon.play }), 'Run'))))
       : emptyState('No scheduled tasks'));
-  })().catch((err) => clear(body, errorState(err)));
+  })().catch((err) => clear(body, err.status === 401 || err.status === 403 ? needsOwner(err) : errorState(err)));
   poll(acts, async () => {
     const a = (await plexGet('activities').catch(() => ({}))).Activity || [];
     clear(acts, a.length ? h('div', { class: 'tasks' }, a.map((x) => h('div', { class: 'task' },

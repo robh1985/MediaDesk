@@ -360,6 +360,13 @@ async function proxyRest(req, res, svc, rest, search) {
   try {
     const upstream = await fetch(target, { method: req.method, headers, body, signal: ctrl.signal });
     clearTimeout(timer);
+    // Plex answers refusals with a bare HTML page; say what it means instead.
+    if (svc === 'plex' && (upstream.status === 401 || upstream.status === 403) && !/json/.test(upstream.headers.get('content-type') || '')) {
+      upstream.body?.cancel().catch(() => {});
+      return sendJson(res, upstream.status, { code: 'plex-not-admin', error: upstream.status === 401
+        ? 'Plex rejected MediaDesk’s token. Sign in again in Settings → Plex.'
+        : 'Plex only allows this for the server owner. MediaDesk’s Plex token isn’t the owner’s admin token — in Settings → Plex, click “Sign in with Plex” and sign in as the account (and Plex Home profile) that owns the server.' });
+    }
     await pipeUpstream(res, upstream);
   } catch (err) {
     clearTimeout(timer);
@@ -462,7 +469,11 @@ async function testService(svc) {
       if (r.status === 401) return { ok: false, error: 'Plex rejected the token (HTTP 401)' };
       if (!r.ok) return { ok: false, error: `HTTP ${r.status}` };
       const mc = (await r.json()).MediaContainer || {};
-      return { ok: true, version: mc.version, name: mc.friendlyName, plexPass: Boolean(mc.myPlexSubscription) };
+      // Now Playing, history and tasks need the owner's (admin) token.
+      const admin = await fetch(`${base}/status/sessions`, { headers: { ...plexHeaders(c.apiKey), Accept: 'application/json' }, signal: AbortSignal.timeout(8e3) })
+        .then((x) => { x.body?.cancel().catch(() => {}); return x.status !== 401 && x.status !== 403; }).catch(() => true);
+      return { ok: true, version: mc.version, name: mc.friendlyName, plexPass: Boolean(mc.myPlexSubscription), admin,
+        ...(admin ? {} : { warning: 'Connected, but not as the server owner: Now Playing, history and scheduled tasks won’t work. Sign in with Plex as the owner.' }) };
     }
     r = await fetch(`${base}/api/v3/system/status`, { headers: { 'X-Api-Key': c.apiKey }, signal: AbortSignal.timeout(8e3) });
     if (!r.ok) return { ok: false, error: `HTTP ${r.status}` };
@@ -529,7 +540,9 @@ async function plexSignIn(req, res, p) {
       if (MOCK) return sendJson(res, 200, publicConfig());
       const next = fs.existsSync(CONFIG_PATH) ? readConfigFile() : {};
       next.services = next.services || {};
-      next.services.plex = { ...(next.services.plex || {}), url: uri, apiKey: server.accessToken || pin.token };
+      // On a server you own, your account token has full admin rights (Now Playing, history, tasks).
+      // The per-server token from plex.tv can be more limited, so it is only used for shared servers.
+      next.services.plex = { ...(next.services.plex || {}), url: uri, apiKey: server.owned ? pin.token : (server.accessToken || pin.token) };
       saveConfig(next);
       return sendJson(res, 200, publicConfig());
     }

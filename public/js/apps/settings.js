@@ -156,6 +156,7 @@ function renderApp(container, svc) {
   portal.test().then((res) => {
     const r = res[svc];
     clear(status, h('span', { class: `dot ${r.ok ? 'ok' : 'bad'}` }), r.ok ? connected(r.version) : r.error);
+    if (r.warning) status.parentElement.after(h('div', { class: 'notice' }, r.warning));
   }).catch(() => {});
 }
 
