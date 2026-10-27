@@ -25,6 +25,11 @@ const DEFAULTS = {
     notifyPlayback: false,
     rowResume: true, rowNextUp: true, rowLatest: true, nowPlayingWidget: true,
   },
+  plex: {
+    notifyPlayback: false, notifyAdded: true,
+    rowContinue: true, rowOnDeck: true, rowRecent: true, nowPlayingWidget: true,
+    quality: 'original', autoplayNext: true,
+  },
   files: {
     showHidden: false,
   },
@@ -44,6 +49,7 @@ const ALLOWED = {
   'nzbget.defaultPriority': [-100, -50, 0, 50, 100, 900],
   'music.visAutoSeconds': [0, 10, 20, 40, 60],
   'music.visQuality': ['low', 'medium', 'high'],
+  'plex.quality': ['original', '20000', '12000', '8000', '4000', '2000', '1500', '720'],
   'screensaver.timeoutMin': [1, 2, 3, 5, 10, 15, 20, 30, 45, 60],
   'screensaver.saver': ['random', 'toasters', 'maze', 'pipes', 'starfield', 'mystify', 'text3d', 'bubbles', 'ribbons', 'flurry', 'hello'],
 };

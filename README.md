@@ -1,18 +1,20 @@
 # MediaDesk
 
-One web portal for **Radarr, Sonarr, NZBGet and Jellyfin**, laid out like a desktop OS: draggable and resizable windows, a dock, a menu bar with live status, desktop widgets, notifications and a universal search launcher.
+One web portal for **Radarr, Sonarr, NZBGet, Jellyfin and Plex**, laid out like a desktop OS: draggable and resizable windows, a dock, a menu bar with live status, desktop widgets, notifications and a universal search launcher.
 
 ## Features
 
 - **Desktop shell**: windows that snap to screen edges (drag to the left/right edge, or the top to maximise), minimise to the dock, and remember their positions. Includes a light/dark theme, accent colours, built-in wallpapers or your own pictures (Fill, Fit, Stretch, Centre or Tile), and a mobile layout.
 - **Dock, like macOS**: by default it shows Search & apps, the apps you have open, and Settings. Turn off *Show only open apps* in Settings → Dock & Desktop to keep your chosen apps in it instead; then you can drag apps to reorder them, drag one off to remove it, or use *Keep in Dock* on an open app. You can also choose its size, magnification and screen edge (left, bottom or right), hide it automatically, and show or hide open-app dots.
 - **Arrange the desktop**: drag icons anywhere. Drop one app onto another to make a named group, like folders on Android; tap a group to open it, rename it, or drag apps back out. Drop a desktop icon onto the dock to add it. On phones, hold an icon and then drag it.
-- **Launcher**: press `Ctrl+Space`, `Ctrl+K` or `/` to search apps, your Radarr/Sonarr libraries and Jellyfin in one place, run commands ("pause", "scan", "missing"), or type `add <title>` to add a movie or show.
+- **Launcher**: press `Ctrl+Space`, `Ctrl+K` or `/` to search apps, your Radarr/Sonarr libraries, Jellyfin and Plex in one place, run commands ("pause", "scan", "missing"), or type `add <title>` to add a movie or show.
 - **Overview**: library counts, download speed, active streams, health warnings, what's airing this week, the download queue and recently added items.
 - **Radarr / Sonarr**: browse and filter the library, see movie or series details (including seasons and episodes), search, monitor or unmonitor, refresh, delete, add new titles, manage the queue, and view the calendar, health and disk space.
 - **NZBGet**: a live speed graph, pause and resume (everything or one download), a speed limit, move to top, delete, history (including retrying failed downloads), adding an NZB by URL or file upload, the message log, and server stats.
 - **Jellyfin**: continue watching, next up, recently added, library browsing and search, item details (mark watched, favourite, refresh metadata), now playing (pause, stop or message a viewer), library scans, scheduled tasks, the activity log, and restart.
 - **Notification badges**: when a download finishes or fails, a movie or episode is imported, or Radarr/Sonarr report a problem, a number appears on that app's icon instead of a pop-up. Opening the app clears it, and the bell lists everything. The server keeps watching even when no browser is open.
+- **Plex**: manage your Plex Media Server: an overview (version, Plex Pass, library sizes, running activity), *Now Playing* with direct play / direct stream / transcode details, hardware transcoding, bandwidth and local or remote, plus *Stop stream* with a message to the viewer (Plex Pass). Also library scans, metadata refresh, empty trash, a library browser with item details (mark watched, refresh, delete), watch history, scheduled tasks you can run now, and maintenance (clean bundles, optimise the database, check for updates).
+- **Plex Viewer**: watch Plex in the browser. A home screen with Continue watching, On deck and Recently added; library grids with sort, genre and unwatched filters; search; show pages with seasons and episodes. The player resumes where you left off, reports progress back to Plex (so it carries over to your other Plex apps), has quality, audio and subtitle choices, and plays the next episode automatically. Plex converts the video when the browser can't play it as is.
 - **Settings for each app**: connection details, which events to count, and preferences such as the default quality profile and root folder for new titles, Sonarr's monitoring choice, the calendar range, the NZBGet category and priority, which Jellyfin user to browse as, and which home rows to show.
 - **Music**: a Winamp-style player for your Jellyfin music library and the audio files in your shared folders. It has a green LCD display with a spectrum analyser, a 10-band equalizer with Winamp's presets, balance, shuffle/repeat, and a playlist editor. Its visualizer works like MilkDrop: GPU-rendered feedback warps react to bass, mids, treble and beats, with presets that blend into one another, and it can go full screen. Phones get lock-screen and headphone controls. Albums, songs and audio files can be sent to it from Jellyfin and Files.
 - **Calculator**: basic, scientific (trigonometry in degrees, radians or gradians, powers, roots, logs, factorials, memory and history) and graphing (up to eight functions, with pan, zoom and tracing).
@@ -96,6 +98,7 @@ You can configure MediaDesk in three ways. Environment variables override the co
 | `SONARR_URL`, `SONARR_API_KEY` | Sonarr → *Settings → General → API Key* |
 | `NZBGET_URL`, `NZBGET_USERNAME`, `NZBGET_PASSWORD` | NZBGet → *Settings → Security* (`ControlUsername` / `ControlPassword`) |
 | `JELLYFIN_URL`, `JELLYFIN_API_KEY` | Jellyfin → *Dashboard → API Keys → +* |
+| `PLEX_URL`, `PLEX_TOKEN` | Easier: *Settings → Plex → Sign in with Plex*. Otherwise the server address (`http://<ip>:32400`) and an `X-Plex-Token` |
 | `FILE_ROOTS` | Optional. Folders the Files app may manage (also settable in *Settings → Files*) |
 | `JELLYFIN_USER_ID` | Optional. Which user's view to browse (defaults to the first admin) |
 | `*_PUBLIC_URL` | Optional. The browser-facing URL used for "Open in…" links and Web UI windows, if it differs from the server-side URL |
@@ -144,6 +147,7 @@ In Settings → Appearance, choose **Add picture…** to upload one from your de
 - Radarr v3+ and Sonarr v3/v4 (API v3)
 - NZBGet v18+ and nzbget-ng
 - Jellyfin 10.8+
+- Plex Media Server 1.30+ (Stop stream and full watch history need Plex Pass on the server owner's account)
 
 ## Phones and tablets
 
@@ -175,4 +179,7 @@ To see what a touch screen is doing, open MediaDesk with `?touchdebug` at the en
 
 - **"Could not reach radarr: ECONNREFUSED"**: the URL is wrong *from the MediaDesk server's point of view*. Inside Docker, `localhost` means the MediaDesk container itself, so use the host's LAN IP or the container name instead.
 - **A Web UI window is blank**: the service may block being embedded in a frame, or your browser can't reach the public URL. Use "Open in new tab".
+- **Plex sign-in finds the server but it won't connect**: pick an address the *MediaDesk server* can reach (usually the `local` one), or type one such as `http://192.168.1.20:32400`. If Plex requires secure connections, choose the `https://…plex.direct` address.
+- **Plex video stutters**: lower the quality in the player (⚙) or in *Settings → Plex*.
+- **Deleting in Plex fails**: turn on *Allow media deletion* in Plex → *Settings → Library*.
 - **Jellyfin shows the wrong user's watch state**: set `JELLYFIN_USER_ID` (or the field in Settings) to your own user ID.

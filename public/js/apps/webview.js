@@ -4,13 +4,14 @@ import { h, clear } from '../ui.js';
 import { icon, appIcon } from '../icons.js';
 import { serviceLink } from '../api.js';
 
-const NAMES = { radarr: 'Radarr', sonarr: 'Sonarr', nzbget: 'NZBGet', jellyfin: 'Jellyfin' };
+const NAMES = { radarr: 'Radarr', sonarr: 'Sonarr', nzbget: 'NZBGet', jellyfin: 'Jellyfin', plex: 'Plex' };
 
 export const webviewApp = {
   id: 'webview', name: 'Web UI', icon: appIcon.browser, size: [1200, 780], description: 'Full service web interfaces',
   open(win, opts = {}) {
     const svc = opts.key;
-    const url = serviceLink(svc);
+    // Plex's web app lives under /web.
+    const url = svc === 'plex' ? `${serviceLink(svc)}/web/index.html` : serviceLink(svc);
     win.setTitle(`${NAMES[svc]} — Web UI`);
     const frame = h('iframe', { class: 'webview-frame', src: url, referrerpolicy: 'no-referrer', allow: 'fullscreen; autoplay' });
     const bar = h('div', { class: 'webview-bar' },

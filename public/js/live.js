@@ -1,6 +1,6 @@
 // Background polling shared by the menu bar, widgets, dock badges and apps.
 
-import { nzbget, jellyfin, radarr, sonarr, portal, isConfigured } from './api.js';
+import { nzbget, jellyfin, plexGet, radarr, sonarr, portal, isConfigured } from './api.js';
 
 const subs = new Set();
 export const live = {
@@ -8,6 +8,7 @@ export const live = {
   nzbError: null,
   speedHistory: [],      // bytes/s samples, newest last
   sessions: [],          // active Jellyfin sessions with something playing
+  plexSessions: [],      // Plex streams (status/sessions)
   health: { radarr: [], sonarr: [] },
   notifications: [],     // recorded by the server, newest first
   unread: {},            // app id -> unread count (shown as a number on the app's icon)
@@ -38,6 +39,12 @@ async function pollSessions() {
     const sessions = await jellyfin.get('Sessions', { activeWithinSeconds: 960 });
     live.sessions = sessions.filter((s) => s.NowPlayingItem);
   } catch { live.sessions = []; }
+  emit();
+}
+
+async function pollPlex() {
+  if (!isConfigured('plex')) return;
+  try { live.plexSessions = (await plexGet('status/sessions')).Metadata || []; } catch { live.plexSessions = []; }
   emit();
 }
 
@@ -100,6 +107,7 @@ function every(fn, ms) {
 export function startLive() {
   every(pollNzb, 2000);
   every(pollSessions, 10000);
+  every(pollPlex, 10000);
   every(pollHealth, 5 * 60000);
   every(refreshNotifications, 15000);
   document.addEventListener('visibilitychange', () => { if (!document.hidden) refreshNotifications(); });

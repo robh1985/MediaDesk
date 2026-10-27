@@ -50,6 +50,12 @@ export const radarr = rest('/api/radarr/api/v3');
 export const sonarr = rest('/api/sonarr/api/v3');
 export const jellyfin = rest('/api/jellyfin');
 export const nzbget = (method, ...params) => request('/api/nzbget', { method: 'POST', body: { method, params } });
+export const plex = rest('/api/plex');
+// Plex wraps every answer in a MediaContainer.
+export const plexGet = async (path, params) => (await plex.get(path, params))?.MediaContainer || {};
+// Plex scales pictures itself; they come through MediaDesk so the token stays on the server.
+export const plexImage = (pathOnServer, width = 300, height = Math.round(width * 1.5)) => (pathOnServer
+  ? `/api/plex/photo/:/transcode?${new URLSearchParams({ width, height, minSize: 1, upscale: 1, url: pathOnServer })}` : null);
 
 export const portal = {
   config: () => request('/portal/config'),
@@ -61,6 +67,10 @@ export const portal = {
   notifications: () => request('/portal/notifications'),
   markRead: (app) => request('/portal/notifications/read', { method: 'POST', body: { app } }),
   clearNotifications: (app) => request('/portal/notifications/clear', { method: 'POST', body: { app } }),
+  // Sign in with Plex (the PIN flow); the token never reaches the browser.
+  plexPin: () => request('/portal/plex/pin', { method: 'POST', body: {} }),
+  plexPinStatus: (id) => request(`/portal/plex/pin/${encodeURIComponent(id)}`),
+  plexUse: (choice) => request('/portal/plex/use', { method: 'POST', body: choice }),
 };
 
 // Shared state filled at boot.

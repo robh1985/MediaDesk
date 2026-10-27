@@ -22,5 +22,7 @@ services:
       # NZBGET_PASSWORD: ""
       # JELLYFIN_URL: "http://jellyfin:8096"
       # JELLYFIN_API_KEY: ""
+      # PLEX_URL: "http://plex:32400"   # or use Settings → Plex → Sign in with Plex
+      # PLEX_TOKEN: ""
       # Optional browser-facing URLs for "Open in …" links, if different from the URLs above:
       # RADARR_PUBLIC_URL: "https://radarr.example.com"

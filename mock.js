@@ -542,7 +542,12 @@ function sendRange(req, res, buf, type) {
   res.end(buf.subarray(start, end + 1));
 }
 
+let plexMock = null;
 async function handle(req, res, svc, rest, url, { readJson, sendJson }) {
+  if (svc === 'plex') {
+    plexMock = plexMock || require('./mock-plex').createMockPlex({ movies, series, episodes, posterSvg, overview: OVERVIEW, hash });
+    return plexMock.handle(req, res, rest, url, { sendJson, sendRange });
+  }
   const imgMatch = rest.match(/^mock-image\/(\w+)\/(.+)\.svg$/) || (svc === 'jellyfin' && rest.match(/^Items\/([^/]+)\/Images\/(\w+)/));
   if (imgMatch) {
     let title, kind;

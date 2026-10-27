@@ -14,6 +14,8 @@ import { musicApp } from './apps/music.js';
 import { calculatorApp } from './apps/calculator.js';
 import { notesApp } from './apps/notes.js';
 import { previewApp } from './apps/preview.js';
+import { plexApp } from './apps/plex.js';
+import { plexViewerApp } from './apps/plexviewer.js';
 
 applyAppearance();
 
@@ -22,7 +24,7 @@ if (/[?&#]touchdebug\b/.test(location.href)) {
   import('./touchdebug.js').then((m) => m.startTouchDebug());
 }
 
-[dashboardApp, makeArrApp('radarr'), makeArrApp('sonarr'), nzbgetApp, jellyfinApp, musicApp, filesApp, notesApp, previewApp, calculatorApp, settingsApp, webviewApp,
+[dashboardApp, makeArrApp('radarr'), makeArrApp('sonarr'), nzbgetApp, jellyfinApp, plexApp, plexViewerApp, musicApp, filesApp, notesApp, previewApp, calculatorApp, settingsApp, webviewApp,
   { id: 'launcher', name: 'Search', icon: '', open() {} }].forEach(registerApp);
 
 async function boot() {

@@ -2,7 +2,7 @@
 
 import { h, clear, formatSpeed, formatBytes, timeOf, debounce, toast, toastError, contextMenu, timeAgo } from './ui.js';
 import { icon, appIcon } from './icons.js';
-import { radarr, sonarr, nzbget, jellyfin, isConfigured, serviceLink, portal, state, appPref } from './api.js';
+import { radarr, sonarr, nzbget, jellyfin, plex, plexGet, plexImage, isConfigured, serviceLink, portal, state, appPref } from './api.js';
 import { getApps, getApp, openApp, onChange, openWindows, focusedWindow } from './wm.js';
 import { live, subscribe, markRead, markAllRead, clearNotifications, totalUnread, dismissSystemNotice } from './live.js';
 import { upcoming, posterUrl } from './apps/arr.js';
@@ -171,7 +171,8 @@ function buildMenuBar() {
       clear(nowPlaying, h('span', { class: 'tray-glyph', html: p.state === 'paused' ? icon.pause : '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M9 18V6l11-2v11.5"/><circle cx="6.5" cy="18" r="2.8"/><circle cx="17.5" cy="15.5" r="2.8"/></svg>' }), h('span', { class: 'tray-word' }, label));
     }
   });
-  const streams = h('button', { class: 'tray-item', title: 'Jellyfin streams', onclick: () => openApp('jellyfin', { section: 'sessions' }) });
+  // Streams on Jellyfin and Plex; opens whichever has more going on.
+  const streams = h('button', { class: 'tray-item', title: 'Streams', onclick: () => openApp(live.plexSessions.length > live.sessions.length ? 'plex' : 'jellyfin', { section: 'sessions' }) });
   const bell = h('button', { class: 'tray-item tray-icon', title: 'Notifications', html: icon.bell, onclick: toggleNotificationCenter });
   const theme = h('button', { class: 'tray-item tray-icon', title: 'Toggle dark mode' });
   const clock = h('button', { class: 'tray-item tray-clock', onclick: toggleNotificationCenter });
@@ -207,8 +208,10 @@ function buildMenuBar() {
       speed.classList.toggle('active', l.nzb.speed > 0 && !l.nzb.DownloadPaused);
       speed.hidden = false;
     } else speed.hidden = true;
-    if (isConfigured('jellyfin') && l.sessions.length) {
-      clear(streams, h('span', { class: 'tray-glyph', html: icon.play }), `${l.sessions.length}`, h('span', { class: 'tray-word' }, ' streaming'));
+    const nStreams = (isConfigured('jellyfin') ? l.sessions.length : 0) + (isConfigured('plex') ? l.plexSessions.length : 0);
+    if (nStreams) {
+      clear(streams, h('span', { class: 'tray-glyph', html: icon.play }), `${nStreams}`, h('span', { class: 'tray-word' }, ' streaming'));
+      streams.title = [l.sessions.length ? `Jellyfin: ${l.sessions.length}` : null, l.plexSessions.length ? `Plex: ${l.plexSessions.length}` : null].filter(Boolean).join(' · ');
       streams.hidden = false;
     } else streams.hidden = true;
   });
@@ -329,23 +332,29 @@ function buildWidgets() {
   }
 
   // Now playing
-  if (isConfigured('jellyfin')) {
+  if (isConfigured('jellyfin') || isConfigured('plex')) {
     const body = h('div', { class: 'w-list' });
-    const w = widget('Now playing', 'jellyfin', body, () => openApp('jellyfin', { section: 'sessions' }));
+    const both = isConfigured('jellyfin') && isConfigured('plex');
+    const w = widget('Now playing', isConfigured('jellyfin') ? 'jellyfin' : 'plex', body,
+      () => openApp(live.plexSessions.length > live.sessions.length || !isConfigured('jellyfin') ? 'plex' : 'jellyfin', { section: 'sessions' }));
     host.append(w);
+    const row = (img, title, who, pct, cls, from) => h('div', { class: 'w-media' },
+      h('div', { class: 'w-thumb' }, img ? h('img', { src: img, alt: '' }) : null),
+      h('div', { class: 'grow' },
+        h('strong', {}, title),
+        h('div', { class: 'small muted' }, both ? `${who} · ${from}` : who),
+        h('div', { class: `progress ${cls}` }, h('div', { class: 'progress-fill', style: { width: `${pct}%` } }))));
     subscribe((l) => {
-      w.hidden = !l.sessions.length || appPref('jellyfin', 'nowPlayingWidget') === false;
-      clear(body, l.sessions.slice(0, 3).map((s) => {
+      const jf = isConfigured('jellyfin') && appPref('jellyfin', 'nowPlayingWidget') !== false ? l.sessions.map((s) => {
         const it = s.NowPlayingItem;
-        const pct = it.RunTimeTicks ? ((s.PlayState?.PositionTicks || 0) / it.RunTimeTicks) * 100 : 0;
-        const img = itemImage(it, 100);
-        return h('div', { class: 'w-media' },
-          h('div', { class: 'w-thumb' }, img ? h('img', { src: img, alt: '' }) : null),
-          h('div', { class: 'grow' },
-            h('strong', {}, it.SeriesName || it.Name),
-            h('div', { class: 'small muted' }, `${s.UserName} · ${s.DeviceName}`),
-            h('div', { class: 'progress jf' }, h('div', { class: 'progress-fill', style: { width: `${pct}%` } }))));
-      }));
+        return row(itemImage(it, 100), it.SeriesName || it.Name, `${s.UserName} · ${s.DeviceName}`, it.RunTimeTicks ? ((s.PlayState?.PositionTicks || 0) / it.RunTimeTicks) * 100 : 0, 'jf', 'Jellyfin');
+      }) : [];
+      const px = isConfigured('plex') && appPref('plex', 'nowPlayingWidget') !== false ? l.plexSessions.map((s) => row(
+        plexImage(s.type === 'episode' ? s.grandparentThumb || s.thumb : s.thumb, 100), s.grandparentTitle || s.title,
+        `${s.User?.title || 'Someone'} · ${s.Player?.title || s.Player?.product || ''}`, s.duration ? ((s.viewOffset || 0) / s.duration) * 100 : 0, 'plex', 'Plex')) : [];
+      const all = [...jf, ...px];
+      w.hidden = !all.length;
+      clear(body, all.slice(0, 3));
     });
   }
 }
@@ -415,10 +424,11 @@ export function openLauncher() {
     isConfigured('nzbget') && { title: 'Pause all downloads', icon: icon.pause, kind: 'NZBGet', keys: 'pause stop downloads', action: () => nzbget('pausedownload').then(() => toast('Downloads paused')).catch(toastError) },
     isConfigured('nzbget') && { title: 'Resume all downloads', icon: icon.play, kind: 'NZBGet', keys: 'resume start downloads unpause', action: () => nzbget('resumedownload').then(() => toast('Downloads resumed')).catch(toastError) },
     isConfigured('jellyfin') && { title: 'Scan all Jellyfin libraries', icon: icon.refresh, kind: 'Jellyfin', keys: 'scan refresh library jellyfin', action: () => jellyfin.post('Library/Refresh').then(() => toast('Library scan started')).catch(toastError) },
+    isConfigured('plex') && { title: 'Scan all Plex libraries', icon: icon.refresh, kind: 'Plex', keys: 'scan refresh library plex', action: () => plexGet('library/sections').then((mc) => Promise.all((mc.Directory || []).map((x) => plex.get(`library/sections/${x.key}/refresh`)))).then(() => toast('Plex library scan started')).catch(toastError) },
     isConfigured('radarr') && { title: 'Search for all missing movies', icon: icon.search, kind: 'Radarr', keys: 'missing search movies', action: () => radarr.post('command', { name: 'MissingMoviesSearch' }).then(() => toast('Searching missing movies')).catch(toastError) },
     isConfigured('sonarr') && { title: 'Search for all missing episodes', icon: icon.search, kind: 'Sonarr', keys: 'missing search episodes', action: () => sonarr.post('command', { name: 'MissingEpisodeSearch' }).then(() => toast('Searching missing episodes')).catch(toastError) },
     { title: 'Settings', icon: icon.sliders, kind: 'System', keys: 'settings config preferences connections', action: () => openApp('settings') },
-    ...['radarr', 'sonarr', 'nzbget', 'jellyfin'].filter((s) => serviceLink(s)).map((s) => ({ title: `Open ${getApp(s).name} web UI`, icon: icon.globe, kind: 'Web UI', keys: `web ui native open ${s}`, action: () => openWebView(s) })),
+    ...['radarr', 'sonarr', 'nzbget', 'jellyfin', 'plex'].filter((s) => serviceLink(s)).map((s) => ({ title: `Open ${getApp(s).name} web UI`, icon: icon.globe, kind: 'Web UI', keys: `web ui native open ${s}`, action: () => openWebView(s) })),
   ].filter(Boolean);
 
   let seq = 0;
@@ -449,13 +459,17 @@ export function openLauncher() {
       isConfigured('jellyfin') ? searchJellyfin(term, 8).then((items) => items.map((it) => ({
         title: it.Type === 'Episode' ? `${it.SeriesName} — ${it.Name}` : it.Name, sub: `${it.Type}${it.ProductionYear ? ' · ' + it.ProductionYear : ''}`, poster: itemImage(it, 120), kind: 'Jellyfin', action: () => openApp('jellyfin', { itemId: it.Id }),
       }))).catch(() => []) : [],
+      isConfigured('plex') ? plexGet('hubs/search', { query: term, limit: 6 }).then((mc) => (mc.Hub || []).filter((x) => ['movie', 'show', 'episode'].includes(x.type)).flatMap((x) => x.Metadata || []).slice(0, 8).map((m) => ({
+        title: m.type === 'episode' ? `${m.grandparentTitle} — ${m.title}` : m.title, sub: `${m.type[0].toUpperCase()}${m.type.slice(1)}${m.year ? ' · ' + m.year : ''}`,
+        poster: plexImage(m.type === 'episode' ? m.grandparentThumb || m.thumb : m.thumb, 120), kind: 'Plex', action: () => openApp('plexviewer', { ratingKey: m.ratingKey }),
+      }))).catch(() => []) : [],
     ]);
     if (mine !== seq) return;
     const wanted = !libs[0].length && !libs[1].length && !addHits.length ? [
       isConfigured('radarr') && { title: `Add movie “${input.value.trim()}”`, sub: 'Search Radarr', icon: appIcon.radarr, kind: 'Radarr', action: () => openApp('radarr', { section: 'add', term: input.value.trim() }) },
       isConfigured('sonarr') && { title: `Add series “${input.value.trim()}”`, sub: 'Search Sonarr', icon: appIcon.sonarr, kind: 'Sonarr', action: () => openApp('sonarr', { section: 'add', term: input.value.trim() }) },
     ].filter(Boolean) : [];
-    renderGroups([...groups, { title: 'Movies', items: libs[0] }, { title: 'Series', items: libs[1] }, { title: 'In Jellyfin', items: libs[2] }, { title: 'Not in your library', items: wanted }]);
+    renderGroups([...groups, { title: 'Movies', items: libs[0] }, { title: 'Series', items: libs[1] }, { title: 'In Jellyfin', items: libs[2] }, { title: 'In Plex', items: libs[3] }, { title: 'Not in your library', items: wanted }]);
   }, 160);
 
   input.addEventListener('input', search);

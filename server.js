@@ -78,7 +78,7 @@ const PUBLIC_DIR = path.join(ROOT, 'public');
 const CONFIG_PATH = process.env.CONFIG_PATH || path.join(ROOT, 'config', 'config.json');
 const HOST = process.env.HOST || '0.0.0.0';
 const MOCK = process.env.MOCK === '1' || process.argv.includes('--mock');
-const SERVICES = ['radarr', 'sonarr', 'nzbget', 'jellyfin'];
+const SERVICES = ['radarr', 'sonarr', 'nzbget', 'jellyfin', 'plex'];
 const SESSION_DAYS = 30;
 const BUILD_ID = computeBuildId();
 // Lets the server's own notification watcher call the service proxies without a login cookie.
@@ -113,6 +113,9 @@ function loadConfig() {
   set('nzbget', 'username', env.NZBGET_USERNAME);
   set('nzbget', 'password', env.NZBGET_PASSWORD);
   set('jellyfin', 'userId', env.JELLYFIN_USER_ID);
+  set('plex', 'apiKey', env.PLEX_TOKEN);
+  // Plex identifies each app that talks to it; keep one stable id for this MediaDesk.
+  cfg.plexClientId = MOCK ? 'mediadesk-demo' : `mediadesk-${crypto.createHash('sha1').update(`${require('node:os').hostname()}|${CONFIG_PATH}`).digest('hex').slice(0, 16)}`;
   if (env.PORTAL_PASSWORD) cfg.portalPassword = env.PORTAL_PASSWORD;
   if (env.FILE_ROOTS) cfg.fileRoots = env.FILE_ROOTS.split(path.delimiter).filter(Boolean);
   if (MOCK) cfg.fileRoots = require('./mock').demoFileRoots();
@@ -320,8 +323,11 @@ async function pipeUpstream(res, upstream) {
   // fetch() only changes the body when it decompresses it; otherwise keep the length (media players need it to seek).
   if (!upstream.headers.get('content-encoding') && upstream.headers.get('content-length')) headers['content-length'] = upstream.headers.get('content-length');
   res.writeHead(upstream.status, headers);
-  if (upstream.body) Readable.fromWeb(upstream.body).pipe(res);
-  else res.end();
+  if (upstream.body) {
+    const body = Readable.fromWeb(upstream.body);
+    body.on('error', () => res.end());
+    body.pipe(res);
+  } else res.end();
 }
 
 // Radarr, Sonarr, Jellyfin: REST passthrough with credentials injected server-side.
@@ -336,6 +342,9 @@ async function proxyRest(req, res, svc, rest, search) {
   if (svc === 'jellyfin') {
     headers['X-Emby-Token'] = c.apiKey;
     headers.Authorization = `MediaBrowser Client="MediaDesk", Device="MediaDesk", DeviceId="mediadesk", Version="1.0.0", Token="${c.apiKey}"`;
+  } else if (svc === 'plex') {
+    Object.assign(headers, plexHeaders(c.apiKey));
+    if (!req.headers.accept || req.headers.accept === '*/*') headers.Accept = 'application/json';
   } else {
     headers['X-Api-Key'] = c.apiKey;
   }
@@ -343,12 +352,32 @@ async function proxyRest(req, res, svc, rest, search) {
   const hasBody = !['GET', 'HEAD'].includes(req.method);
   const body = hasBody ? await readBody(req) : undefined;
   const target = `${trimSlash(c.url)}/${rest}${search}`;
+  // Give up if the service doesn't answer within 30 s, but let an answer stream for as long as it
+  // needs (a film can play for hours). Stop fetching if the browser goes away.
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(new Error('timed out')), 30e3);
+  res.on('close', () => ctrl.abort());
   try {
-    const upstream = await fetch(target, { method: req.method, headers, body, signal: AbortSignal.timeout(30e3) });
+    const upstream = await fetch(target, { method: req.method, headers, body, signal: ctrl.signal });
+    clearTimeout(timer);
     await pipeUpstream(res, upstream);
   } catch (err) {
-    sendJson(res, 502, { error: `Could not reach ${svc}: ${err.cause?.code || err.message}` });
+    clearTimeout(timer);
+    if (!res.headersSent) sendJson(res, 502, { error: `Could not reach ${svc}: ${err.cause?.code || err.message}` });
+    else res.end();
   }
+}
+
+// Headers Plex expects from every app; the token is added here so the browser never sees it.
+function plexHeaders(token) {
+  return {
+    'X-Plex-Token': token || '',
+    'X-Plex-Client-Identifier': config.plexClientId,
+    'X-Plex-Product': 'MediaDesk',
+    'X-Plex-Version': VERSION.split(' ')[0] || '1.0',
+    'X-Plex-Device-Name': 'MediaDesk',
+    'X-Plex-Device': 'MediaDesk',
+  };
 }
 
 // NZBGet: JSON-RPC. The browser posts {method, params}; we add the auth.
@@ -428,11 +457,85 @@ async function testService(svc) {
       if (!r.ok) return { ok: false, error: `HTTP ${r.status}` };
       return { ok: true, version: (await r.json()).Version };
     }
+    if (svc === 'plex') {
+      r = await fetch(`${base}/`, { headers: { ...plexHeaders(c.apiKey), Accept: 'application/json' }, signal: AbortSignal.timeout(8e3) });
+      if (r.status === 401) return { ok: false, error: 'Plex rejected the token (HTTP 401)' };
+      if (!r.ok) return { ok: false, error: `HTTP ${r.status}` };
+      const mc = (await r.json()).MediaContainer || {};
+      return { ok: true, version: mc.version, name: mc.friendlyName, plexPass: Boolean(mc.myPlexSubscription) };
+    }
     r = await fetch(`${base}/api/v3/system/status`, { headers: { 'X-Api-Key': c.apiKey }, signal: AbortSignal.timeout(8e3) });
     if (!r.ok) return { ok: false, error: `HTTP ${r.status}` };
     return { ok: true, version: (await r.json()).version };
   } catch (err) {
     return { ok: false, error: err.cause?.code || err.message };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Sign in with Plex: the plex.tv PIN flow. The browser opens plex.tv to approve MediaDesk; the token
+// it grants stays here, and the person only picks which server to use.
+// ---------------------------------------------------------------------------
+
+const plexPins = new Map();       // pin id -> { code, token, servers, at }
+async function plexTv(pathAndQuery, { method = 'GET', token } = {}) {
+  const r = await fetch(`https://plex.tv${pathAndQuery}`, { method, headers: { ...plexHeaders(token), Accept: 'application/json' }, signal: AbortSignal.timeout(15e3) });
+  if (!r.ok) throw Object.assign(new Error(`plex.tv answered HTTP ${r.status}`), { status: 502 });
+  return r.json();
+}
+
+async function plexSignIn(req, res, p) {
+  for (const [id, pin] of plexPins) if (Date.now() - pin.at > 30 * 60e3) plexPins.delete(id);
+  try {
+    if (p === '/portal/plex/pin' && req.method === 'POST') {
+      if (MOCK) {
+        plexPins.set('demo', { code: 'DEMO', token: 'demo-token', at: Date.now() });
+        return sendJson(res, 200, { id: 'demo', authUrl: 'about:blank' });
+      }
+      const pin = await plexTv('/api/v2/pins?strong=true', { method: 'POST' });
+      plexPins.set(String(pin.id), { code: pin.code, at: Date.now() });
+      const q = new URLSearchParams({ clientID: config.plexClientId, code: pin.code, 'context[device][product]': 'MediaDesk' });
+      return sendJson(res, 200, { id: String(pin.id), authUrl: `https://app.plex.tv/auth#?${q}` });
+    }
+    const poll = /^\/portal\/plex\/pin\/([\w-]+)$/.exec(p);
+    if (poll && req.method === 'GET') {
+      const pin = plexPins.get(poll[1]);
+      if (!pin) return sendJson(res, 404, { error: 'That sign-in has expired. Start again.' });
+      if (!pin.token) {
+        const r = await plexTv(`/api/v2/pins/${poll[1]}`);
+        if (!r.authToken) return sendJson(res, 200, { done: false });
+        pin.token = r.authToken;
+      }
+      if (!pin.servers) {
+        if (MOCK) pin.servers = [{ id: 'mockplex', name: 'media-server (demo)', owned: true, connections: [{ uri: 'http://192.168.1.20:32400', local: true }] }];
+        else {
+          const list = await plexTv('/api/v2/resources?includeHttps=1&includeRelay=1', { token: pin.token });
+          pin.servers = list.filter((r) => String(r.provides || '').includes('server')).map((r) => ({
+            id: r.clientIdentifier, name: r.name, owned: Boolean(r.owned), accessToken: r.accessToken,
+            connections: (r.connections || []).map((c) => ({ uri: c.uri, local: Boolean(c.local), relay: Boolean(c.relay) })),
+          }));
+        }
+      }
+      return sendJson(res, 200, { done: true, servers: pin.servers.map(({ accessToken, ...rest }) => rest) });
+    }
+    if (p === '/portal/plex/use' && req.method === 'POST') {
+      const b = await readJson(req);
+      const pin = plexPins.get(String(b.pin));
+      const server = pin?.servers?.find((s) => s.id === b.server);
+      if (!pin?.token || !server) return sendJson(res, 400, { error: 'Sign in with Plex again' });
+      const uri = trimSlash(String(b.uri || ''));
+      if (!server.connections.some((c) => c.uri === uri) && !/^https?:\/\/[^\s/]+(:\d+)?$/.test(uri)) return sendJson(res, 400, { error: 'Choose one of the server addresses' });
+      plexPins.delete(String(b.pin));
+      if (MOCK) return sendJson(res, 200, publicConfig());
+      const next = fs.existsSync(CONFIG_PATH) ? readConfigFile() : {};
+      next.services = next.services || {};
+      next.services.plex = { ...(next.services.plex || {}), url: uri, apiKey: server.accessToken || pin.token };
+      saveConfig(next);
+      return sendJson(res, 200, publicConfig());
+    }
+    return sendJson(res, 404, { error: 'Unknown endpoint' });
+  } catch (err) {
+    return sendJson(res, err.status || 502, { error: err.message });
   }
 }
 
@@ -564,7 +667,9 @@ async function handle(req, res) {
     return sendJson(res, 200, results);
   }
 
-  const m = p.match(/^\/api\/(radarr|sonarr|nzbget|jellyfin)(?:\/(.*))?$/);
+  if (p.startsWith('/portal/plex/')) return plexSignIn(req, res, p);
+
+  const m = p.match(/^\/api\/(radarr|sonarr|nzbget|jellyfin|plex)(?:\/(.*))?$/);
   if (!m) return sendJson(res, 404, { error: 'Unknown endpoint' });
   const [, svc, rest = ''] = m;
 

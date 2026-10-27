@@ -5,8 +5,10 @@
 const KEY = 'mediadesk.layout';
 const listeners = new Set();
 
-export const DEFAULT_DOCK_APPS = ['dashboard', 'radarr', 'sonarr', 'nzbget', 'jellyfin', 'music', 'files', 'notes', 'calculator', 'settings'];
-export const DEFAULT_DESKTOP_APPS = ['dashboard', 'radarr', 'sonarr', 'nzbget', 'jellyfin', 'music', 'files', 'notes', 'calculator', 'settings'];
+export const DEFAULT_DOCK_APPS = ['dashboard', 'radarr', 'sonarr', 'nzbget', 'jellyfin', 'plex', 'plexviewer', 'music', 'files', 'notes', 'calculator', 'settings'];
+export const DEFAULT_DESKTOP_APPS = ['dashboard', 'radarr', 'sonarr', 'nzbget', 'jellyfin', 'plex', 'plexviewer', 'music', 'files', 'notes', 'calculator', 'settings'];
+// Apps added in later versions show up on desktops arranged before they existed.
+const ADDED_LATER = ['plex', 'plexviewer'];
 // Apps that can be placed in the dock or on the desktop (Preview and Web UI open from other apps).
 export const PLACEABLE_EXCLUDE = new Set(['launcher', 'webview', 'preview']);
 
@@ -33,14 +35,23 @@ export function layout() {
     dock: { ...DOCK_DEFAULTS, ...s.dock },
     desktop: {
       // [{ type: 'app', id } | { type: 'group', id, name, apps: [] }]
-      items: Array.isArray(s.desktop?.items) ? s.desktop.items : DEFAULT_DESKTOP_APPS.map((id) => ({ type: 'app', id })),
+      items: Array.isArray(s.desktop?.items) ? withNewApps(s.desktop) : DEFAULT_DESKTOP_APPS.map((id) => ({ type: 'app', id })),
+      known: s.desktop?.known,
       // positions per screen shape: { wide: { key: [col, row] }, narrow: { … } }
       pos: s.desktop?.pos || {},
     },
   };
 }
 
+function withNewApps(desk) {
+  const known = new Set(desk.known || []);
+  const has = (id) => desk.items.some((it) => (it.type === 'app' && it.id === id) || (it.type === 'group' && it.apps.includes(id)));
+  return [...desk.items, ...ADDED_LATER.filter((id) => !known.has(id) && !has(id)).map((id) => ({ type: 'app', id }))];
+}
+
 export function saveLayout(next) {
+  // Remember which apps this desktop has seen, so removing one keeps it removed.
+  if (next.desktop) next.desktop.known = [...new Set([...(next.desktop.known || []), ...ADDED_LATER])];
   try { localStorage.setItem(KEY, JSON.stringify(next)); } catch { /* storage full or blocked */ }
   listeners.forEach((fn) => fn(next));
 }

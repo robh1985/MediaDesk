@@ -30,6 +30,7 @@ function createNotifier({ file, isConfigured, settings, callApi, log = () => {} 
     'sonarr.health': 'notifyHealth', 'sonarr.imported': 'notifyImported', 'sonarr.grabbed': 'notifyGrabbed',
     'nzbget.complete': 'notifyComplete', 'nzbget.failed': 'notifyFailed',
     'jellyfin.playback': 'notifyPlayback',
+    'plex.playback': 'notifyPlayback', 'plex.added': 'notifyAdded',
   };
 
   function add(app, kind, { title, body = '', level = 'info', link = null }) {
@@ -133,6 +134,43 @@ function createNotifier({ file, isConfigured, settings, callApi, log = () => {} 
     save();
   }
 
+  async function watchPlexSessions() {
+    const mc = (await callApi('plex', 'status/sessions'))?.MediaContainer || {};
+    const playing = mc.Metadata || [];
+    const keys = playing.map((s) => `${s.Session?.id || s.sessionKey}:${s.ratingKey}`);
+    const seen = data.cursors.plexPlaying;
+    if (seen) {
+      for (const s of playing) {
+        if (seen.includes(`${s.Session?.id || s.sessionKey}:${s.ratingKey}`)) continue;
+        add('plex', 'playback', {
+          title: `${s.User?.title || 'Someone'} started watching`,
+          body: `${s.grandparentTitle ? `${s.grandparentTitle} — ` : ''}${s.title} · ${s.Player?.title || s.Player?.product || ''}`,
+          link: { app: 'plex', opts: { section: 'sessions' } },
+        });
+      }
+    }
+    data.cursors.plexPlaying = keys;
+    save();
+  }
+
+  async function watchPlexAdded() {
+    const mc = (await callApi('plex', 'library/recentlyAdded?X-Plex-Container-Start=0&X-Plex-Container-Size=40'))?.MediaContainer || {};
+    const list = mc.Metadata || [];
+    const newest = Math.max(0, ...list.map((m) => Number(m.addedAt) || 0));
+    const last = data.cursors.plexAdded;
+    if (last !== undefined) {
+      for (const m of list.filter((x) => Number(x.addedAt) > last).reverse()) {
+        const name = m.type === 'season' ? `${m.parentTitle} — ${m.title}` : m.type === 'episode' ? `${m.grandparentTitle} — ${m.title}` : m.type === 'album' ? `${m.parentTitle} — ${m.title}` : `${m.title}${m.year ? ` (${m.year})` : ''}`;
+        add('plex', 'added', {
+          title: `Added to ${m.librarySectionTitle || 'Plex'}`, body: name, level: 'success',
+          link: { app: 'plexviewer', opts: { ratingKey: m.type === 'season' ? m.parentRatingKey || m.ratingKey : m.ratingKey } },
+        });
+      }
+    }
+    data.cursors.plexAdded = Math.max(last ?? 0, newest);
+    save();
+  }
+
   // --- Scheduling ---------------------------------------------------------------
 
   const running = new Set();
@@ -151,6 +189,8 @@ function createNotifier({ file, isConfigured, settings, callApi, log = () => {} 
   function start() {
     every('nzbget', EVERY.nzbget, watchNzbget, () => isConfigured('nzbget'));
     every('jellyfin', EVERY.sessions, watchSessions, () => isConfigured('jellyfin'));
+    every('plex', EVERY.sessions, watchPlexSessions, () => isConfigured('plex'));
+    every('plex-added', EVERY.history, watchPlexAdded, () => isConfigured('plex'));
     for (const svc of ['radarr', 'sonarr']) {
       every(`${svc}-health`, EVERY.health, () => watchHealth(svc), () => isConfigured(svc));
       every(`${svc}-history`, EVERY.history, () => watchHistory(svc), () => isConfigured(svc));
