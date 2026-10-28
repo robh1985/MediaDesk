@@ -425,11 +425,29 @@ class Player {
     addEventListener('pagehide', this.unload);
   }
 
-  position() { return this.offset + (this.video.currentTime || 0); }
+  // Where we are in the film. Plex's stream either starts at the position we asked for (then the
+  // video's own clock starts at 0) or covers the whole film (then its clock is the real time).
+  position() { return Math.min(this.duration || Infinity, Math.max(0, this.base + (this.video.currentTime || 0))); }
+
+  // Called once the stream's length is known: a stream as long as the whole film starts at 0:00,
+  // so jump to where we wanted to be; a shorter one already starts there.
+  placeStream(streamLength) {
+    if (this.placed) return 0;
+    this.placed = true;
+    const full = Number.isFinite(streamLength) && this.duration > 0 && this.offset > 0
+      && Math.abs(streamLength - this.duration) <= Math.max(30, this.duration * 0.03);
+    this.base = full ? 0 : this.offset;
+    return full ? this.offset : 0;
+  }
   paintSeek(p) { this.seek.style.setProperty('--pct', `${this.duration ? (p / this.duration) * 100 : 0}%`); }
 
   tick() {
     if (this.seeking) return;
+    // Some streams keep the film's own time stamps: the clock already reads the real time.
+    if (!this.checkedClock && this.video.currentTime > 0) {
+      this.checkedClock = true;
+      if (this.base > 30 && this.video.currentTime > this.base - 15 && this.video.currentTime < this.base + 60) this.base = 0;
+    }
     const p = this.position();
     this.time.textContent = fmtClock(p);
     this.seek.value = String(p);
@@ -458,6 +476,10 @@ class Player {
 
   async load(start) {
     this.offset = Math.max(0, Math.min(start, Math.max(0, this.duration - 2)));
+    // Until the stream says otherwise, assume it starts where we asked.
+    this.base = this.offset;
+    this.placed = false;
+    this.checkedClock = false;
     this.busy.hidden = false;
     this.msg.hidden = true;
     this.paintSeek(this.offset);
@@ -472,21 +494,39 @@ class Player {
     try {
       const Hls = await loadHls();
       if (Hls.isSupported()) {
-        this.hls = new Hls({ maxBufferLength: 30, xhrSetup: (xhr) => xhr.setRequestHeader('X-MediaDesk', '1') });
-        this.hls.on(Hls.Events.ERROR, (_e, data) => {
-          if (!data.fatal) return;
-          if (data.type === Hls.ErrorTypes.MEDIA_ERROR && !this.recovered) { this.recovered = true; this.hls.recoverMediaError(); return; }
-          this.fail(data.response?.code === 503 || data.response?.code === 400 ? 'Plex couldn’t convert this video. Try a lower quality (⚙).' : `Playback stopped (${data.details}).`);
-        });
-        this.hls.loadSource(url);
-        this.hls.attachMedia(v);
+        const make = (startPosition) => {
+          const hls = new Hls({ maxBufferLength: 30, startPosition, xhrSetup: (xhr) => xhr.setRequestHeader('X-MediaDesk', '1') });
+          hls.on(Hls.Events.ERROR, (_e, data) => {
+            if (!data.fatal || hls !== this.hls) return;
+            if (data.type === Hls.ErrorTypes.MEDIA_ERROR && !this.recovered) { this.recovered = true; hls.recoverMediaError(); return; }
+            this.fail(data.response?.code === 503 || data.response?.code === 400 ? 'Plex couldn’t convert this video. Try a lower quality (⚙).' : `Playback stopped (${data.details}).`);
+          });
+          // Once the playlist says how long the stream is: a full-length one is started again at
+          // the right place (hls.js only honours a start position given up front).
+          hls.on(Hls.Events.LEVEL_LOADED, (_e, data) => {
+            if (this.placed) return;
+            const at = this.placeStream(data.details?.totalduration);
+            if (at) { hls.destroy(); this.hls = make(at); }
+          });
+          hls.loadSource(url);
+          hls.attachMedia(v);
+          return hls;
+        };
+        this.hls = make(-1);
       } else if (nativeHls()) {
-        v.src = url;
+        this.loadNative(url);
       } else throw new Error('This browser can’t play Plex streams');
     } catch (err) {
-      if (nativeHls()) v.src = url; else return this.fail(err.message);
+      if (nativeHls()) this.loadNative(url); else return this.fail(err.message);
     }
     v.play().catch(() => { this.playBtn.innerHTML = I.play; this.busy.hidden = true; });
+  }
+
+  // Safari plays HLS itself.
+  loadNative(url) {
+    const v = this.video;
+    v.addEventListener('loadedmetadata', () => { const at = this.placeStream(v.duration); if (at) v.currentTime = at; }, { once: true });
+    v.src = url;
   }
 
   fail(text) {

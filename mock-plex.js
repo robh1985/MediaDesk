@@ -144,6 +144,8 @@ function createMockPlex({ movies, series, episodes, posterSvg, overview, hash })
 
   // A short HLS stream for the player: VP9 + Opus in fragmented MP4, made with ffmpeg once.
   const hlsDir = path.join(os.tmpdir(), 'mediadesk-demo-plex-hls');
+  let fullLength = false;
+  const sessionLength = new Map();
   let hlsReady = null;
   function ensureHls() {
     if (hlsReady) return hlsReady;
@@ -270,9 +272,15 @@ function createMockPlex({ movies, series, episodes, posterSvg, overview, hash })
       return res.end(posterSvg(it?.grandparentTitle || it?.title || 'Plex', m[2] === 'art' ? 'fanart' : 'poster'));
     }
     // Streaming
+    // Real Plex servers send one of two kinds of stream: one starting at the requested offset (the
+    // default here) or one covering the whole title from 0:00. GET plex/__mode?full=1 switches the
+    // demo to the second kind, for testing the player against both.
+    if (rest === '__mode') { fullLength = q.get('full') === '1'; return sendJson(res, 200, { fullLength }); }
     if (rest === 'video/:/transcode/universal/start.m3u8') {
       try { await ensureHls(); } catch { return sendJson(res, 503, { error: 'The demo player needs ffmpeg installed' }); }
       const session = q.get('session') || 'demo';
+      const rk = /\/library\/metadata\/(\d+)/.exec(q.get('path') || '')?.[1];
+      sessionLength.set(session, (items.get(rk)?.duration || 0) / 1000);
       res.writeHead(200, { 'Content-Type': 'application/vnd.apple.mpegurl', 'Cache-Control': 'no-cache' });
       return res.end(`#EXTM3U\n#EXT-X-VERSION:7\n#EXT-X-STREAM-INF:BANDWIDTH=1800000,RESOLUTION=1280x720\nsession/${encodeURIComponent(session)}/base/index.m3u8\n`);
     }
@@ -280,6 +288,17 @@ function createMockPlex({ movies, series, episodes, posterSvg, overview, hash })
       const file = path.join(hlsDir, m[1]);
       if (!fs.existsSync(file)) return sendJson(res, 404, { error: 'Not found' });
       const type = file.endsWith('.m3u8') ? 'application/vnd.apple.mpegurl' : 'video/mp4';
+      const sess = decodeURIComponent(rest.split('/')[5] || '');
+      if (fullLength && m[1] === 'index.m3u8' && sessionLength.get(sess) > 120) {
+        // Loop the 90-second clip until the playlist is as long as the whole title.
+        const text = fs.readFileSync(file, 'utf8');
+        const head = text.slice(0, text.indexOf('#EXTINF'));
+        const body = text.slice(text.indexOf('#EXTINF')).replace('#EXT-X-ENDLIST', '').trim();
+        const loops = Math.ceil(sessionLength.get(sess) / 90);
+        const out = `${head}${Array.from({ length: loops }, (_, i) => body.replace(/^(seg\d+\.m4s)$/gm, `$1?loop=${i}`)).join('\n#EXT-X-DISCONTINUITY\n')}\n#EXT-X-ENDLIST\n`;
+        res.writeHead(200, { 'Content-Type': type, 'Cache-Control': 'no-cache' });
+        return res.end(out);
+      }
       return sendRange(req, res, fs.readFileSync(file), type);
     }
     let out;
