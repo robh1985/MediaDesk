@@ -15,6 +15,7 @@ const { createNotifier } = require('./notify');
 const { createWallpapers } = require('./wallpapers');
 const media = require('./media');
 const { createGames } = require('./games');
+const { createPikvm } = require('./pikvm');
 
 const ROOT = __dirname;
 
@@ -79,7 +80,7 @@ const PUBLIC_DIR = path.join(ROOT, 'public');
 const CONFIG_PATH = process.env.CONFIG_PATH || path.join(ROOT, 'config', 'config.json');
 const HOST = process.env.HOST || '0.0.0.0';
 const MOCK = process.env.MOCK === '1' || process.argv.includes('--mock');
-const SERVICES = ['radarr', 'sonarr', 'nzbget', 'jellyfin', 'plex'];
+const SERVICES = ['radarr', 'sonarr', 'nzbget', 'jellyfin', 'plex', 'pikvm'];
 const SESSION_DAYS = 30;
 const BUILD_ID = computeBuildId();
 // Lets the server's own notification watcher call the service proxies without a login cookie.
@@ -114,6 +115,8 @@ function loadConfig() {
   set('nzbget', 'username', env.NZBGET_USERNAME);
   set('nzbget', 'password', env.NZBGET_PASSWORD);
   set('jellyfin', 'userId', env.JELLYFIN_USER_ID);
+  set('pikvm', 'username', env.PIKVM_USERNAME);
+  set('pikvm', 'password', env.PIKVM_PASSWORD);
   set('plex', 'apiKey', env.PLEX_TOKEN);
   // Plex identifies each app that talks to it; keep one stable id for this MediaDesk.
   cfg.plexClientId = MOCK ? 'mediadesk-demo' : `mediadesk-${crypto.createHash('sha1').update(`${require('node:os').hostname()}|${CONFIG_PATH}`).digest('hex').slice(0, 16)}`;
@@ -137,7 +140,10 @@ const trimSlash = (u) => String(u || '').replace(/\/+$/, '');
 const isConfigured = (svc) => {
   const c = config.services[svc];
   if (!c || !c.url) return false;
-  return svc === 'nzbget' ? true : Boolean(c.apiKey);
+  if (svc === 'nzbget') return true;
+  // PiKVM logs in with a user name and password (admin by default).
+  if (svc === 'pikvm') return Boolean(c.password);
+  return Boolean(c.apiKey);
 };
 
 // Shape of the config the browser is allowed to see: no secrets.
@@ -153,6 +159,7 @@ function publicConfig() {
       userId: c.userId || '',
       hasApiKey: Boolean(c.apiKey),
       hasPassword: Boolean(c.password),
+      ...(svc === 'pikvm' ? { verifyTls: Boolean(c.verifyTls) } : {}),
     };
   }
   return {
@@ -164,11 +171,12 @@ function publicConfig() {
 
 // The file manager can change anything inside its folders, so it also requires a portal password.
 function filesStatus() {
-  const roots = files.rootList(config).map((r) => r.path);
+  const list = files.rootList(config);
+  const roots = list.map((r) => r.path);
   let reason = null;
   if (!config.portalPassword && !MOCK) reason = 'password';
   else if (!roots.length) reason = 'roots';
-  return { enabled: !reason, reason, roots };
+  return { enabled: !reason, reason, roots, folders: list.map(({ path: p, alias, tags, folderName }) => ({ path: p, alias, tags, folderName })), tags: config.fileTags || [] };
 }
 
 // ---------------------------------------------------------------------------
@@ -430,6 +438,7 @@ async function updateConfig(req, res) {
     for (const key of ['url', 'publicUrl', 'username', 'userId']) {
       if (typeof incoming[key] === 'string') cur[key] = incoming[key].trim();
     }
+    if (svc === 'pikvm' && typeof incoming.verifyTls === 'boolean') cur.verifyTls = incoming.verifyTls;
     // Secrets are only replaced when a new value is supplied.
     for (const key of ['apiKey', 'password']) {
       if (typeof incoming[key] === 'string' && incoming[key] !== '') cur[key] = incoming[key].trim();
@@ -440,6 +449,10 @@ async function updateConfig(req, res) {
     const { roots, errors } = await files.validateRoots(body.fileRoots);
     if (errors.length) return sendJson(res, 400, { error: `Check these folders: ${errors.join('; ')}` });
     next.fileRoots = roots;
+  }
+  if (Array.isArray(body.fileTags)) next.fileTags = files.cleanTags(body.fileTags);
+  if (body.fileRootInfo || Array.isArray(body.fileTags) || Array.isArray(body.fileRoots)) {
+    next.fileRootInfo = files.cleanRootInfo(body.fileRootInfo || next.fileRootInfo, next.fileRoots || [], next.fileTags || []);
   }
   if (typeof body.gamesFolder === 'string') {
     const folder = body.gamesFolder.trim();
@@ -462,6 +475,7 @@ async function updateConfig(req, res) {
 async function testService(svc) {
   if (MOCK) return { ok: true, version: 'mock' };
   if (!isConfigured(svc)) return { ok: false, error: 'Not configured' };
+  if (svc === 'pikvm') return pikvm.test();
   const c = config.services[svc];
   const base = trimSlash(c.url);
   try {
@@ -577,6 +591,7 @@ const games = createGames({
   mock: MOCK,
   sample: MOCK ? require('./mock-games').createSample() : null,
 });
+const pikvm = createPikvm({ getConfig: () => config.services.pikvm });
 const wallpapers = createWallpapers(MOCK ? path.join(require('node:os').tmpdir(), 'mediadesk-demo-wallpapers') : path.join(path.dirname(CONFIG_PATH), 'wallpapers'));
 
 // --- Notifications ------------------------------------------------------------
@@ -680,6 +695,9 @@ async function handle(req, res) {
       const body = await readJson(req);
       if (body.services || body.fileRoots || typeof body.gamesFolder === 'string') return sendJson(res, 400, { error: 'Connections and folders are read-only in demo mode' });
       if (body.appSettings) config.appSettings = appSettings.merge(config.appSettings, body.appSettings);
+      // Folder tags and aliases can be tried out too (kept in memory).
+      if (Array.isArray(body.fileTags)) config.fileTags = files.cleanTags(body.fileTags);
+      if (body.fileRootInfo || Array.isArray(body.fileTags)) config.fileRootInfo = files.cleanRootInfo(body.fileRootInfo || config.fileRootInfo, config.fileRoots || [], config.fileTags || []);
       if (body.recheckTools) await media.detect(config);
       return sendJson(res, 200, publicConfig());
     }
@@ -703,12 +721,16 @@ async function handle(req, res) {
   if (p.startsWith('/portal/plex/')) return plexSignIn(req, res, p);
   if (p.startsWith('/portal/games/')) return games.handle(req, res, url, { sendJson, readJson });
 
-  const m = p.match(/^\/api\/(radarr|sonarr|nzbget|jellyfin|plex)(?:\/(.*))?$/);
+  const m = p.match(/^\/api\/(radarr|sonarr|nzbget|jellyfin|plex|pikvm)(?:\/(.*))?$/);
   if (!m) return sendJson(res, 404, { error: 'Unknown endpoint' });
   const [, svc, rest = ''] = m;
 
   if (mock) return mock.handle(req, res, svc, rest, url, { readJson, sendJson });
   if (svc === 'nzbget') return proxyNzbget(req, res);
+  if (svc === 'pikvm') {
+    if (!isConfigured('pikvm')) return sendJson(res, 503, { error: 'pikvm is not configured' });
+    return pikvm.proxy(req, res, rest, url.search, sendJson);
+  }
   return proxyRest(req, res, svc, rest, url.search);
 }
 
@@ -720,6 +742,19 @@ const server = http.createServer((req, res) => {
     if (!res.headersSent) sendJson(res, 500, { error: err.message });
     else res.end();
   });
+});
+
+// WebSockets: only PiKVM's keyboard/mouse channel, for a logged-in MediaDesk page on this site.
+server.on('upgrade', (req, socket, head) => {
+  const url = new URL(req.url, 'http://localhost');
+  const origin = req.headers.origin;
+  const sameSite = !origin || (() => { try { return new URL(origin).host === req.headers.host; } catch { return false; } })();
+  if (url.pathname !== '/api/pikvm/api/ws' || !sameSite || !isAuthed(req) || (!MOCK && !isConfigured('pikvm'))) {
+    socket.end('HTTP/1.1 403 Forbidden\r\n\r\n');
+    return;
+  }
+  if (MOCK) return mock.pikvmSocket(req, socket);
+  pikvm.upgrade(req, socket, head, 'api/ws', url.search);
 });
 
 server.on('error', (err) => {

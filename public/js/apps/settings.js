@@ -1,6 +1,6 @@
 // Settings: a page per app (connection, notifications, preferences), plus general options.
 
-import { h, clear, toast, toastError, spinner, sidebarLayout, confirmDialog, contextMenu } from '../ui.js';
+import { h, clear, toast, toastError, spinner, sidebarLayout, confirmDialog, contextMenu, debounce } from '../ui.js';
 import { icon, appIcon } from '../icons.js';
 import { portal, state, radarr, sonarr, nzbget, jellyfin, isConfigured } from '../api.js';
 import { applyAppearance, appearance, WALLPAPERS, ACCENTS, WALLPAPER_FITS, useCustomWallpaper, setWallpaperFromFile } from '../desktop.js';
@@ -15,6 +15,7 @@ const SERVICES = {
   sonarr: { name: 'Sonarr', port: 8989, hint: 'Sonarr → Settings → General → Security → API Key' },
   nzbget: { name: 'NZBGet', port: 6789, hint: 'NZBGet → Settings → Security → ControlUsername / ControlPassword' },
   jellyfin: { name: 'Jellyfin', port: 8096, hint: 'Jellyfin → Dashboard → API Keys → +' },
+  pikvm: { name: 'PiKVM', port: 443, hint: 'the PiKVM web login (user admin unless you changed it). MediaDesk signs in for you; the password stays on the MediaDesk server.' },
   plex: { name: 'Plex', port: 32400, hint: 'easiest is “Sign in with Plex” above. To paste a token instead: in Plex Web open any movie → ⋯ → Get Info → View XML, and copy X-Plex-Token from the address bar.' },
 };
 
@@ -23,6 +24,7 @@ const NOTIFICATIONS = {
   sonarr: [['notifyImported', 'An episode finishes downloading'], ['notifyGrabbed', 'A release is grabbed (sent to the downloader)'], ['notifyHealth', 'Sonarr reports a problem']],
   nzbget: [['notifyComplete', 'A download finishes'], ['notifyFailed', 'A download fails']],
   jellyfin: [['notifyPlayback', 'Someone starts watching something']],
+  pikvm: [],
   plex: [['notifyPlayback', 'Someone starts watching something'], ['notifyAdded', 'New movies or episodes are added']],
 };
 
@@ -139,10 +141,12 @@ function renderApp(container, svc) {
     connectionSection(svc, status));
 
   let notif;
-  notif = section('Notifications',
-    h('p', { class: 'small muted' }, `Count these on the ${meta.name} icon:`),
-    NOTIFICATIONS[svc].map(([key, label]) => toggle(svc, key, label, null, () => notif)));
-  container.append(notif);
+  if (NOTIFICATIONS[svc].length) {
+    notif = section('Notifications',
+      h('p', { class: 'small muted' }, `Count these on the ${meta.name} icon:`),
+      NOTIFICATIONS[svc].map(([key, label]) => toggle(svc, key, label, null, () => notif)));
+    container.append(notif);
+  }
 
   const prefsBox = h('div', {});
   container.append(prefsBox);
@@ -150,7 +154,7 @@ function renderApp(container, svc) {
     prefsBox.append(h('p', { class: 'muted small' }, `Connect ${meta.name} to see its other settings.`));
   } else {
     prefsBox.append(spinner('Loading options…'));
-    ({ radarr: arrPrefs, sonarr: arrPrefs, nzbget: nzbgetPrefs, jellyfin: jellyfinPrefs, plex: plexPrefs })[svc](prefsBox, svc)
+    ({ radarr: arrPrefs, sonarr: arrPrefs, nzbget: nzbgetPrefs, jellyfin: jellyfinPrefs, plex: plexPrefs, pikvm: pikvmPrefs })[svc](prefsBox, svc)
       .catch((err) => clear(prefsBox, h('p', { class: 'small muted' }, `Couldn’t load ${meta.name}’s options: ${err.message}`)));
   }
 
@@ -174,18 +178,20 @@ function connectionSection(svc, statusEl) {
   const sec = section('Connection',
     svc === 'plex' ? plexSignInBox(statusEl) : null,
     h('div', { class: 'field-grid' },
-      field('url', 'Server URL (as seen by the MediaDesk server)', { placeholder: `http://192.168.1.10:${meta.port}` }),
+      field('url', 'Server URL (as seen by the MediaDesk server)', { placeholder: svc === 'pikvm' ? 'https://192.168.1.50' : `http://192.168.1.10:${meta.port}` }),
       field('publicUrl', 'Browser URL for “Open in…” links (optional)', { placeholder: 'Same as server URL' }),
-      svc === 'nzbget' ? [
-        field('username', 'Username', { placeholder: 'nzbget' }),
+      svc === 'nzbget' || svc === 'pikvm' ? [
+        field('username', 'Username', { placeholder: svc === 'pikvm' ? 'admin' : 'nzbget' }),
         field('password', 'Password', { type: 'password', value: '', placeholder: c.hasPassword ? '•••••••• (unchanged)' : '' }),
       ] : field('apiKey', svc === 'plex' ? 'Plex token' : 'API key', { type: 'password', value: '', placeholder: c.hasApiKey ? '•••••••• (unchanged)' : svc === 'plex' ? 'Paste a Plex token' : 'Paste API key', autocomplete: 'off' })),
+    svc === 'pikvm' ? h('label', { class: 'pref-row' }, f.verifyTls = h('input', { type: 'checkbox', checked: Boolean(c.verifyTls), disabled: locked }),
+      h('span', {}, h('span', {}, 'Verify the certificate'), h('span', { class: 'small muted pref-help' }, 'Leave off unless your PiKVM has a certificate this server trusts — PiKVM uses its own self-signed one by default.'))) : null,
     h('div', { class: 'small muted' }, `Where to find it: ${meta.hint}`),
     h('div', { class: 'btn-row' }, save));
   save.onclick = async () => {
     save.disabled = true;
     try {
-      state.config = await portal.saveConfig({ services: { [svc]: Object.fromEntries(Object.entries(f).map(([k, el]) => [k, el.value])) } });
+      state.config = await portal.saveConfig({ services: { [svc]: Object.fromEntries(Object.entries(f).map(([k, el]) => [k, el.type === 'checkbox' ? el.checked : el.value])) } });
       const r = (await portal.test())[svc];
       clear(statusEl, h('span', { class: `dot ${r.ok ? 'ok' : 'bad'}` }), r.ok ? connected(r.version) : r.error);
       toast(`${meta.name} saved`, { body: 'Reloading to reconnect…', type: 'success' });
@@ -326,6 +332,14 @@ function plexSignInBox(statusEl) {
   return box;
 }
 
+async function pikvmPrefs(box) {
+  let use;
+  use = section('Using PiKVM',
+    select('pikvm', 'video', 'Screen', [['stream', 'Live video (MJPEG stream)'], ['snapshots', 'Pictures, a few a second (for slow links or proxies that block streams)']], () => use),
+    toggle('pikvm', 'confirmPower', 'Ask before power actions', 'Shut down, force off and reset ask first.', () => use));
+  clear(box, use);
+}
+
 async function plexPrefs(box) {
   const { serverInfo } = await import('./plex-common.js');
   const info = await serverInfo(true);
@@ -398,6 +412,69 @@ function renderConsole(container) {
   };
 }
 
+// Aliases (a friendlier name shown under the full path) and colour tags for shared folders.
+const TAG_COLORS = ['#ef4444', '#f97316', '#eab308', '#22c55e', '#14b8a6', '#3b82f6', '#8b5cf6', '#ec4899', '#6b7280'];
+function folderDetails(cfg) {
+  const files = cfg.files || {};
+  let tags = (files.tags || []).map((t) => ({ ...t }));
+  const info = Object.fromEntries((files.folders || []).map((f) => [f.path, { alias: f.alias || '', tags: [...(f.tags || [])] }]));
+  const tagBox = h('div', { class: 'fm-tags-edit' });
+  const cards = h('div', { class: 'fm-folder-cards' });
+  const status = h('span', { class: 'small muted' });
+  const save = debounce(async () => {
+    try {
+      state.config = await portal.saveConfig({ fileTags: tags, fileRootInfo: info });
+      // Keep the ids the server settled on.
+      tags = (state.config.files.tags || []).map((t) => ({ ...t }));
+      dispatchEvent(new Event('mediadesk:folders'));
+      status.textContent = 'Saved';
+      setTimeout(() => { status.textContent = ''; }, 1500);
+    } catch (err) { toastError(err, 'Could not save'); }
+  }, 500);
+  const chip = (t, on, onclick) => h('button', { class: `tag-chip ${on ? 'on' : ''}`, style: { '--tag': t.color }, onclick, 'aria-pressed': String(on) }, h('span', { class: 'tag-dot' }), t.name);
+
+  const drawTags = () => clear(tagBox,
+    tags.map((t) => {
+      const name = h('input', { class: 'input tag-name', value: t.name, maxlength: 30, 'aria-label': 'Tag name' });
+      name.addEventListener('input', () => { t.name = name.value; drawCards(); save(); });
+      const colors = h('div', { class: 'tag-colors' }, TAG_COLORS.map((c) => h('button', { class: `tag-swatch ${t.color === c ? 'on' : ''}`, style: { background: c }, 'aria-label': `Colour ${c}`, onclick: () => { t.color = c; drawTags(); drawCards(); save(); } })));
+      return h('div', { class: 'tag-row' }, h('span', { class: 'tag-dot big', style: { '--tag': t.color } }), name, colors,
+        h('button', { class: 'btn btn-icon btn-sm', title: 'Delete tag', html: icon.trash, onclick: () => {
+          tags = tags.filter((x) => x !== t);
+          for (const v of Object.values(info)) v.tags = v.tags.filter((x) => x !== t.id);
+          drawTags(); drawCards(); save();
+        } }));
+    }),
+    h('div', { class: 'tag-add' },
+      h('button', { class: 'btn btn-sm', onclick: () => {
+        const n = tags.length + 1;
+        tags.push({ id: Math.random().toString(36).slice(2, 10), name: `Tag ${n}`, color: TAG_COLORS[(n - 1) % TAG_COLORS.length] });
+        drawTags(); drawCards(); save();
+        tagBox.querySelectorAll('.tag-name')[tags.length - 1]?.select();
+      } }, h('span', { html: icon.plus }), 'New tag')));
+
+  const drawCards = () => clear(cards, (files.folders || []).length ? files.folders.map((f) => {
+    const v = info[f.path];
+    const alias = h('input', { class: 'input fm-alias', value: v.alias, maxlength: 60, placeholder: `Alias (optional) — shown instead of “${f.folderName}”` });
+    alias.addEventListener('input', () => { v.alias = alias.value; aliasLine.textContent = v.alias.trim() || ''; aliasLine.hidden = !v.alias.trim(); save(); });
+    const aliasLine = h('div', { class: 'fm-card-alias', hidden: !v.alias }, v.alias);
+    return h('div', { class: 'fm-card' },
+      h('div', { class: 'fm-card-path' }, f.path),
+      aliasLine,
+      alias,
+      tags.length ? h('div', { class: 'tag-chips' }, tags.map((t) => chip(t, v.tags.includes(t.id), () => {
+        v.tags = v.tags.includes(t.id) ? v.tags.filter((x) => x !== t.id) : [...v.tags, t.id];
+        drawCards(); save();
+      }))) : h('div', { class: 'small muted' }, 'Create a tag above to tag this folder.'));
+  }) : h('div', { class: 'small muted' }, 'Add a shared folder above first.'));
+
+  drawTags(); drawCards();
+  return section('Folder names & tags',
+    h('p', { class: 'muted small' }, 'Give a shared folder an alias to show in Files instead of its folder name, and tag folders to group and filter them. Changes save as you type.'),
+    h('div', { class: 'fm-tags-head' }, h('strong', {}, 'Tags'), status), tagBox,
+    h('div', { class: 'fm-tags-head' }, h('strong', {}, 'Shared folders')), cards);
+}
+
 function renderFiles(container) {
   const cfg = state.config;
   const files = cfg.files || { roots: [] };
@@ -423,6 +500,7 @@ function renderFiles(container) {
       h('div', { class: 'small muted', style: { margin: '10px 0 6px' } }, 'Suggestions from your connected apps:'),
       suggestions,
       h('div', { class: 'btn-row' }, save)),
+    folderDetails(cfg),
     view,
     previewHelpers(cfg));
 

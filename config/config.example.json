@@ -5,6 +5,7 @@
     "sonarr":   { "url": "http://192.168.1.10:8989", "apiKey": "YOUR_SONARR_API_KEY" },
     "nzbget":   { "url": "http://192.168.1.10:6789", "username": "nzbget", "password": "tegbzn6789" },
     "jellyfin": { "url": "http://192.168.1.10:8096", "apiKey": "YOUR_JELLYFIN_API_KEY", "publicUrl": "https://jellyfin.example.com" },
-    "plex":     { "url": "http://192.168.1.10:32400", "apiKey": "YOUR_PLEX_TOKEN" }
+    "plex":     { "url": "http://192.168.1.10:32400", "apiKey": "YOUR_PLEX_TOKEN" },
+    "pikvm":    { "url": "https://192.168.1.50", "username": "admin", "password": "YOUR_PIKVM_PASSWORD" }
   }
 }

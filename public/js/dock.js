@@ -76,7 +76,7 @@ export function appMenu(e, id, more = []) {
   const inDock = d.apps.includes(id);
   const placeable = !PLACEABLE_EXCLUDE.has(id);
   const items = [{ label: wins.length ? 'Show' : 'Open', icon: icon.external, action: () => toggleApp(id) }];
-  if (['radarr', 'sonarr', 'nzbget', 'jellyfin', 'plex'].includes(id) && serviceLink(id)) items.push({ label: 'Open full web UI', icon: icon.globe, action: () => hooks.openWebView(id) });
+  if (['radarr', 'sonarr', 'nzbget', 'jellyfin', 'plex', 'pikvm'].includes(id) && serviceLink(id)) items.push({ label: 'Open full web UI', icon: icon.globe, action: () => hooks.openWebView(id) });
   if (placeable) {
     items.push('-');
     // With "only open apps" the dock has nothing to keep, so there's nothing to add or remove.

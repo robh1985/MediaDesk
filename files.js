@@ -61,10 +61,38 @@ const within = (child, parent) => {
 
 function rootList(config) {
   const raw = Array.isArray(config.fileRoots) ? config.fileRoots : [];
+  const info = config.fileRootInfo || {};
+  const tagIds = new Set((config.fileTags || []).map((t) => t.id));
   return raw.filter((r) => typeof r === 'string' && r.trim()).map((r, id) => {
     const abs = path.resolve(r.trim());
-    return { id, path: abs, name: path.basename(abs) || abs };
+    const meta = info[abs] || {};
+    // The alias (if any) is the name people see; the folder name is the fallback.
+    return { id, path: abs, folderName: path.basename(abs) || abs, name: meta.alias || path.basename(abs) || abs, alias: meta.alias || '', tags: (meta.tags || []).filter((t) => tagIds.has(t)) };
   });
+}
+
+// Tags ([{ id, name, color }]) and per-folder alias + tags, as sent from Settings → Files.
+function cleanTags(list) {
+  if (!Array.isArray(list)) return [];
+  const seen = new Set();
+  return list.slice(0, 50).map((t) => ({
+    id: String(t?.id || '').replace(/[^a-z0-9-]/gi, '').slice(0, 24) || crypto.randomBytes(4).toString('hex'),
+    name: String(t?.name || '').trim().slice(0, 30),
+    color: /^#[0-9a-f]{6}$/i.test(t?.color || '') ? t.color.toLowerCase() : '#6b7280',
+  })).filter((t) => t.name && !seen.has(t.id) && seen.add(t.id));
+}
+function cleanRootInfo(info, roots, tags) {
+  const out = {};
+  const tagIds = new Set(tags.map((t) => t.id));
+  const known = new Set(roots.map((r) => path.resolve(r)));
+  for (const [p, v] of Object.entries(info && typeof info === 'object' ? info : {})) {
+    const abs = path.resolve(p);
+    if (!known.has(abs) || !v || typeof v !== 'object') continue;
+    const alias = String(v.alias || '').trim().slice(0, 60);
+    const t = [...new Set((Array.isArray(v.tags) ? v.tags : []).map(String))].filter((x) => tagIds.has(x));
+    if (alias || t.length) out[abs] = { ...(alias ? { alias } : {}), ...(t.length ? { tags: t } : {}) };
+  }
+  return out;
 }
 
 function getRoot(config, id) {
@@ -474,4 +502,4 @@ async function resolveShared(config, rootId, rel) {
   } catch (err) { throw toFileError(err); }
 }
 
-module.exports = { handle, rootList, validateRoots, resolveShared };
+module.exports = { handle, rootList, validateRoots, resolveShared, cleanTags, cleanRootInfo };

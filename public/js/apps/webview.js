@@ -4,7 +4,7 @@ import { h, clear } from '../ui.js';
 import { icon, appIcon } from '../icons.js';
 import { serviceLink } from '../api.js';
 
-const NAMES = { radarr: 'Radarr', sonarr: 'Sonarr', nzbget: 'NZBGet', jellyfin: 'Jellyfin', plex: 'Plex' };
+const NAMES = { radarr: 'Radarr', sonarr: 'Sonarr', nzbget: 'NZBGet', jellyfin: 'Jellyfin', plex: 'Plex', pikvm: 'PiKVM' };
 
 export const webviewApp = {
   id: 'webview', name: 'Web UI', icon: appIcon.browser, size: [1200, 780], description: 'Full service web interfaces',

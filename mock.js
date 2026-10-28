@@ -543,7 +543,12 @@ function sendRange(req, res, buf, type) {
 }
 
 let plexMock = null;
+let pikvmMock = null;
+const pikvmDemo = () => (pikvmMock ||= require('./mock-pikvm').createMockPikvm());
+function pikvmSocket(req, socket) { pikvmDemo().socket(req, socket); }
+
 async function handle(req, res, svc, rest, url, { readJson, sendJson }) {
+  if (svc === 'pikvm') return pikvmDemo().handle(req, res, rest, url, { sendJson });
   if (svc === 'plex') {
     plexMock = plexMock || require('./mock-plex').createMockPlex({ movies, series, episodes, posterSvg, overview: OVERVIEW, hash });
     return plexMock.handle(req, res, rest, url, { sendJson, sendRange });
@@ -616,8 +621,35 @@ function demoFileRoots() {
   put('Downloads/complete/Velvet.Thunder.2025.1080p.WEB-DL/Velvet.Thunder.2025.1080p.WEB-DL.mkv', blob(900));
   put('Downloads/complete/Velvet.Thunder.2025.1080p.WEB-DL/Velvet.Thunder.2025.1080p.WEB-DL.nfo', 'Release notes for the demo download.\n');
   put('Downloads/incomplete/Ironclad.S04E02.2160p.WEB.h265.part', blob(300));
+  // Logs for the Log Viewer: a Configuration Manager log and a Windows servicing log.
+  const cm = (text, comp, type, thread, t) => `<![LOG[${text}]LOG]!><time="${t}.${String((thread * 37) % 1000).padStart(3, '0')}+300" date="01-31-2026" component="${comp}" context="" type="${type}" thread="${thread}" file="">\n`;
+  put('Logs/AppEnforce.log', [
+    cm('+++ Starting Install enforcement for App DT "Contoso VPN 5.2" ApplicationDeliveryType - ScopeId_1/DeploymentType_7, Revision - 4, ContentPath - C:\\Windows\\ccmcache\\1d, Execution Context - System', 'AppEnforce', 1, 4120, '09:14:02'),
+    cm('    Performing detection of app deployment type Contoso VPN 5.2(ScopeId_1/DeploymentType_7, revision 4) for system.', 'AppEnforce', 1, 4120, '09:14:02'),
+    cm('+++ Application not discovered. [AppDT Id: ScopeId_1/DeploymentType_7, Revision: 4]', 'AppEnforce', 1, 4120, '09:14:03'),
+    cm('    Executing Command line: "C:\\Windows\\system32\\msiexec.exe" /i "ContosoVPN.msi" /qn /l*v C:\\Windows\\Temp\\vpn.log with user context', 'AppEnforce', 1, 4120, '09:14:03'),
+    cm('    Working directory C:\\Windows\\ccmcache\\1d', 'AppEnforce', 1, 4120, '09:14:03'),
+    cm('    Post install behavior is BasedOnExitCode', 'AppEnforce', 1, 4120, '09:14:04'),
+    cm('    Waiting for process 6624 to finish.  Timeout = 120 minutes.', 'AppEnforce', 1, 4120, '09:14:04'),
+    cm('    Process 6624 terminated with exitcode: 1618', 'AppEnforce', 1, 4120, '09:15:31'),
+    cm('    Looking for exit code 1618 in exit codes table...', 'AppEnforce', 1, 4120, '09:15:31'),
+    cm('    Matched exit code 1618 to a FastRetry entry in exit codes table.', 'AppEnforce', 2, 4120, '09:15:31'),
+    cm('++++++ App enforcement completed (87 seconds) for App DT "Contoso VPN 5.2" [ScopeId_1/DeploymentType_7], Revision: 4, User SID: ] ++++++', 'AppEnforce', 1, 4120, '09:15:31'),
+    cm('Unable to download content for "Contoso Office Add-in". Error 0x87D01201', 'ContentTransferManager', 3, 5236, '09:16:10'),
+    cm('Failed to resolve PackageID=CON0004A, Version=2 with error 0x87D00607', 'ContentAccess', 3, 5236, '09:16:10'),
+    cm('Retrying download in 60 seconds', 'DataTransferService', 2, 5240, '09:16:11'),
+  ].join(''));
+  put('Logs/CBS.log', [
+    '2026-01-31 09:20:01, Info                  CBS    Starting TrustedInstaller initialization.',
+    '2026-01-31 09:20:01, Info                  CBS    Loaded Servicing Stack v10.0.26100.1000 with Core: C:\\Windows\\winsxs\\amd64_microsoft-windows-servicingstack\\cbscore.dll',
+    '2026-01-31 09:20:03, Info                  CBS    Session: 31234567_1234567890 initialized by client WindowsUpdateAgent.',
+    '2026-01-31 09:20:05, Warning               CBS    Failed to get next element [HRESULT = 0x800f080d - CBS_E_MANIFEST_INVALID_ITEM]',
+    '2026-01-31 09:20:09, Error                 CBS    Failed to process single phase execution. [HRESULT = 0x800f0922]',
+    '2026-01-31 09:20:10, Info                  CBS    Exec: Processing complete. Session: 31234567_1234567890, Package: Package_for_RollupFix [HRESULT = 0x800f0922]',
+    '',
+  ].join('\r\n'));
   put('Downloads/README.txt', 'Demo folder for MediaDesk Files.\nEverything here is recreated each time demo mode starts.\n');
-  demoRoots = [path.join(base, 'Media'), path.join(base, 'Downloads')];
+  demoRoots = [path.join(base, 'Media'), path.join(base, 'Downloads'), path.join(base, 'Logs')];
   return demoRoots;
 }
 
@@ -629,4 +661,4 @@ function seedNotifications(notifier) {
   notifier.add('nzbget', 'failed', { title: 'Download failed', body: 'Glasshouse.S02E04.720p.WEB.h264', level: 'error', link: { app: 'nzbget', opts: { tab: 'history' } } });
 }
 
-module.exports = { handle, demoFileRoots, seedNotifications };
+module.exports = { handle, demoFileRoots, seedNotifications, pikvmSocket };

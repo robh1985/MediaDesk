@@ -5,10 +5,10 @@
 const KEY = 'mediadesk.layout';
 const listeners = new Set();
 
-export const DEFAULT_DOCK_APPS = ['dashboard', 'radarr', 'sonarr', 'nzbget', 'jellyfin', 'plex', 'plexviewer', 'console', 'music', 'files', 'notes', 'calculator', 'settings'];
-export const DEFAULT_DESKTOP_APPS = ['dashboard', 'radarr', 'sonarr', 'nzbget', 'jellyfin', 'plex', 'plexviewer', 'console', 'music', 'files', 'notes', 'calculator', 'settings'];
+export const DEFAULT_DOCK_APPS = ['dashboard', 'radarr', 'sonarr', 'nzbget', 'jellyfin', 'plex', 'plexviewer', 'pikvm', 'console', 'music', 'files', 'notes', 'logs', 'calculator', 'settings'];
+export const DEFAULT_DESKTOP_APPS = ['dashboard', 'radarr', 'sonarr', 'nzbget', 'jellyfin', 'plex', 'plexviewer', 'pikvm', 'console', 'music', 'files', 'notes', 'logs', 'calculator', 'settings'];
 // Apps added in later versions show up on desktops arranged before they existed.
-const ADDED_LATER = ['plex', 'plexviewer', 'console'];
+const ADDED_LATER = ['plex', 'plexviewer', 'pikvm', 'console', 'logs'];
 // Apps that can be placed in the dock or on the desktop (Preview and Web UI open from other apps).
 export const PLACEABLE_EXCLUDE = new Set(['launcher', 'webview', 'preview']);
 

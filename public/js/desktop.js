@@ -315,18 +315,28 @@ function buildWidgets() {
     });
   }
 
-  // Upcoming
+  // Upcoming: TV episodes this week and movie releases this month.
   const kinds = ['radarr', 'sonarr'].filter(isConfigured);
   if (kinds.length) {
-    const list = h('div', { class: 'w-list' }, h('div', { class: 'small muted' }, 'Loading…'));
-    host.append(widget('Up next', kinds.includes('sonarr') ? 'sonarr' : 'radarr', list));
-    const load = () => Promise.all(kinds.map((k) => upcoming(k, 7).catch(() => []))).then((all) => {
-      const items = all.flat().filter((i) => new Date(i.date) >= new Date(Date.now() - 6 * 3600e3)).sort((a, b) => new Date(a.date) - new Date(b.date)).slice(0, 5);
-      clear(list, items.length ? items.map((it) => h('button', { class: 'w-item', onclick: () => openApp(it.kind, { itemId: it.id }) },
-        h('span', { class: `w-dot cal-${it.kind}` }),
-        h('span', { class: 'grow' }, h('strong', {}, it.title), h('span', { class: 'small muted' }, it.sub)),
-        h('span', { class: 'small muted nowrap' }, new Date(it.date).toLocaleDateString(undefined, { weekday: 'short' }))))
-        : h('div', { class: 'small muted' }, 'Nothing this week'));
+    const list = h('div', { class: 'w-list w-upcoming' }, h('div', { class: 'small muted' }, 'Loading…'));
+    host.append(widget('Upcoming', kinds.includes('sonarr') ? 'sonarr' : 'radarr', list, () => openApp(kinds.includes('sonarr') ? 'sonarr' : 'radarr', { section: 'calendar' })));
+    const when = (d) => {
+      const dt = new Date(d);
+      return dt - Date.now() < 6 * 864e5 ? dt.toLocaleDateString(undefined, { weekday: 'short' }) : dt.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+    };
+    const row = (it) => h('button', { class: 'w-item', onclick: () => openApp(it.kind, { itemId: it.id }) },
+      h('span', { class: `w-dot cal-${it.kind}` }),
+      h('span', { class: 'grow' }, h('strong', {}, it.title), h('span', { class: 'small muted' }, it.sub)),
+      h('span', { class: 'small muted nowrap' }, when(it.date)));
+    const section = (title, items, empty) => [h('div', { class: 'w-sub' }, title), items.length ? items.map(row) : h('div', { class: 'small muted w-empty' }, empty)];
+    const load = () => Promise.all([
+      isConfigured('sonarr') ? upcoming('sonarr', 7).catch(() => []) : null,
+      isConfigured('radarr') ? upcoming('radarr', 30).catch(() => []) : null,
+    ]).then(([tv, movies]) => {
+      const soon = (list) => list.filter((i) => new Date(i.date) >= new Date(Date.now() - 6 * 3600e3)).sort((a, b) => new Date(a.date) - new Date(b.date));
+      clear(list,
+        tv ? section('TV this week', soon(tv).slice(0, 4), 'No episodes this week') : null,
+        movies ? section('Movie releases', soon(movies).slice(0, 4), 'No movie releases this month') : null);
     });
     load();
     setInterval(load, 30 * 60e3);
@@ -437,7 +447,7 @@ export function openLauncher() {
     isConfigured('radarr') && { title: 'Search for all missing movies', icon: icon.search, kind: 'Radarr', keys: 'missing search movies', action: () => radarr.post('command', { name: 'MissingMoviesSearch' }).then(() => toast('Searching missing movies')).catch(toastError) },
     isConfigured('sonarr') && { title: 'Search for all missing episodes', icon: icon.search, kind: 'Sonarr', keys: 'missing search episodes', action: () => sonarr.post('command', { name: 'MissingEpisodeSearch' }).then(() => toast('Searching missing episodes')).catch(toastError) },
     { title: 'Settings', icon: icon.sliders, kind: 'System', keys: 'settings config preferences connections', action: () => openApp('settings') },
-    ...['radarr', 'sonarr', 'nzbget', 'jellyfin', 'plex'].filter((s) => serviceLink(s)).map((s) => ({ title: `Open ${getApp(s).name} web UI`, icon: icon.globe, kind: 'Web UI', keys: `web ui native open ${s}`, action: () => openWebView(s) })),
+    ...['radarr', 'sonarr', 'nzbget', 'jellyfin', 'plex', 'pikvm'].filter((s) => serviceLink(s)).map((s) => ({ title: `Open ${getApp(s).name} web UI`, icon: icon.globe, kind: 'Web UI', keys: `web ui native open ${s}`, action: () => openWebView(s) })),
   ].filter(Boolean);
 
   let seq = 0;

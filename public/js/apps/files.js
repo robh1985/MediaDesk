@@ -105,6 +105,9 @@ class FileBrowser {
   constructor(win, opts) {
     this.win = win;
     this.roots = [];
+    // Folder names and tags edited in Settings show up straight away.
+    const onFolders = () => { if (this.win.el.isConnected) this.loadRoots(); else removeEventListener('mediadesk:folders', onFolders); };
+    addEventListener('mediadesk:folders', onFolders);
     this.root = 0;
     this.path = '';
     this.entries = [];
@@ -195,14 +198,30 @@ class FileBrowser {
 
   async loadRoots() {
     try { this.roots = await call('roots'); } catch (err) { this.roots = []; toastError(err); }
+    this.drawRoots();
+  }
+
+  // Shared folders: alias (or folder name), the full path when there's an alias, tags, free space.
+  drawRoots() {
+    const tags = state.config?.files?.tags || [];
+    const byId = Object.fromEntries(tags.map((t) => [t.id, t]));
+    const used = new Set(this.roots.flatMap((r) => r.tags || []));
+    const shownTags = tags.filter((t) => used.has(t.id));
+    if (this.tagFilter && !used.has(this.tagFilter)) this.tagFilter = null;
+    const roots = this.roots.filter((r) => !this.tagFilter || (r.tags || []).includes(this.tagFilter));
     clear(this.sidebar,
       h('div', { class: 'fm-side-title' }, 'Shared folders'),
-      this.roots.map((r) => {
-        const used = r.total ? ((r.total - r.free) / r.total) * 100 : 0;
-        const btn = h('button', { class: 'nav-item fm-root', dataset: { root: r.id }, title: r.path, onclick: () => this.go(r.id, '') },
+      shownTags.length ? h('div', { class: 'fm-tag-filter' },
+        h('button', { class: `tag-chip ${this.tagFilter ? '' : 'on'}`, onclick: () => { this.tagFilter = null; this.drawRoots(); } }, 'All'),
+        shownTags.map((t) => h('button', { class: `tag-chip ${this.tagFilter === t.id ? 'on' : ''}`, style: { '--tag': t.color }, onclick: () => { this.tagFilter = this.tagFilter === t.id ? null : t.id; this.drawRoots(); } }, h('span', { class: 'tag-dot' }), t.name))) : null,
+      roots.map((r) => {
+        const pct = r.total ? ((r.total - r.free) / r.total) * 100 : 0;
+        const btn = h('button', { class: `nav-item fm-root ${r.id === this.root ? 'active' : ''}`, dataset: { root: r.id }, title: r.path, onclick: () => this.go(r.id, '') },
           h('span', { class: 'nav-icon', html: r.ok ? fileIcon('folder') : icon.alert }),
-          h('span', { class: 'fm-root-text' }, h('span', {}, r.name),
-            r.total ? h('span', { class: 'fm-root-free' }, progressBar(used, used > 90 ? 'bad' : used > 75 ? 'warn' : ''), `${formatBytes(r.free)} free`) : null));
+          h('span', { class: 'fm-root-text' }, h('span', { class: 'fm-root-name' }, r.name),
+            r.alias ? h('span', { class: 'fm-root-path' }, r.path) : null,
+            (r.tags || []).length ? h('span', { class: 'fm-root-tags' }, r.tags.map((id) => byId[id] && h('span', { class: 'tag-chip mini', style: { '--tag': byId[id].color } }, h('span', { class: 'tag-dot' }), byId[id].name))) : null,
+            r.total ? h('span', { class: 'fm-root-free' }, progressBar(pct, pct > 90 ? 'bad' : pct > 75 ? 'warn' : ''), `${formatBytes(r.free)} free`) : null));
         this.dropTarget(btn, () => ({ root: r.id, path: '' }));
         return btn;
       }),
@@ -443,6 +462,7 @@ class FileBrowser {
     contextMenu(ev.clientX, ev.clientY, [
       { label: e.dir ? 'Open' : kindOf(e) === 'text' ? 'Open in Notes' : 'Open in Preview', icon: e.dir ? icon.folder : icon.eye, disabled: many, action: () => this.open(e) },
       !e.dir ? { label: 'Download', icon: icon.download, action: () => this.download() } : null,
+      !e.dir && /\.(log|lo_|txt)$/i.test(e.name) ? { label: 'Open in Log Viewer', icon: appIcon.logs, disabled: many, action: () => openApp('logs', { root: this.root, path: join(this.path, e.name), key: `${this.root}:${join(this.path, e.name)}` }) } : null,
       !e.dir && kindOf(e) !== 'text' ? { label: 'Open in Notes', icon: appIcon.notes, disabled: many, action: () => openApp('notes', { root: this.root, path: join(this.path, e.name) }) } : null,
       kindOf(e) === 'image' && extOf(e.name) !== 'ico' && extOf(e.name) !== 'tbn' ? { label: 'Set as desktop wallpaper', icon: icon.image, disabled: many, action: () => this.setWallpaper(e) } : null,
       ...(this.selectedAudio().length ? ['-',
@@ -476,6 +496,8 @@ class FileBrowser {
   // ---- Actions ----
   open(e) {
     if (e.dir) return this.go(this.root, join(this.path, e.name));
+    // Log files open in the Log Viewer (Notes is still in the right-click menu).
+    if (/\.(log|lo_)$/i.test(e.name)) return openApp('logs', { root: this.root, path: join(this.path, e.name), key: `${this.root}:${join(this.path, e.name)}` });
     this.preview(e);
   }
 

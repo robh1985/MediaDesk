@@ -5,7 +5,7 @@ export function notConfigured(name, svc) {
   return h('div', { class: 'empty not-configured' },
     h('div', { class: 'big-icon', html: appIcon[svc] }),
     h('div', { class: 'empty-title' }, `${name} isn’t connected yet`),
-    h('div', {}, svc === 'plex' ? 'Use “Sign in with Plex” in Settings → Plex to connect your server.' : `Add its URL${svc === 'nzbget' ? ' and login' : ' and API key'} in Settings to manage it from here.`),
+    h('div', {}, svc === 'plex' ? 'Use “Sign in with Plex” in Settings → Plex to connect your server.' : svc === 'pikvm' ? 'Add its address, user name and password in Settings → PiKVM.' : `Add its URL${svc === 'nzbget' ? ' and login' : ' and API key'} in Settings to manage it from here.`),
     h('button', { class: 'btn btn-primary', onclick: () => import('../wm.js').then((wm) => wm.openApp('settings')) }, 'Open Settings'));
 }
 
