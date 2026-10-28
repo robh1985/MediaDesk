@@ -16,6 +16,7 @@ const { createWallpapers } = require('./wallpapers');
 const media = require('./media');
 const { createGames } = require('./games');
 const { createPikvm } = require('./pikvm');
+const { createArchive } = require('./archive');
 
 const ROOT = __dirname;
 
@@ -165,6 +166,7 @@ function publicConfig() {
   return {
     services, mock: MOCK, auth: Boolean(config.portalPassword), files: filesStatus(), version: VERSION, appSettings: appSettings.resolve(config.appSettings),
     media: { ...media.status(), ffmpegPath: config.ffmpegPath || '', libreOfficePath: config.libreOfficePath || '' },
+    archive: { ...archive.status(), sevenZipPath: config.sevenZipPath || '' },
     games: { folder: MOCK ? '(demo games)' : config.gamesFolder || '' },
   };
 }
@@ -467,8 +469,14 @@ async function updateConfig(req, res) {
   for (const key of ['ffmpegPath', 'libreOfficePath']) {
     if (typeof body[key] === 'string' && body[key].trim() !== (next[key] || '')) { next[key] = body[key].trim(); toolsChanged = true; }
   }
+  let sevenChanged = false;
+  if (typeof body.sevenZipPath === 'string' && body.sevenZipPath.trim() !== (next.sevenZipPath || '')) {
+    if (body.sevenZipPath.trim()) next.sevenZipPath = body.sevenZipPath.trim(); else delete next.sevenZipPath;
+    sevenChanged = true;
+  }
   saveConfig(next);
   if (toolsChanged || body.recheckTools) await media.detect(config);
+  if (sevenChanged || body.recheckTools) await archive.detect();
   sendJson(res, 200, publicConfig());
 }
 
@@ -592,6 +600,7 @@ const games = createGames({
   sample: MOCK ? require('./mock-games').createSample() : null,
 });
 const pikvm = createPikvm({ getConfig: () => config.services.pikvm });
+const archive = createArchive({ getConfig: () => config, resolveInShared: files.resolveInShared, filesEnabled: () => filesStatus().enabled });
 const wallpapers = createWallpapers(MOCK ? path.join(require('node:os').tmpdir(), 'mediadesk-demo-wallpapers') : path.join(path.dirname(CONFIG_PATH), 'wallpapers'));
 
 // --- Notifications ------------------------------------------------------------
@@ -698,7 +707,7 @@ async function handle(req, res) {
       // Folder tags and aliases can be tried out too (kept in memory).
       if (Array.isArray(body.fileTags)) config.fileTags = files.cleanTags(body.fileTags);
       if (body.fileRootInfo || Array.isArray(body.fileTags)) config.fileRootInfo = files.cleanRootInfo(body.fileRootInfo || config.fileRootInfo, config.fileRoots || [], config.fileTags || []);
-      if (body.recheckTools) await media.detect(config);
+      if (body.recheckTools) { await media.detect(config); await archive.detect(); }
       return sendJson(res, 200, publicConfig());
     }
     return updateConfig(req, res);
@@ -720,6 +729,7 @@ async function handle(req, res) {
 
   if (p.startsWith('/portal/plex/')) return plexSignIn(req, res, p);
   if (p.startsWith('/portal/games/')) return games.handle(req, res, url, { sendJson, readJson });
+  if (p.startsWith('/portal/archive/')) return archive.handle(req, res, url, { sendJson, readJson });
 
   const m = p.match(/^\/api\/(radarr|sonarr|nzbget|jellyfin|plex|pikvm)(?:\/(.*))?$/);
   if (!m) return sendJson(res, 404, { error: 'Unknown endpoint' });
@@ -774,6 +784,7 @@ server.listen(PORT, HOST, () => {
     console.log(`Preview helpers: ffmpeg ${t.ffmpeg ? `found (${w.ffmpeg})` : w.ffmpeg ? 'found but ffprobe is missing' : 'not found'}, LibreOffice ${t.office ? `found (${w.soffice})` : 'not found'}`);
     if (!t.ffmpeg || !t.office) console.log('  Install the missing ones (see Settings -> Files), or enter their location there under "Installed somewhere unusual?".');
   });
+  archive.detect().then((a) => console.log(`Archive Expander: 7-Zip ${a.available ? `${a.version} found (${a.path})` : 'not found - install 7-Zip to open and create archives (see Settings -> Files)'}`));
   console.log(`MediaDesk running at http://${HOST === '0.0.0.0' ? 'localhost' : HOST}:${PORT}${MOCK ? '  (demo mode, fake data)' : ''}`);
   if (!MOCK) {
     const missing = SERVICES.filter((s) => !isConfigured(s));

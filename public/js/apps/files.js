@@ -4,6 +4,7 @@ import { h, clear, formatBytes, formatDuration, debounce, toast, toastError, con
 import { icon, appIcon } from '../icons.js';
 import { state, appPref } from '../api.js';
 import { openApp } from '../wm.js';
+import { isArchiveName, canOpenAsArchive, addToArchive, quickAdd, quickExtract } from './archive.js';
 import { fromFiles } from './music-engine.js';
 import { setWallpaperFromFile } from '../desktop.js';
 
@@ -464,6 +465,7 @@ class FileBrowser {
       !e.dir ? { label: 'Download', icon: icon.download, action: () => this.download() } : null,
       !e.dir && /\.(log|lo_|txt)$/i.test(e.name) ? { label: 'Open in Log Viewer', icon: appIcon.logs, disabled: many, action: () => openApp('logs', { root: this.root, path: join(this.path, e.name), key: `${this.root}:${join(this.path, e.name)}` }) } : null,
       !e.dir && kindOf(e) !== 'text' ? { label: 'Open in Notes', icon: appIcon.notes, disabled: many, action: () => openApp('notes', { root: this.root, path: join(this.path, e.name) }) } : null,
+      ...this.archiveItems(e, many),
       kindOf(e) === 'image' && extOf(e.name) !== 'ico' && extOf(e.name) !== 'tbn' ? { label: 'Set as desktop wallpaper', icon: icon.image, disabled: many, action: () => this.setWallpaper(e) } : null,
       ...(this.selectedAudio().length ? ['-',
         { label: 'Play in Music', icon: icon.play, action: () => this.toMusic(true) },
@@ -476,6 +478,24 @@ class FileBrowser {
       '-',
       { label: many ? `Delete ${this.selected.size} items` : 'Delete', icon: icon.trash, action: () => this.remove() },
     ].filter(Boolean));
+  }
+
+  // 7-Zip commands, when 7-Zip is installed on the server (see the Archive Expander).
+  archiveItems(e, many) {
+    if (!state.config.archive?.available) return [];
+    const sel = this.selectedEntries();
+    const names = sel.map((x) => x.name);
+    const isDir = Object.fromEntries(sel.map((x) => [x.name, x.dir]));
+    const arcs = sel.length && sel.every((x) => !x.dir && isArchiveName(x.name));
+    const base = sel.length === 1 ? (e.dir ? e.name : e.name.replace(/\.[^.]+$/, '')) : (this.path.split('/').pop() || 'Archive');
+    const done = () => this.refresh();
+    return ['-',
+      !e.dir && canOpenAsArchive(e.name) ? { label: 'Open in Archive Expander', icon: appIcon.archive, disabled: many, action: () => openApp('archive', { root: this.root, path: join(this.path, e.name) }) } : null,
+      arcs ? { label: 'Extract Here', icon: appIcon.archive, action: async () => { for (const n of names) await quickExtract(this.root, join(this.path, n), false); done(); } } : null,
+      arcs ? { label: many ? 'Extract each to its own folder' : `Extract to “${e.name.replace(/\.(tar\.)?[^.]+$/, '')}/”`, icon: appIcon.archive, action: async () => { for (const n of names) await quickExtract(this.root, join(this.path, n), true); done(); } } : null,
+      { label: 'Add to archive…', icon: appIcon.archive, action: async () => { if (await addToArchive(this.root, this.path, names, isDir)) done(); } },
+      { label: `Add to “${base}.zip”`, icon: appIcon.archive, action: async () => { if (await quickAdd(this.root, this.path, names, 'zip')) done(); } },
+    ].filter(Boolean);
   }
 
   async setWallpaper(e) {
@@ -498,6 +518,8 @@ class FileBrowser {
     if (e.dir) return this.go(this.root, join(this.path, e.name));
     // Log files open in the Log Viewer (Notes is still in the right-click menu).
     if (/\.(log|lo_)$/i.test(e.name)) return openApp('logs', { root: this.root, path: join(this.path, e.name), key: `${this.root}:${join(this.path, e.name)}` });
+    // Archives open in the Archive Expander, like double-clicking them with 7-Zip installed.
+    if (isArchiveName(e.name) && state.config.archive?.available) return openApp('archive', { root: this.root, path: join(this.path, e.name) });
     this.preview(e);
   }
 

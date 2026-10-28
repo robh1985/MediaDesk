@@ -546,26 +546,32 @@ function previewHelpers(cfg) {
     h('div', { class: 'grow' }, h('strong', {}, name), h('span', { class: 'small muted' }, ok ? ` — found. ${what}` : ` — not found. ${what}`),
       ok ? null : h('div', { class: 'small helper-install' }, install)));
   const ffPath = h('input', { class: 'input', value: m.ffmpegPath || '', placeholder: win ? 'C:\\ffmpeg\\bin\\ffmpeg.exe (optional)' : '/usr/bin/ffmpeg (optional)', disabled: cfg.mock });
+  const z = cfg.archive || {};
+  const zPath = h('input', { class: 'input', value: z.sevenZipPath || '', placeholder: win ? 'C:\\Program Files\\7-Zip\\7z.exe (optional)' : '/usr/bin/7zz (optional)', disabled: cfg.mock });
   const loPath = h('input', { class: 'input', value: m.libreOfficePath || '', placeholder: win ? 'C:\\Program Files\\LibreOffice\\program\\soffice.exe (optional)' : '/usr/bin/soffice (optional)', disabled: cfg.mock });
   const check = h('button', { class: 'btn' }, h('span', { html: icon.refresh }), 'Check again');
-  const sec = section('Preview helpers',
-    h('p', { class: 'muted small' }, 'Preview opens pictures, PDFs and most documents by itself. Two free programs on the MediaDesk computer let it do more:'),
+  const sec = section('Helper programs',
+    h('p', { class: 'muted small' }, 'Preview opens pictures, PDFs and most documents by itself. Free programs on the MediaDesk computer let it (and the Archive Expander) do more:'),
     row(m.ffmpeg, 'ffmpeg', 'Plays any video or audio format (AVI, WMV, MKV with any codec, FLV, MPEG-TS, WMA, AC3, …) and shows TIFF/HEIC pictures.',
       win ? h('span', {}, 'Install: open PowerShell and run ', h('code', {}, 'winget install Gyan.FFmpeg'), ', then restart MediaDesk (restart-windows.cmd).')
         : h('span', {}, 'Install: ', h('code', {}, 'sudo apt install ffmpeg'), ' (Docker images include it), then restart MediaDesk.')),
     row(m.office, 'LibreOffice', 'Shows Word, Excel and PowerPoint files exactly as they print, including older .doc and .ppt files.',
       win ? h('span', {}, 'Install: ', h('code', {}, 'winget install TheDocumentFoundation.LibreOffice'), ', then press Check again.')
         : h('span', {}, 'Install: ', h('code', {}, 'sudo apt install libreoffice-core libreoffice-writer libreoffice-calc libreoffice-impress'), ' (Docker: build with ', h('code', {}, '--build-arg WITH_OFFICE=true'), ').')),
+    row(z.available, '7-Zip', `${z.available ? `(${z.version}) ` : ''}Lets the Archive Expander open, extract and create archives: 7z, ZIP, RAR, TAR, GZ, ISO, CAB, DMG, WIM and dozens more.`,
+      win ? h('span', {}, 'Install: ', h('code', {}, 'winget install 7zip.7zip'), ' (or from 7-zip.org), then press Check again.')
+        : h('span', {}, 'Install: ', h('code', {}, 'sudo apt install 7zip'), ' (older systems: ', h('code', {}, 'p7zip-full'), '; for RAR also ', h('code', {}, '7zip-rar'), '; macOS: ', h('code', {}, 'brew install sevenzip'), '; Docker images include it), then press Check again.')),
     h('details', { class: 'helper-paths' }, h('summary', { class: 'small' }, 'Installed somewhere unusual?'),
       h('label', { class: 'field' }, h('span', {}, 'ffmpeg program'), ffPath),
-      h('label', { class: 'field' }, h('span', {}, 'LibreOffice program (soffice)'), loPath)),
+      h('label', { class: 'field' }, h('span', {}, 'LibreOffice program (soffice)'), loPath),
+      h('label', { class: 'field' }, h('span', {}, '7-Zip program (7zz, 7z or 7z.exe)'), zPath)),
     h('div', { class: 'btn-row' }, check));
   check.onclick = async () => {
     check.disabled = true;
     try {
-      state.config = await portal.saveConfig({ recheckTools: true, ...(cfg.mock ? {} : { ffmpegPath: ffPath.value, libreOfficePath: loPath.value }) });
-      const t = state.config.media;
-      toast('Checked', { body: `ffmpeg ${t.ffmpeg ? 'found' : 'not found'} · LibreOffice ${t.office ? 'found' : 'not found'}`, type: t.ffmpeg && t.office ? 'success' : 'info' });
+      state.config = await portal.saveConfig({ recheckTools: true, ...(cfg.mock ? {} : { ffmpegPath: ffPath.value, libreOfficePath: loPath.value, sevenZipPath: zPath.value }) });
+      const t = state.config.media, a = state.config.archive || {};
+      toast('Checked', { body: `ffmpeg ${t.ffmpeg ? 'found' : 'not found'} · LibreOffice ${t.office ? 'found' : 'not found'} · 7-Zip ${a.available ? 'found' : 'not found'}`, type: t.ffmpeg && t.office && a.available ? 'success' : 'info' });
       sec.replaceWith(previewHelpers(state.config));
     } catch (err) { toastError(err, 'Could not check'); check.disabled = false; }
   };

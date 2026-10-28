@@ -18,6 +18,8 @@ import { plexApp } from './apps/plex.js';
 import { plexViewerApp } from './apps/plexviewer.js';
 import { consoleApp } from './apps/console/console.js';
 import { logViewerApp } from './apps/logviewer.js';
+import { archiveApp } from './apps/archive.js';
+import { convertApp } from './apps/convert.js';
 import { pikvmApp } from './apps/pikvm.js';
 
 applyAppearance();
@@ -27,7 +29,7 @@ if (/[?&#]touchdebug\b/.test(location.href)) {
   import('./touchdebug.js').then((m) => m.startTouchDebug());
 }
 
-[dashboardApp, makeArrApp('radarr'), makeArrApp('sonarr'), nzbgetApp, jellyfinApp, plexApp, plexViewerApp, pikvmApp, consoleApp, musicApp, filesApp, notesApp, logViewerApp, previewApp, calculatorApp, settingsApp, webviewApp,
+[dashboardApp, makeArrApp('radarr'), makeArrApp('sonarr'), nzbgetApp, jellyfinApp, plexApp, plexViewerApp, pikvmApp, consoleApp, musicApp, filesApp, notesApp, logViewerApp, archiveApp, convertApp, previewApp, calculatorApp, settingsApp, webviewApp,
   { id: 'launcher', name: 'Search', icon: '', open() {} }].forEach(registerApp);
 
 async function boot() {

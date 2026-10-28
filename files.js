@@ -502,4 +502,9 @@ async function resolveShared(config, rootId, rel) {
   } catch (err) { throw toFileError(err); }
 }
 
-module.exports = { handle, rootList, validateRoots, resolveShared, cleanTags, cleanRootInfo };
+// For other modules (e.g. archives): a path inside a shared folder, which needn't exist yet.
+async function resolveInShared(config, rootId, rel) {
+  try { return await resolveIn(getRoot(config, rootId), rel); } catch (err) { throw toFileError(err); }
+}
+
+module.exports = { handle, rootList, validateRoots, resolveShared, resolveInShared, cleanTags, cleanRootInfo };

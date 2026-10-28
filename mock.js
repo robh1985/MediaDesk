@@ -648,9 +648,49 @@ function demoFileRoots() {
     '2026-01-31 09:20:10, Info                  CBS    Exec: Processing complete. Session: 31234567_1234567890, Package: Package_for_RollupFix [HRESULT = 0x800f0922]',
     '',
   ].join('\r\n'));
+  // An archive for the Archive Expander (a real ZIP; 7-Zip on the server opens it).
+  put('Downloads/Archives/Demo Pack.zip', makeZip([
+    ['Demo Pack/README.txt', 'This is a demo archive.\nOpen, extract, test or add to it with the Archive Expander.\n'],
+    ['Demo Pack/notes/todo.txt', '- Watch Velvet Thunder\n- Tidy the Downloads folder\n'],
+    ['Demo Pack/notes/movie.nfo', `<movie>\n  <title>Burning Atlas</title>\n  <plot>${OVERVIEW}</plot>\n</movie>\n`],
+    ['Demo Pack/art/poster.svg', posterSvg('Demo Pack')],
+    ['Demo Pack/data/sample.bin', blob(40)],
+  ]));
   put('Downloads/README.txt', 'Demo folder for MediaDesk Files.\nEverything here is recreated each time demo mode starts.\n');
   demoRoots = [path.join(base, 'Media'), path.join(base, 'Downloads'), path.join(base, 'Logs')];
   return demoRoots;
+}
+
+// A minimal ZIP writer (deflate), for the demo archive.
+function makeZip(items) {
+  const zlib = require('node:zlib');
+  const crcTable = Array.from({ length: 256 }, (_, n) => { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; return c >>> 0; });
+  const crc32 = (buf) => { let c = 0xffffffff; for (const b of buf) c = crcTable[(c ^ b) & 0xff] ^ (c >>> 8); return (c ^ 0xffffffff) >>> 0; };
+  const local = [], central = [];
+  let offset = 0;
+  const dosTime = (10 << 11) | (30 << 5), dosDate = ((2026 - 1980) << 9) | (1 << 5) | 31;
+  for (const [name, content] of items) {
+    const data = Buffer.isBuffer(content) ? content : Buffer.from(content, 'utf8');
+    const packed = zlib.deflateRawSync(data);
+    const nameBuf = Buffer.from(name, 'utf8');
+    const crc = crc32(data);
+    const head = Buffer.alloc(30);
+    head.writeUInt32LE(0x04034b50, 0); head.writeUInt16LE(20, 4); head.writeUInt16LE(0x0800, 6); head.writeUInt16LE(8, 8);
+    head.writeUInt16LE(dosTime, 10); head.writeUInt16LE(dosDate, 12); head.writeUInt32LE(crc, 14);
+    head.writeUInt32LE(packed.length, 18); head.writeUInt32LE(data.length, 22); head.writeUInt16LE(nameBuf.length, 26);
+    local.push(head, nameBuf, packed);
+    const cen = Buffer.alloc(46);
+    cen.writeUInt32LE(0x02014b50, 0); cen.writeUInt16LE(20, 4); cen.writeUInt16LE(20, 6); cen.writeUInt16LE(0x0800, 8); cen.writeUInt16LE(8, 10);
+    cen.writeUInt16LE(dosTime, 12); cen.writeUInt16LE(dosDate, 14); cen.writeUInt32LE(crc, 16);
+    cen.writeUInt32LE(packed.length, 20); cen.writeUInt32LE(data.length, 24); cen.writeUInt16LE(nameBuf.length, 28); cen.writeUInt32LE(offset, 42);
+    central.push(cen, nameBuf);
+    offset += 30 + nameBuf.length + packed.length;
+  }
+  const cd = Buffer.concat(central);
+  const end = Buffer.alloc(22);
+  end.writeUInt32LE(0x06054b50, 0); end.writeUInt16LE(items.length, 8); end.writeUInt16LE(items.length, 10);
+  end.writeUInt32LE(cd.length, 12); end.writeUInt32LE(offset, 16);
+  return Buffer.concat([...local, cd, end]);
 }
 
 // A few example notifications so the demo shows unread badges straight away.
