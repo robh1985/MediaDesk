@@ -6,6 +6,7 @@
 import { SYSTEMS, CORES, buttonsFor, keyName, padName, padStyle } from './systems.js';
 import { emulatorControls, bindings, pads } from './controls.js';
 import { Nav, blip } from './input.js';
+import { TouchPad, loadLayout, openEditor } from './touchpad.js';
 
 const EJS_VERSION = '4.2.3';
 const params = new URLSearchParams(location.search);
@@ -44,6 +45,7 @@ const toast = (text) => {
 const post = (msg) => { if (embedded) window.parent.postMessage({ source: 'mediadesk-console', ...msg }, location.origin); };
 
 let game, system, sys, settings, emu, startedAt = 0, menuOpen = false, nav, lastBatteryHash = '';
+let pad = null, padWanted = false, padIdle = false;
 
 function fail(title, detail) {
   overlay.className = 'show';
@@ -56,6 +58,13 @@ function fail(title, detail) {
 }
 
 async function start() {
+  // ?layout=<console>: just the on-screen controls editor, over a stand-in game screen.
+  const layoutOnly = params.get('layout');
+  if (layoutOnly && SYSTEMS[layoutOnly]) {
+    document.title = `${SYSTEMS[layoutOnly].short} on-screen controls — The Game Console`;
+    openEditor({ system: layoutOnly, accent, preview: true, onDone: () => { if (embedded) post({ type: 'console-exit' }); else window.close(); } });
+    return;
+  }
   let lib;
   try { lib = await (await api('/portal/games/library')).json(); } catch (err) { return fail('Couldn’t load your games', err.message); }
   game = lib.games.find((g) => g.id === gameId);
@@ -88,6 +97,9 @@ async function start() {
     EJS_externalFiles: game.parts?.length ? Object.fromEntries(game.parts.map((p) => [`/${p.split('/').pop()}`, fileUrl(p)])) : undefined,
     EJS_startOnLoaded: true,
     EJS_defaultControls: emulatorControls(system),
+    // EmulatorJS picks layouts and labels by console; given only a core shared by several
+    // consoles (Genesis Plus GX), it would use the first one's (the Master System's).
+    EJS_controlScheme: system,
     EJS_disableLocalStorage: true,
     EJS_language: 'en-US',
     EJS_disableAutoLang: false,
@@ -99,7 +111,8 @@ async function start() {
       shader: settings.shader || 'disabled',
       rewindEnabled: settings.rewind ? 'enabled' : 'disabled',
       'ff-ratio': settings.ffRatio || '3.0',
-      ...(settings.touchControls === false ? { 'virtual-gamepad': 'disabled' } : settings.touchControls === true ? { 'virtual-gamepad': 'enabled' } : {}),
+      // MediaDesk draws its own on-screen controls (see touchpad.js).
+      'virtual-gamepad': 'disabled',
     },
     // MediaDesk's pause menu does saving, loading, controls and quitting.
     EJS_Buttons: { saveState: false, loadState: false, gamepad: false, cheat: false, cacheManager: false, saveSavFiles: false, loadSavFiles: false, exitEmulation: false, netplay: false, screenRecord: false, settings: false, quickSave: false, quickLoad: false, restart: false, fullscreen: false, screenshot: false, contextMenu: false, diskButton: true },
@@ -123,9 +136,11 @@ async function start() {
       post({ type: 'console-started' });
       assignPads();
       // Touch screens have no Esc or Home button: give them one for the game menu.
-      if (matchMedia('(pointer: coarse)').matches || navigator.maxTouchPoints > 0) {
+      const touchScreen = matchMedia('(pointer: coarse)').matches || navigator.maxTouchPoints > 0;
+      if (touchScreen) {
         document.body.append(h('button', { class: 'menu-btn', 'aria-label': 'Game menu', onclick: openMenu }, 'Menu'));
       }
+      startPad(touchScreen);
       addEventListener('gamepadconnected', () => setTimeout(assignPads, 100));
       setInterval(assignPads, 2000);
       hint();
@@ -156,10 +171,33 @@ function assignPads() {
 
 function hint() {
   const padNow = pads()[0];
-  const t = h('div', { class: 'hint' }, padNow ? 'Press Home (or Select + Start) for the menu' : 'Press Esc for the menu');
+  const touchOnly = !padNow && (matchMedia('(pointer: coarse)').matches || navigator.maxTouchPoints > 0);
+  const t = h('div', { class: 'hint' }, padNow ? 'Press Home (or Select + Start) for the menu' : touchOnly ? 'Tap Menu for the game menu' : 'Press Esc for the menu');
   document.body.append(t);
   setTimeout(() => t.classList.add('out'), 3500);
   setTimeout(() => t.remove(), 4200);
+}
+
+// ---- On-screen controls ----
+
+function startPad(touchScreen) {
+  padWanted = settings.touchControls === true || (settings.touchControls !== false && touchScreen);
+  if (!padWanted) return;
+  pad = new TouchPad({ system, layout: loadLayout(system), send: (id, value) => emu?.gameManager?.simulateInput(0, id, value) });
+  // Put away while a game controller is in use; back as soon as the screen is touched.
+  addEventListener('pointerdown', (e) => { if (e.pointerType === 'touch' && padIdle) { padIdle = false; showPad(); } }, true);
+  showPad();
+}
+function showPad() {
+  const on = Boolean(pad) && padWanted && !menuOpen && !padIdle;
+  pad?.show(on);
+  // EmulatorJS's own bar (pause, volume) would sit under the buttons; the game menu covers it.
+  document.body.classList.toggle('tp-on', on);
+}
+function padInUse() {
+  if (!pad || padIdle || pad.layout.hideWithPad === false) return;
+  padIdle = true;
+  showPad();
 }
 
 // ---- Saves ----
@@ -205,7 +243,9 @@ function watchPads() {
   const tick = () => {
     requestAnimationFrame(tick);
     if (menuOpen) { was = true; return; }
-    const press = pads().some((gp) => gp.buttons[16]?.pressed || (gp.buttons[8]?.pressed && gp.buttons[9]?.pressed));
+    const list = pads();
+    if (pad && !padIdle && list.some((gp) => gp.buttons.some((b) => b.pressed) || gp.axes.some((a) => Math.abs(a) > 0.5))) padInUse();
+    const press = list.some((gp) => gp.buttons[16]?.pressed || (gp.buttons[8]?.pressed && gp.buttons[9]?.pressed));
     if (press && !was) openMenu();
     was = press;
   };
@@ -233,6 +273,7 @@ function openMenu() {
   menuShot = Promise.race([gm.screenshot().then((png) => png.slice()), new Promise((r) => setTimeout(() => r(null), 800))]).catch(() => null);
   menuShot.finally(() => { if (menuOpen) emu.pause?.(); });
   syncBattery();
+  showPad();
   overlay.className = 'show';
   nav ||= new Nav(overlay, { onAction: menuAction, isActive: () => menuOpen || !emu });
   showMain();
@@ -244,6 +285,7 @@ function closeMenu() {
   menuShot = null;
   overlay.className = '';
   overlay.replaceChildren();
+  showPad();
   // Let go of the button that closed the menu before the game sees controller input again.
   setTimeout(() => { emu?.play?.(); document.querySelector('#game')?.focus?.(); }, 180);
   post({ type: 'console-menu', open: false });
@@ -266,6 +308,7 @@ function showMain(focus = 'resume') {
       }) : null,
       item('full', document.fullscreenElement ? 'Leave full screen' : 'Full screen', null, () => { (document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen()).catch(() => {}); setTimeout(() => showMain('full'), 200); }),
       item('controls', 'Controls', 'What each button does', showControls),
+      item('touch', 'On-screen controls', 'Move, resize, relabel, recolour and remap them', editTouch),
       item('quit', 'Quit game', settings.autosave === false ? 'Battery saves are kept' : 'Saves your place automatically', quit, 'danger'))));
   nav.restore(focus);
 }
@@ -306,6 +349,20 @@ function showControls() {
   nav.restore('back');
 }
 
+// The editor opens over the paused game; the menu comes back when it's done.
+function editTouch() {
+  overlay.className = '';
+  overlay.replaceChildren();
+  pad?.show(false);
+  openEditor({ system, accent, onDone: (layout) => {
+    if (pad) pad.setLayout(layout);
+    else if (layout) { padWanted = true; pad = new TouchPad({ system, layout, send: (id, value) => emu?.gameManager?.simulateInput(0, id, value) }); }
+    overlay.className = 'show';
+    showMain('touch');
+    showPad();
+  } });
+}
+
 let quitting = false;
 async function quit() {
   if (quitting) return;
@@ -327,7 +384,7 @@ async function quit() {
 // The window around us asks us to wrap up (e.g. it's being closed).
 addEventListener('message', (e) => {
   if (e.origin !== location.origin || e.data?.source !== 'mediadesk-console-host') return;
-  if (e.data.type === 'quit') quit();
+  if (e.data.type === 'quit') { if (params.get('layout')) post({ type: 'console-exit' }); else quit(); }
   if (e.data.type === 'menu') openMenu();
 });
 addEventListener('pagehide', () => { syncBattery(); });

@@ -45,4 +45,73 @@ html, body { margin: 0; height: 100%; background: #000; color: #f2f2f2; font: 15
 .toast.out, .hint.out { opacity: 0; }
 .spinner { width: 34px; height: 34px; margin: 6px auto 12px; border-radius: 50%; border: 3px solid rgba(255, 255, 255, .2); border-top-color: var(--accent); animation: spin .8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
-.menu-btn { position: fixed; z-index: 9000; top: max(10px, env(safe-area-inset-top)); left: 10px; padding: 7px 14px; border-radius: 999px; border: 1px solid rgba(255, 255, 255, .25); background: rgba(0, 0, 0, .45); color: #fff; font: 600 13px system-ui, sans-serif; backdrop-filter: blur(6px); }
+.menu-btn { position: fixed; z-index: 9000; top: max(10px, env(safe-area-inset-top)); left: 50%; transform: translateX(-50%); padding: 7px 14px; border-radius: 999px; border: 1px solid rgba(255, 255, 255, .25); background: rgba(0, 0, 0, .45); color: #fff; font: 600 13px system-ui, sans-serif; backdrop-filter: blur(6px); }
+
+/* ---- On-screen controls (touchpad.js) ---- */
+.tp { position: fixed; inset: 0; z-index: 8000; pointer-events: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+.tp[hidden] { display: none; }
+.tp-c { position: absolute; pointer-events: auto; touch-action: none; box-sizing: border-box; opacity: var(--tp-opacity, .75); }
+.tp-face { width: 100%; height: 100%; display: grid; place-items: center; background: var(--c); color: var(--t); font: 700 var(--fs)/1 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; box-shadow: inset 0 -3px 0 rgba(0, 0, 0, .28), 0 2px 6px rgba(0, 0, 0, .35); border: 1px solid rgba(255, 255, 255, .14); transition: background .05s, transform .05s; }
+.tp-face span { pointer-events: none; white-space: nowrap; overflow: hidden; max-width: 92%; text-overflow: clip; }
+.tp-circle .tp-face { border-radius: 50%; }
+.tp-rounded .tp-face { border-radius: 22%; }
+.tp-pill .tp-face { border-radius: 999px; }
+.tp-button.down .tp-face { background: var(--p); transform: scale(.94); box-shadow: inset 0 2px 4px rgba(0, 0, 0, .3); }
+/* D-pad: a cross whose arms light up */
+.tp-dpad .tp-face { background: none; border: 0; box-shadow: none; }
+.tp-dpad svg { width: 100%; height: 100%; filter: drop-shadow(0 2px 4px rgba(0, 0, 0, .45)); }
+.tp-dpad .arm, .tp-dpad .hub { fill: var(--c); stroke: rgba(255, 255, 255, .14); stroke-width: 1; }
+.tp-dpad .hub { stroke: none; }
+.tp-dpad .arm.on { fill: var(--p); }
+.tp-dpad .tri { fill: var(--t); opacity: .55; }
+/* Stick: a well and a knob that follows the thumb */
+.tp-stick .tp-face { border-radius: 50%; background: color-mix(in srgb, var(--c) 45%, transparent); }
+.tp-knob { width: 46%; height: 46%; border-radius: 50%; display: grid; place-items: center; background: var(--c); color: var(--t); border: 1px solid rgba(255, 255, 255, .2); box-shadow: 0 3px 8px rgba(0, 0, 0, .45); }
+.tp-stick.down .tp-knob { background: var(--p); }
+
+/* Editing: every control outlined and draggable */
+.tp-edit .tp-c { cursor: grab; opacity: max(.85, var(--tp-opacity, .75)); }
+.tp-edit .tp-c::after { content: ''; position: absolute; inset: 0; border: 1.5px dashed rgba(255, 255, 255, .45); border-radius: 10px; pointer-events: none; }
+.tp-edit .tp-c.tp-sel::after { border: 2px solid var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 35%, transparent); }
+.tp-edit .tp-hidden { opacity: .3; }
+.tpe { position: fixed; inset: 0; z-index: 10001; background: rgba(0, 0, 0, .25); }
+.tpe-screen { position: absolute; left: 50%; top: 50%; width: min(86vw, 120vh); aspect-ratio: 4 / 3; max-height: 92vh; transform: translate(-50%, -50%); display: grid; place-items: center; border-radius: 6px; background: repeating-linear-gradient(45deg, #15161a 0 18px, #1b1d22 18px 36px); color: #555a66; font-weight: 700; letter-spacing: .04em; }
+@media (orientation: portrait) { .tpe-screen { top: 8px; transform: translateX(-50%); width: 100vw; border-radius: 0; } }
+.tpe-bar { position: absolute; z-index: 3; left: 50%; top: 42%; transform: translate(-50%, -50%); width: max-content; max-width: calc(100vw - 16px); display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 6px; padding: 7px 9px; border-radius: 14px; background: rgba(22, 22, 26, .94); border: 1px solid rgba(255, 255, 255, .12); box-shadow: 0 10px 30px rgba(0, 0, 0, .5); font-size: 13px; }
+.tpe-title { margin: 0 4px; white-space: nowrap; }
+.tpe-title small { color: #999; font-weight: 400; }
+.tpe-btn { padding: 6px 11px; border-radius: 9px; border: 1px solid rgba(255, 255, 255, .16); background: rgba(255, 255, 255, .07); color: inherit; font: inherit; font-weight: 600; cursor: pointer; white-space: nowrap; }
+.tpe-btn:hover { background: rgba(255, 255, 255, .14); }
+.tpe-btn.primary { background: var(--accent); border-color: var(--accent); color: #111; }
+.tpe-btn.on { border-color: var(--accent); color: var(--accent); }
+.tpe-btn.danger { color: #ff7b72; }
+.tpe-inline { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+.tpe select, .tpe input[type=text] { background: #2a2b31; color: inherit; border: 1px solid rgba(255, 255, 255, .16); border-radius: 8px; padding: 6px 8px; font: inherit; min-width: 0; }
+.tpe-sheet { position: absolute; z-index: 3; right: 10px; bottom: 10px; width: min(400px, calc(100vw - 20px)); max-height: min(70vh, calc(100vh - 80px)); overflow: auto; padding: 12px 14px; border-radius: 16px; background: rgba(24, 24, 28, .97); border: 1px solid rgba(255, 255, 255, .12); box-shadow: 0 20px 50px rgba(0, 0, 0, .6); font-size: 13px; }
+.tpe-sheet[hidden] { display: none; }
+.tpe-sheet.top { bottom: auto; top: 10px; }
+.tpe-sheet.left { right: auto; left: 10px; }
+.tpe-sheet-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; font-size: 15px; }
+.tpe-x { width: 30px; height: 30px; border-radius: 50%; border: 0; background: rgba(255, 255, 255, .1); color: inherit; font-size: 18px; cursor: pointer; }
+.tpe-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 12px; }
+.tpe-field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.tpe-field > span { color: #aaa; font-size: 12px; font-weight: 600; }
+.tpe-field small { color: #888; }
+.tpe-field input[type=color] { width: 100%; height: 32px; padding: 0 2px; border: 1px solid rgba(255, 255, 255, .16); border-radius: 8px; background: #2a2b31; cursor: pointer; }
+.tpe-field input[type=range] { width: 100%; accent-color: var(--accent); }
+.tpe-sec { margin-top: 12px; padding-top: 10px; border-top: 1px solid rgba(255, 255, 255, .08); }
+.tpe-sec-title { font-weight: 600; margin-bottom: 6px; }
+.tpe-sec-title small { color: #999; font-weight: 400; }
+.tpe-chips { display: flex; flex-wrap: wrap; gap: 5px; }
+.tpe-chip { padding: 5px 9px; border-radius: 999px; border: 1px solid rgba(255, 255, 255, .16); background: transparent; color: #ccc; font: inherit; font-size: 12px; cursor: pointer; }
+.tpe-chip.on { background: var(--accent); border-color: var(--accent); color: #111; font-weight: 700; }
+.tpe-check { display: flex; align-items: center; gap: 8px; margin-top: 10px; cursor: pointer; }
+.tpe-check input { accent-color: var(--accent); width: 17px; height: 17px; }
+.tpe-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+.tpe-note { color: #999; font-size: 12px; margin: 12px 0 0; }
+.tpe-test { position: absolute; z-index: 3; left: 50%; top: 50%; transform: translate(-50%, -50%); padding: 10px 16px; border-radius: 12px; background: rgba(20, 20, 24, .9); border: 1px solid var(--accent); font-weight: 600; pointer-events: none; }
+.tpe-test[hidden] { display: none; }
+@media (max-width: 560px) { .tpe-grid { grid-template-columns: 1fr 1fr; } .tpe-bar { font-size: 12px; gap: 4px; } .tpe-btn { padding: 5px 8px; } }
+.tpe .tp { z-index: 1; }
+.tpe-bar[hidden] { display: none; }
+body.tp-on .ejs_menu_bar, body.tp-on .ejs_menu_button, body.tp-on .ejs_virtualGamepad_open { display: none !important; }

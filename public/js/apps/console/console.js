@@ -54,7 +54,7 @@ class GameConsole {
     this.capturing = false;
     this.nav = new Nav(this.root, {
       onAction: (a, el, dir) => this.action(a, el, dir),
-      isActive: () => !this.player && !this.capturing && this.isFocused(),
+      isActive: () => !this.player && !this.touchFrame && !this.capturing && this.isFocused(),
     });
     this.applyTheme();
     this.load().then(() => { if (opts.game) this.openGameById(opts.game); });
@@ -354,6 +354,27 @@ class GameConsole {
     addEventListener('message', this.onMsg);
   }
 
+  // The on-screen controls editor, on the player page without a game. Settings stay open
+  // underneath; layouts are saved in this browser as they're changed.
+  editTouch(system) {
+    if (this.touchFrame) return;
+    const accent = getComputedStyle(this.root).getPropertyValue('--gc-accent').trim();
+    const url = new URL('../../../console-player.html', import.meta.url);
+    url.search = new URLSearchParams({ layout: system, ...(/^#[0-9a-f]{6}$/i.test(accent) ? { accent } : {}) }).toString();
+    const frame = h('iframe', { class: 'gc-player gc-touch-editor', src: url.href, title: `${SYSTEMS[system].short} on-screen controls` });
+    this.touchFrame = frame;
+    this.root.append(frame);
+    frame.addEventListener('load', () => frame.focus());
+    const onMsg = (e) => {
+      if (e.source !== frame.contentWindow || e.data?.source !== 'mediadesk-console' || e.data.type !== 'console-exit') return;
+      removeEventListener('message', onMsg);
+      frame.remove();
+      this.touchFrame = null;
+      this.nav.restore('con:touchedit');
+    };
+    addEventListener('message', onMsg);
+  }
+
   // Ask the game to save and leave; if the window is closing, keep it alive until it has.
   stopPlayer(closing = false) {
     const p = this.player;
@@ -549,11 +570,13 @@ class GameConsole {
       this.optionRow('con:autosave', 'Save my place when I quit', [[true, 'On'], [false, 'Off']], cfg.autosave !== false, (v) => save({ autosave: v }), 'Lets you pick up exactly where you left off'),
       this.optionRow('con:rewind', 'Rewind', [[false, 'Off'], [true, 'On']], Boolean(cfg.rewind), (v) => save({ rewind: v }), 'Hold the rewind key to go back in time (uses more memory)'),
       this.optionRow('con:ff', 'Fast-forward speed', [['1.5', '1.5×'], ['2.0', '2×'], ['3.0', '3×'], ['4.0', '4×'], ['6.0', '6×'], ['8.0', '8×']], cfg.ffRatio || '3.0', (v) => save({ ffRatio: v })),
-      this.optionRow('con:touch', 'On-screen controls', [['auto', 'On touch screens'], [true, 'Always'], [false, 'Never']], cfg.touchControls ?? 'auto', (v) => save({ touchControls: v === 'auto' ? undefined : v })),
+      this.optionRow('con:touch', 'On-screen controls', [['auto', 'On touch screens'], [true, 'Always'], [false, 'Never']], cfg.touchControls ?? 'auto', (v) => save({ touchControls: v === 'auto' ? undefined : v }),
+        `Move, resize, relabel, recolour and remap them with “Customize on-screen controls”${sys === 'n64' ? ' (including C buttons as four buttons or a stick)' : ''}`),
       this.optionRow('con:volume', 'Volume', [20, 40, 60, 80, 100].map((v) => [v, `${v}%`]), cfg.volume ?? 80, (v) => save({ volume: Number(v) })),
       this.optionRow('con:hidden', 'Show on the home screen', [[false, 'Yes'], [true, 'No']], Boolean(cfg.hidden), (v) => save({ hidden: v })),
       h('div', { class: 'gc-row' },
         this.navBtn(`Controls for ${info.short}`, () => { layer.ctlSystem = sys; layer.show('controls'); this.nav.restore('ctl:system'); }, 'con:controls'),
+        this.navBtn('Customize on-screen controls', () => this.editTouch(sys), 'con:touchedit'),
         this.navBtn(ready(cfg.core || cores[0]) ? 'Emulator downloaded ✓' : 'Download emulator now', async () => {
           const btn = detail.querySelector('[data-nav="con:dl"]');
           btn.textContent = 'Downloading…';

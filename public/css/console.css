@@ -459,3 +459,4 @@
 .mce-tile .gc-tile-title { color: #cfe6ff; }
 .mce-tile.focused .gc-cover { transform: scale(1.1); box-shadow: 0 0 0 3px #7fd3ff, 0 0 30px rgba(127, 211, 255, .6); }
 .mce-top .gc-chrome-btn { background: rgba(255,255,255,.15); }
+.gc-touch-editor { z-index: 500; }
