@@ -294,6 +294,33 @@ function buildWidgets() {
   setInterval(clockTick, 10e3);
   host.append(h('section', { class: 'widget widget-clock glass' }, time, date));
 
+  // Sharing the column's height: Now playing shows up to three sessions, giving some up when
+  // Upcoming would otherwise have room for less than about two of each; Upcoming takes the
+  // rest of the height and shows as many rows as fit (more on taller screens).
+  const fitters = { now: null, upcoming: null };
+  let laying = 0;
+  const relayout = () => { cancelAnimationFrame(laying); laying = requestAnimationFrame(layoutColumn); };
+  function layoutColumn() {
+    const phone = getComputedStyle(host).position === 'static';
+    const up = fitters.upcoming?.el;
+    fitters.now?.render(3);
+    if (phone || !up) return fitters.upcoming?.fit(Infinity, phone ? 4 : Infinity);
+    const room = () => {
+      const shown = [...host.children].filter((w) => !w.hidden);
+      return host.clientHeight - 12 * (shown.length - 1) - shown.filter((w) => w !== up).reduce((a, w) => a + w.offsetHeight, 0);
+    };
+    up.hidden = false;
+    let n = fitters.now?.count() || 0;
+    while (n > 1 && room() < 230) fitters.now.render(--n);
+    // Too short for even its summary lines: rather than a sliver, it steps aside.
+    const left = room();
+    up.hidden = left < 96;
+    if (!up.hidden) fitters.upcoming.fit(left, Infinity);
+  }
+  addEventListener('resize', relayout);
+  const ro = new ResizeObserver(relayout);
+  queueMicrotask(() => { for (const w of host.children) if (!w.classList.contains('widget-upcoming') && !w.classList.contains('widget-nowplaying')) ro.observe(w); });
+
   // Downloads
   if (isConfigured('nzbget')) {
     const speed = h('div', { class: 'w-big' }, '—');
@@ -315,11 +342,14 @@ function buildWidgets() {
     });
   }
 
-  // Upcoming: TV episodes this week and movie releases this month.
+  // Upcoming: TV episodes this week and movie releases this month. It takes the height the
+  // other widgets leave, showing as many of each as fit (more on taller screens).
   const kinds = ['radarr', 'sonarr'].filter(isConfigured);
   if (kinds.length) {
     const list = h('div', { class: 'w-list w-upcoming' }, h('div', { class: 'small muted' }, 'Loading…'));
-    host.append(widget('Upcoming', kinds.includes('sonarr') ? 'sonarr' : 'radarr', list, () => openApp(kinds.includes('sonarr') ? 'sonarr' : 'radarr', { section: 'calendar' })));
+    const upcomingWidget = widget('Upcoming', kinds.includes('sonarr') ? 'sonarr' : 'radarr', list, () => openApp(kinds.includes('sonarr') ? 'sonarr' : 'radarr', { section: 'calendar' }));
+    upcomingWidget.classList.add('widget-upcoming');
+    host.append(upcomingWidget);
     const when = (d) => {
       const dt = new Date(d);
       return dt - Date.now() < 6 * 864e5 ? dt.toLocaleDateString(undefined, { weekday: 'short' }) : dt.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
@@ -328,15 +358,44 @@ function buildWidgets() {
       h('span', { class: `w-dot cal-${it.kind}` }),
       h('span', { class: 'grow' }, h('strong', {}, it.title), h('span', { class: 'small muted' }, it.sub)),
       h('span', { class: 'small muted nowrap' }, when(it.date)));
-    const section = (title, items, empty) => [h('div', { class: 'w-sub' }, title), items.length ? items.map(row) : h('div', { class: 'small muted w-empty' }, empty)];
+    const calendar = (kind) => openApp(kind, { section: 'calendar' });
+    const section = (title, all, n, empty, kind) => [h('div', { class: 'w-sub' }, title),
+      all.length ? all.slice(0, n).map(row) : h('div', { class: 'small muted w-empty' }, empty),
+      n < all.length ? h('button', { class: 'w-more small muted', onclick: () => calendar(kind) }, `+${all.length - n} more`) : null];
+    let data = null;
+    const draw = (n) => clear(list,
+      data.tv ? section('TV this week', data.tv, n.tv, 'No episodes this week', 'sonarr') : null,
+      data.movies ? section('Movie releases', data.movies, n.movies, 'No movie releases this month', 'radarr') : null);
+    // Start with everything, then take rows off the longer list until it fits; what doesn't
+    // fit is counted in a "+N more" line.
+    // maxPx: the height it may take; cap: most rows of each (phones stack the widgets with no
+    // height limit, and show four of each).
+    const fit = (maxPx, cap) => {
+      upcomingWidget.style.maxHeight = Number.isFinite(maxPx) ? `${maxPx}px` : '';
+      if (!data || !upcomingWidget.isConnected) return;
+      const n = { tv: Math.min(cap, data.tv?.length || 0), movies: Math.min(cap, data.movies?.length || 0) };
+      draw(n);
+      const over = () => list.scrollHeight > list.clientHeight + 1;
+      while (over() && (n.tv > 0 || n.movies > 0)) {
+        if ((n.tv >= n.movies && n.tv > 0) || n.movies === 0) n.tv--; else n.movies--;
+        draw(n);
+      }
+      // Not even the headings fit: one line for each.
+      if (over()) {
+        const line = (kind, count, what) => h('button', { class: 'w-more small', onclick: () => calendar(kind) }, `${count} ${what}`);
+        clear(list,
+          data.tv ? line('sonarr', data.tv.length, `TV episode${data.tv.length === 1 ? '' : 's'} this week`) : null,
+          data.movies ? line('radarr', data.movies.length, `movie release${data.movies.length === 1 ? '' : 's'} this month`) : null);
+      }
+    };
+    fitters.upcoming = { el: upcomingWidget, fit };
     const load = () => Promise.all([
       isConfigured('sonarr') ? upcoming('sonarr', 7).catch(() => []) : null,
       isConfigured('radarr') ? upcoming('radarr', 30).catch(() => []) : null,
     ]).then(([tv, movies]) => {
-      const soon = (list) => list.filter((i) => new Date(i.date) >= new Date(Date.now() - 6 * 3600e3)).sort((a, b) => new Date(a.date) - new Date(b.date));
-      clear(list,
-        tv ? section('TV this week', soon(tv).slice(0, 4), 'No episodes this week') : null,
-        movies ? section('Movie releases', soon(movies).slice(0, 4), 'No movie releases this month') : null);
+      const soon = (items) => items.filter((i) => new Date(i.date) >= new Date(Date.now() - 6 * 3600e3)).sort((a, b) => new Date(a.date) - new Date(b.date)).slice(0, 15);
+      data = { tv: tv && soon(tv), movies: movies && soon(movies) };
+      relayout();
     });
     load();
     setInterval(load, 30 * 60e3);
@@ -348,7 +407,14 @@ function buildWidgets() {
     const both = isConfigured('jellyfin') && isConfigured('plex');
     const w = widget('Now playing', isConfigured('jellyfin') ? 'jellyfin' : 'plex', body,
       () => openApp(live.plexSessions.length > live.sessions.length || !isConfigured('jellyfin') ? 'plex' : 'jellyfin', { section: 'sessions' }));
+    w.classList.add('widget-nowplaying');
     host.append(w);
+    // Up to three sessions; fewer (and "+N more") when the column is short.
+    let rows = [];
+    fitters.now = {
+      count: () => rows.length,
+      render: (n) => clear(body, rows.slice(0, n), n < rows.length ? h('div', { class: 'w-more small muted' }, `+${rows.length - n} more`) : null),
+    };
     const row = (img, title, who, pct, cls, from) => h('div', { class: 'w-media' },
       h('div', { class: 'w-thumb' }, img ? h('img', { src: img, alt: '' }) : null),
       h('div', { class: 'grow' },
@@ -365,7 +431,8 @@ function buildWidgets() {
         `${s.User?.title || 'Someone'} · ${s.Player?.title || s.Player?.product || ''}`, s.duration ? ((s.viewOffset || 0) / s.duration) * 100 : 0, 'plex', 'Plex')) : [];
       const all = [...jf, ...px];
       w.hidden = !all.length;
-      clear(body, all.slice(0, 3));
+      rows = all.slice(0, 3);
+      relayout();
     });
   }
 }

@@ -216,8 +216,15 @@ kbd { font: 11px var(--mono); padding: 2px 6px; border-radius: 5px; background: 
 /* Widgets                                                             */
 /* ------------------------------------------------------------------ */
 
-#widgets { position: absolute; top: 14px; right: 14px; width: 290px; display: flex; flex-direction: column; gap: 12px; max-height: calc(100% - 120px); overflow: hidden; }
+#widgets { position: absolute; top: 14px; right: 14px; width: 290px; display: flex; flex-direction: column; gap: 12px; height: calc(100% - 120px); overflow: hidden; pointer-events: none; }
+#widgets > * { pointer-events: auto; }
 .hide-widgets #widgets { display: none; }
+#widgets > .widget { flex: none; }
+/* Upcoming is given the height left over (see layoutColumn in desktop.js) and shows as many rows as fit. */
+#widgets > .widget-upcoming { display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+.widget-upcoming .w-upcoming { min-height: 0; overflow: hidden; }
+.w-more { display: block; border: 0; background: none; padding: 2px 0 4px; text-align: left; cursor: pointer; }
+.w-more:hover { color: var(--text); }
 .widget { border-radius: 20px; padding: 14px 16px; box-shadow: 0 8px 30px -10px rgba(0, 0, 0, .35); color: var(--text); }
 .widget > header { display: flex; align-items: center; gap: 8px; font-size: 11.5px; font-weight: 650; text-transform: uppercase; letter-spacing: .05em; color: var(--text-muted); margin-bottom: 10px; cursor: pointer; }
 .widget-icon { width: 18px; height: 18px; }
@@ -731,7 +738,8 @@ button.health-item { cursor: pointer; }
   /* The desktop scrolls: icons first, then widgets, then room for the dock. */
   #desktop { overflow-y: auto; padding: 12px 12px 110px; -webkit-overflow-scrolling: touch; }
   #desktop-icons { position: static; grid-auto-flow: row; grid-template-columns: repeat(4, 1fr); grid-template-rows: none; justify-items: center; max-height: none; }
-  #widgets { position: static; width: auto; max-width: 520px; margin: 12px auto 0; max-height: none; overflow: visible; }
+  #widgets { position: static; width: auto; max-width: 520px; margin: 12px auto 0; height: auto; max-height: none; overflow: visible; }
+  #widgets > .widget-upcoming { flex: none; max-height: none; }
   .tray-word { display: none; }
   .window { border-radius: 0; min-width: 0; }
   .rz { display: none; }
