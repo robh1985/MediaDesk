@@ -228,6 +228,13 @@ export function placeOf(c, u, w = innerWidth, hgt = innerHeight) {
   const y = c.v === 't' ? c.y * u : hgt - c.y * u;
   return { x, y };
 }
+// A point relative to a control's centre, turned into the control's own (unrotated) frame.
+function local(c, dx, dy) {
+  const r = -((c.rot || 0) * Math.PI) / 180;
+  if (!r) return { lx: dx, ly: dy };
+  return { lx: dx * Math.cos(r) - dy * Math.sin(r), ly: dx * Math.sin(r) + dy * Math.cos(r) };
+}
+
 // Size of a control's face in px.
 function boxOf(c, u) {
   const s = (c.size || 1) * u;
@@ -294,11 +301,11 @@ export class TouchPad {
       const pad = c.type === 'button' ? Math.min(w, hh) * 0.18 : 0;
       const color = isHex(c.color) ? c.color : GREY;
       const el = h('div', {
-        class: `tp-c tp-${c.type} ${c.type === 'button' ? `tp-${c.shape || 'circle'}` : ''} ${c.hidden ? 'tp-hidden' : ''} ${this.edit?.selected === c.id ? 'tp-sel' : ''}`,
+        class: `tp-c tp-${c.type} ${c.type === 'button' ? `tp-${c.shape || 'circle'}` : ''} ${c.hidden ? 'tp-hidden' : ''} ${this.edit?.selected?.has?.(c.id) ? 'tp-sel' : ''}`,
         'data-id': c.id,
         style: {
           left: `${x - w / 2 - pad}px`, top: `${y - hh / 2 - pad}px`, width: `${w + pad * 2}px`, height: `${hh + pad * 2}px`, padding: `${pad}px`,
-          '--c': color, '--p': isHex(c.pressed) ? c.pressed : lighten(color), '--t': isHex(c.text) ? c.text : TEXT, '--fs': `${fontFor(c, w, hh)}px`,
+          '--c': color, '--p': isHex(c.pressed) ? c.pressed : lighten(color), '--t': isHex(c.text) ? c.text : TEXT, '--fs': `${fontFor(c, w, hh)}px`, '--rot': `${c.rot || 0}deg`,
         },
         onpointerdown: (e) => this.down(e, c),
       },
@@ -352,9 +359,10 @@ export class TouchPad {
           const { x, y } = placeOf(c, u);
           const { w, h: hh } = boxOf(c, u);
           const m = Math.min(w, hh) * 0.18;
+          const { lx, ly } = local(c, p.x - x, p.y - y);
           let hit;
-          if (c.shape === 'circle') hit = Math.hypot(p.x - x, p.y - y) <= w / 2 + m;
-          else hit = Math.abs(p.x - x) <= w / 2 + m && Math.abs(p.y - y) <= hh / 2 + m;
+          if (c.shape === 'circle') hit = Math.hypot(lx, ly) <= w / 2 + m;
+          else hit = Math.abs(lx) <= w / 2 + m && Math.abs(ly) <= hh / 2 + m;
           if (!hit) continue;
           lit.set(c.id, true);
           if (c.turbo) { anyTurbo = true; if (!this.turboOn) continue; }
@@ -366,7 +374,8 @@ export class TouchPad {
       if (!c) continue;
       const { x, y } = placeOf(c, u);
       const r = (c.size || 1) * u / 2;
-      const dx = p.x - x, dy = p.y - y;
+      // Directions follow the control: a D-pad turned 45° has its "up" arm where you see it.
+      const { lx: dx, ly: dy } = local(c, p.x - x, p.y - y);
       if (c.type === 'dpad') {
         const dist = Math.hypot(dx, dy);
         const dirs = { up: false, down: false, left: false, right: false };
@@ -385,7 +394,8 @@ export class TouchPad {
       } else if (c.type === 'stick') {
         // Measured from where the finger first landed, so it works without looking.
         const o = p.origin || { x, y };
-        let vx = (p.x - o.x) / (r * 0.75), vy = (p.y - o.y) / (r * 0.75);
+        const v = local(c, p.x - o.x, p.y - o.y);
+        let vx = v.lx / (r * 0.75), vy = v.ly / (r * 0.75);
         const len = Math.hypot(vx, vy);
         if (len > 1) { vx /= len; vy /= len; }
         const dead = 0.12;
@@ -435,15 +445,30 @@ export class TouchPad {
 
 // ---- Editor ----
 //
-// Drag to move; tap to select and change its label, shape, size, colours and what it presses.
-// `onDone(layout)` is called when the editor closes.
+// Drag to move; tap to select and change its label, shape, size, rotation, colours and what it
+// presses. Several controls can be selected (Select several, Shift/Ctrl-click, or drag a box
+// around them) to move or rotate them together. `onDone(layout)` is called when it closes.
 
 const SHAPES = [['circle', 'Round'], ['rounded', 'Rounded square'], ['pill', 'Pill']];
+const ROTATE_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/></svg>';
+const normDeg = (d) => { let v = ((d + 180) % 360 + 360) % 360 - 180; if (Object.is(v, -0)) v = 0; return Math.round(v * 10) / 10; };
+
+// Where a control sits from a point in px: anchored to the nearest side, so it stays under the
+// same thumb on other screens.
+function setPx(c, px, py, u, W = innerWidth, H = innerHeight) {
+  const nx = Math.max(0, Math.min(W, px)), ny = Math.max(0, Math.min(H, py));
+  c.h = nx < W * 0.36 ? 'l' : nx > W * 0.64 ? 'r' : 'c';
+  c.v = ny < H * 0.5 ? 't' : 'b';
+  const snap = (v) => Math.round(v * 20) / 20;
+  c.x = snap(c.h === 'l' ? nx / u : c.h === 'r' ? (W - nx) / u : (nx - W / 2) / u);
+  c.y = snap(c.v === 't' ? ny / u : (H - ny) / u);
+}
 
 export function openEditor({ system, host = document.body, accent = '#e5a00d', onDone, preview = false }) {
   const sys = SYSTEMS[system];
   let layout = structuredClone(loadLayout(system));
-  let selected = null;
+  const selected = new Set();
+  let multi = false;          // "Select several": taps add and remove
   let testing = false;
   const save = () => saveLayout(system, layout);
   // Edit this orientation's own controls (in portrait, made from the landscape ones if new).
@@ -461,19 +486,24 @@ export function openEditor({ system, host = document.body, accent = '#e5a00d', o
       if (v && !names.includes(inputName(system, id))) names.push(inputName(system, id));
       testLog.textContent = names.length ? `Pressing: ${names.join(' + ')}` : 'Press the controls to try them';
     },
-    edit: { selected: null, onPointerDown: (c, e) => startDrag(c, e) },
+    edit: { selected, onPointerDown: (c, e) => startDrag(c, e) },
   });
+  pad.edit0 = pad.edit;
 
-  // ---- Top bar ----
   const bar = h('div', { class: 'tpe-bar' });
   const sheet = h('div', { class: 'tpe-sheet', hidden: true });
-  shell.append(bar, sheet, testLog);
-  const tbtn = (label, onclick, cls = '') => h('button', { class: `tpe-btn ${cls}`, type: 'button', onclick }, label);
+  const handle = h('button', { class: 'tpe-rotate', type: 'button', title: 'Drag to rotate', 'aria-label': 'Rotate', html: ROTATE_SVG, hidden: true });
+  const marquee = h('div', { class: 'tpe-marquee', hidden: true });
+  shell.append(marquee, handle, bar, sheet, testLog);
+  const tbtn = (label, onclick, cls = '', attrs = {}) => h('button', { class: `tpe-btn ${cls}`, type: 'button', onclick, ...attrs }, label);
   const list = () => controlsFor(layout, true);
-  const add = (c) => { list().push(c); save(); refresh(); select(c.id); };
+  const chosen = () => list().filter((c) => selected.has(c.id));
+  const add = (c) => { list().push(c); save(); select([c.id]); };
   const center = { h: 'c', x: 0, v: 'b', y: 3.2 };
+
+  // ---- Toolbar ----
   function drawBar() {
-    fill(bar, 
+    fill(bar,
       h('strong', { class: 'tpe-title' }, `${sys.short} on-screen controls`, h('small', {}, isPortrait() ? ' · portrait' : ' · landscape')),
       h('label', { class: 'tpe-inline' }, h('select', { 'aria-label': 'Add a control', onchange: (e) => {
         const v = e.target.value;
@@ -482,84 +512,179 @@ export function openEditor({ system, host = document.body, accent = '#e5a00d', o
         if (v === 'dpad') add(dpad('c', 0, 'b', 3.2));
         if (v === 'stick') add(stick('left', 'c', 0, 'b', 3.2));
       } }, h('option', { value: '' }, '+ Add…'), h('option', { value: 'button' }, 'Button'), h('option', { value: 'dpad' }, 'D-pad'), h('option', { value: 'stick' }, 'Analogue stick'))),
-      system === 'n64' ? h('label', { class: 'tpe-inline' }, 'C buttons ', h('select', { onchange: (e) => { layout = setCMode(layout, e.target.value); save(); select(null); refresh(); } },
+      system === 'n64' ? h('label', { class: 'tpe-inline' }, 'C buttons ', h('select', { onchange: (e) => { layout = setCMode(layout, e.target.value); save(); select([]); refresh(); } },
         h('option', { value: 'buttons', selected: layout.cMode !== 'stick' }, 'Four buttons'), h('option', { value: 'stick', selected: layout.cMode === 'stick' }, 'Analogue stick'))) : null,
-      tbtn('Layout…', () => { select(null); showGlobal(); }),
+      tbtn(multi ? 'Selecting several ✓' : 'Select several', () => { multi = !multi; if (!multi) select([...selected]); else drawBar(); }, multi ? 'on' : '',
+        { title: 'Tap controls to add them to the selection (or drag a box around them, or Shift-click)' }),
+      selected.size ? tbtn(`Edit ${selected.size > 1 ? `${selected.size} selected` : 'selected'}…`, () => { multi = false; openPanel(); }, 'primary-outline') : null,
+      tbtn('Layout…', () => { select([]); showGlobal(); }),
       tbtn(testing ? 'Stop trying' : 'Try it', () => {
         testing = !testing;
         pad.edit = testing ? null : pad.edit0;
         pad.root.classList.toggle('tp-edit', !testing);
         testLog.hidden = !testing;
         testLog.textContent = 'Press the controls to try them';
-        select(null);
+        select([]);
         drawBar();
       }, testing ? 'on' : ''),
       tbtn('Done', () => close(), 'primary'));
   }
-  pad.edit0 = pad.edit;
 
   function refresh() {
     pad.layout = layout;
-    pad.edit0.selected = selected;
     pad.render();
+    placeHandle();
     drawBar();
   }
 
-  function select(id) {
-    selected = id;
-    if (pad.edit0) pad.edit0.selected = id;
+  // ---- Selection ----
+  // panel: open the settings for the selection (a tap does; a drag just selects).
+  function select(ids, { panel = true } = {}) {
+    selected.clear();
+    for (const id of ids) selected.add(id);
     pad.render();
-    const c = list().find((x) => x.id === id);
-    // The toolbar steps aside while a control's settings are open (small screens fit one).
-    bar.hidden = Boolean(c);
-    if (!c) { sheet.hidden = true; return; }
-    showSheet(c);
+    placeHandle();
+    const cs = chosen();
+    // While picking several, the toolbar stays (with "Edit N selected") and no panel opens.
+    if (multi || !panel) { sheet.hidden = true; bar.hidden = false; drawBar(); return; }
+    // Otherwise the toolbar steps aside while the settings are open (small screens fit one).
+    bar.hidden = cs.length > 0;
+    if (!cs.length) { sheet.hidden = true; return; }
+    openPanel(cs);
+  }
+  const openPanel = (cs = chosen()) => { bar.hidden = true; if (cs.length === 1) showSheet(cs[0]); else if (cs.length) showGroup(cs); };
+  const toggle = (id) => select(selected.has(id) ? [...selected].filter((x) => x !== id) : [...selected, id]);
+
+  // Centre of the selection, and the rotate handle above it.
+  function bounds(cs = chosen()) {
+    const u = pad.u;
+    let l = Infinity, t = Infinity, r = -Infinity, b = -Infinity;
+    for (const c of cs) {
+      const p = placeOf(c, u), { w, h: hh } = boxOf(c, u);
+      const rad = Math.hypot(w, hh) / 2;
+      const ext = (c.rot || 0) % 180 ? rad : null;
+      l = Math.min(l, p.x - (ext ?? w / 2)); r = Math.max(r, p.x + (ext ?? w / 2));
+      t = Math.min(t, p.y - (ext ?? hh / 2)); b = Math.max(b, p.y + (ext ?? hh / 2));
+    }
+    return { l, t, r, b, cx: (l + r) / 2, cy: (t + b) / 2 };
+  }
+  function placeHandle() {
+    const cs = chosen();
+    if (!cs.length || testing) { handle.hidden = true; return; }
+    const bx = bounds(cs);
+    const top = bx.t - 34 < 4 ? bx.b + 8 : bx.t - 34;
+    handle.hidden = false;
+    handle.style.left = `${bx.cx - 14}px`;
+    handle.style.top = `${top}px`;
   }
 
-  // Drag a control; a tap (hardly any movement) selects it.
+  // Rotating: the handle turns the selection about its centre (each control turns too).
+  handle.addEventListener('pointerdown', (e) => {
+    e.preventDefault(); e.stopPropagation();
+    try { handle.setPointerCapture(e.pointerId); } catch { /* fine */ }
+    const snap = snapshot();
+    const a0 = Math.atan2(e.clientY - snap.cy, e.clientX - snap.cx);
+    const mv = (ev) => {
+      let deg = (Math.atan2(ev.clientY - snap.cy, ev.clientX - snap.cx) - a0) * 180 / Math.PI;
+      deg = ev.shiftKey ? Math.round(deg) : Math.round(deg / 5) * 5;
+      applyRotation(snap, deg, true);
+    };
+    const upH = () => {
+      handle.removeEventListener('pointermove', mv); handle.removeEventListener('pointerup', upH); handle.removeEventListener('pointercancel', upH);
+      save(); select([...selected], { panel: !sheet.hidden });
+    };
+    handle.addEventListener('pointermove', mv); handle.addEventListener('pointerup', upH); handle.addEventListener('pointercancel', upH);
+  });
+
+  function snapshot(cs = chosen()) {
+    const u = pad.u, bx = bounds(cs);
+    return { u, cx: bx.cx, cy: bx.cy, items: cs.map((c) => ({ c, ...placeOf(c, u), rot: c.rot || 0 })) };
+  }
+  // Turn the snapshot by `deg` about its centre; `each` turns the controls themselves too.
+  function applyRotation(snap, deg, each = true) {
+    const r = deg * Math.PI / 180, cos = Math.cos(r), sin = Math.sin(r);
+    for (const it of snap.items) {
+      if (snap.items.length > 1) {
+        const dx = it.x - snap.cx, dy = it.y - snap.cy;
+        setPx(it.c, snap.cx + dx * cos - dy * sin, snap.cy + dx * sin + dy * cos, snap.u);
+      }
+      if (each || snap.items.length === 1) it.c.rot = normDeg(it.rot + deg);
+    }
+    pad.render();
+    placeHandle();
+  }
+
+  // Dragging a control moves it (and the rest of the selection, if it's selected);
+  // a tap selects it (or adds/removes it in "Select several", or with Shift / Ctrl).
   function startDrag(shown, e) {
     const c = list().find((x) => x.id === shown.id) || shown;
     const el = e.currentTarget;
     try { el.setPointerCapture(e.pointerId); } catch { /* fine */ }
     const u = pad.u;
     const start = { x: e.clientX, y: e.clientY };
-    const from = placeOf(c, u);
+    const group = selected.has(c.id) && selected.size > 1 ? chosen() : [c];
+    const from = group.map((g) => ({ g, ...placeOf(g, u) }));
+    const additive = multi || e.shiftKey || e.ctrlKey || e.metaKey;
     let moved = false;
     const mv = (ev) => {
       if (ev.pointerId !== e.pointerId) return;
       const dx = ev.clientX - start.x, dy = ev.clientY - start.y;
       if (!moved && Math.hypot(dx, dy) < 6) return;
       moved = true;
-      const W = innerWidth, H = innerHeight;
-      const nx = Math.max(0, Math.min(W, from.x + dx)), ny = Math.max(0, Math.min(H, from.y + dy));
-      // Anchor to the nearest side, so it stays under the same thumb on other screens.
-      c.h = nx < W * 0.36 ? 'l' : nx > W * 0.64 ? 'r' : 'c';
-      c.v = ny < H * 0.5 ? 't' : 'b';
-      const snap = (v) => Math.round(v * 20) / 20;
-      c.x = snap(c.h === 'l' ? nx / u : c.h === 'r' ? (W - nx) / u : (nx - W / 2) / u);
-      c.y = snap(c.v === 't' ? ny / u : (H - ny) / u);
-      const el2 = pad.els.get(c.id);
-      const p = placeOf(c, u);
-      if (el2) { el2.style.left = `${p.x - el2.offsetWidth / 2}px`; el2.style.top = `${p.y - el2.offsetHeight / 2}px`; }
+      for (const f of from) setPx(f.g, f.x + dx, f.y + dy, u);
+      for (const f of from) {
+        const el2 = pad.els.get(f.g.id), p = placeOf(f.g, u);
+        if (el2) { el2.style.left = `${p.x - el2.offsetWidth / 2}px`; el2.style.top = `${p.y - el2.offsetHeight / 2}px`; }
+      }
+      placeHandle();
     };
     const upH = (ev) => {
       if (ev.pointerId !== e.pointerId) return;
-      el.removeEventListener('pointermove', mv);
-      el.removeEventListener('pointerup', upH);
-      el.removeEventListener('pointercancel', upH);
-      if (moved) save();
-      select(c.id);
+      el.removeEventListener('pointermove', mv); el.removeEventListener('pointerup', upH); el.removeEventListener('pointercancel', upH);
+      if (moved) { save(); select(group.length > 1 ? [...selected] : additive && selected.size ? [...new Set([...selected, c.id])] : [c.id], { panel: false }); }
+      else if (additive) toggle(c.id);
+      else select([c.id]);
     };
-    el.addEventListener('pointermove', mv);
-    el.addEventListener('pointerup', upH);
-    el.addEventListener('pointercancel', upH);
+    el.addEventListener('pointermove', mv); el.addEventListener('pointerup', upH); el.addEventListener('pointercancel', upH);
   }
 
-  // ---- Property sheet ----
+  // Drag on empty space: a box that selects everything it touches.
+  shell.addEventListener('pointerdown', (e) => {
+    if (testing || e.target.closest('.tpe-bar, .tpe-sheet, .tpe-rotate, .tp-c')) return;
+    const start = { x: e.clientX, y: e.clientY };
+    const additive = multi || e.shiftKey || e.ctrlKey || e.metaKey;
+    const before = additive ? [...selected] : [];
+    let moved = false;
+    try { shell.setPointerCapture(e.pointerId); } catch { /* fine */ }
+    const rect = (ev) => ({ l: Math.min(start.x, ev.clientX), t: Math.min(start.y, ev.clientY), r: Math.max(start.x, ev.clientX), b: Math.max(start.y, ev.clientY) });
+    const mv = (ev) => {
+      if (ev.pointerId !== e.pointerId) return;
+      if (!moved && Math.hypot(ev.clientX - start.x, ev.clientY - start.y) < 6) return;
+      moved = true;
+      const r = rect(ev);
+      Object.assign(marquee.style, { left: `${r.l}px`, top: `${r.t}px`, width: `${r.r - r.l}px`, height: `${r.b - r.t}px` });
+      marquee.hidden = false;
+      const inside = list().filter((c) => { const p = placeOf(c, pad.u); return p.x >= r.l && p.x <= r.r && p.y >= r.t && p.y <= r.b; }).map((c) => c.id);
+      selected.clear();
+      for (const id of [...before, ...inside]) selected.add(id);
+      pad.render();
+    };
+    const upH = (ev) => {
+      if (ev.pointerId !== e.pointerId) return;
+      shell.removeEventListener('pointermove', mv); shell.removeEventListener('pointerup', upH); shell.removeEventListener('pointercancel', upH);
+      marquee.hidden = true;
+      if (moved) select([...selected], { panel: selected.size > 0 });
+      else if (!additive) { select([]); bar.hidden = false; }
+    };
+    shell.addEventListener('pointermove', mv); shell.addEventListener('pointerup', upH); shell.addEventListener('pointercancel', upH);
+  });
+
+  // ---- Settings for one control ----
   const field = (label, control, hint) => h('label', { class: 'tpe-field' }, h('span', {}, label), control, hint ? h('small', {}, hint) : null);
   const colorIn = (value, onchange) => h('input', { type: 'color', value, oninput: (e) => onchange(e.target.value) });
   const range = (min, max, step, value, oninput) => h('input', { type: 'range', min, max, step, value, oninput: (e) => oninput(Number(e.target.value)) });
-  const changed = (c) => { save(); pad.render(); placeSheet(c); };
+  const changed = (c) => { save(); pad.render(); placeHandle(); if (c) placeSheet(c); };
+  const closeBtn = () => h('button', { type: 'button', class: 'tpe-x', 'aria-label': 'Close', onclick: () => { select([]); bar.hidden = false; } }, '×');
 
   function placeSheet(c) {
     const p = placeOf(c, pad.u);
@@ -567,21 +692,24 @@ export function openEditor({ system, host = document.body, accent = '#e5a00d', o
     sheet.classList.toggle('left', p.x > innerWidth / 2);
   }
 
+  // Rotation: a slider with the angle, and quick turns.
+  function rotationField(get, set, label = 'Rotation') {
+    const out = h('output', {}, `${get()}°`);
+    const slider = range(-180, 180, 1, get(), (v) => { set(v); out.textContent = `${get()}°`; });
+    const nudge = (d) => { set(normDeg(get() + d)); slider.value = String(get()); out.textContent = `${get()}°`; };
+    return h('div', { class: 'tpe-field tpe-rot' }, h('span', {}, label, ' ', out),
+      h('div', { class: 'tpe-rot-row' }, tbtn('⟲ 15°', () => nudge(-15)), slider, tbtn('15° ⟳', () => nudge(15)), tbtn('0°', () => { set(0); slider.value = '0'; out.textContent = '0°'; })));
+  }
+
   function inputPicker(c) {
     const all = buttonsFor(system);
     const extra = [[16, 'Left stick right'], [17, 'Left stick left'], [18, 'Left stick down'], [19, 'Left stick up'], [20, 'Right stick right'], [21, 'Right stick left'], [22, 'Right stick down'], [23, 'Right stick up'], [4, 'D-pad up'], [5, 'D-pad down'], [6, 'D-pad left'], [7, 'D-pad right']]
       .filter(([id]) => !all.some(([x]) => x === id));
-    const list = [...all, ...extra];
-    return h('div', { class: 'tpe-chips' }, list.map(([id, name]) => {
+    return h('div', { class: 'tpe-chips' }, [...all, ...extra].map(([id, name]) => {
       const on = (c.inputs || []).includes(id);
       return h('button', {
-        type: 'button', class: `tpe-chip ${on ? 'on' : ''}`, title: on ? 'Pressed by this button (tap to remove)' : 'Tap to add',
-        onclick: () => {
-          c.inputs = on ? c.inputs.filter((x) => x !== id) : [...(c.inputs || []), id];
-          save();
-          showSheet(c);
-        },
-        'data-i': String(id),
+        type: 'button', class: `tpe-chip ${on ? 'on' : ''}`, title: on ? 'Pressed by this button (tap to remove)' : 'Tap to add', 'data-i': String(id),
+        onclick: () => { c.inputs = on ? c.inputs.filter((x) => x !== id) : [...(c.inputs || []), id]; save(); showSheet(c); },
       }, name);
     }));
   }
@@ -595,8 +723,8 @@ export function openEditor({ system, host = document.body, accent = '#e5a00d', o
       .filter(([id], i, arr) => arr.findIndex(([x]) => x === id) === i);
     const dirSel = (i, name) => field(name, h('select', { onchange: (e) => { c.dirs[i] = Number(e.target.value); changed(c); } },
       allInputs.map(([id, n]) => h('option', { value: String(id), selected: c.dirs?.[i] === id }, n))));
-    fill(sheet, 
-      h('div', { class: 'tpe-sheet-head' }, h('strong', {}, `${kind}${c.label ? `: ${c.label}` : ''}`), h('button', { type: 'button', class: 'tpe-x', 'aria-label': 'Close', onclick: () => select(null) }, '×')),
+    fill(sheet,
+      h('div', { class: 'tpe-sheet-head' }, h('strong', {}, `${kind}${c.label ? `: ${c.label}` : ''}`), closeBtn()),
       h('div', { class: 'tpe-grid' },
         field('Label', label),
         c.type === 'button' ? field('Shape', h('select', { onchange: (e) => { c.shape = e.target.value; changed(c); } }, SHAPES.map(([v, n]) => h('option', { value: v, selected: (c.shape || 'circle') === v }, n)))) : null,
@@ -604,6 +732,7 @@ export function openEditor({ system, host = document.body, accent = '#e5a00d', o
         field('Colour', colorIn(isHex(c.color) ? c.color : GREY, (v) => { c.color = v; if (!c.pressedSet) c.pressed = undefined; changed(c); })),
         field('Colour when pressed', colorIn(isHex(c.pressed) ? c.pressed : lighten(isHex(c.color) ? c.color : GREY), (v) => { c.pressed = v; c.pressedSet = true; changed(c); })),
         field('Label colour', colorIn(isHex(c.text) ? c.text : TEXT, (v) => { c.text = v; changed(c); }))),
+      rotationField(() => c.rot || 0, (v) => { c.rot = normDeg(v); changed(c); }),
       c.type === 'button' ? h('div', { class: 'tpe-sec' },
         h('div', { class: 'tpe-sec-title' }, 'Presses', h('small', {}, ' — pick one, or several to press them together (e.g. B + A)')),
         inputPicker(c),
@@ -619,31 +748,67 @@ export function openEditor({ system, host = document.body, accent = '#e5a00d', o
         }),
         tbtn('Duplicate', () => add({ ...structuredClone(c), id: nid(), x: c.x + 0.6, y: c.y + 0.6 })),
         tbtn(c.hidden ? 'Show' : 'Hide', () => { c.hidden = !c.hidden; save(); pad.render(); showSheet(c); }),
-        tbtn('Delete', () => { const l = list(); l.splice(l.indexOf(c), 1); save(); select(null); }, 'danger')));
+        tbtn('Delete', () => { const l = list(); l.splice(l.indexOf(c), 1); save(); select([]); bar.hidden = false; }, 'danger')));
   }
 
+  // ---- Settings for several controls ----
+  function showGroup(cs) {
+    sheet.hidden = false;
+    const bx = bounds(cs);
+    sheet.classList.toggle('top', bx.cy > innerHeight / 2);
+    sheet.classList.toggle('left', bx.cx > innerWidth / 2);
+    // Group rotation is measured from how they were when the panel opened.
+    let snap = snapshot(cs), angle = 0, each = true;
+    const sizeSnap = cs.map((c) => [c, c.size || 1]);
+    const first = cs[0];
+    fill(sheet,
+      h('div', { class: 'tpe-sheet-head' }, h('strong', {}, `${cs.length} controls selected`), closeBtn()),
+      h('p', { class: 'tpe-note tpe-tight' }, 'Drag any of them to move them together, or use the ↻ handle to turn them.'),
+      rotationField(() => angle, (v) => { angle = normDeg(v); applyRotation(snap, angle, each); save(); }, 'Turn the group'),
+      h('label', { class: 'tpe-check' }, h('input', { type: 'checkbox', checked: true, onchange: (e) => {
+        each = e.target.checked;
+        applyRotation(snap, angle, each); save();
+      } }), 'Turn each control with the group (so they stay at the same angle to each other)'),
+      h('div', { class: 'tpe-grid' },
+        field('Size (all)', range(0.5, 1.8, 0.05, 1, (v) => { for (const [c, s0] of sizeSnap) c.size = Math.round(s0 * v * 100) / 100; changed(); })),
+        field('Colour (all)', colorIn(isHex(first.color) ? first.color : GREY, (v) => { for (const c of cs) { c.color = v; if (!c.pressedSet) c.pressed = undefined; } changed(); })),
+        field('Colour when pressed (all)', colorIn(isHex(first.pressed) ? first.pressed : lighten(isHex(first.color) ? first.color : GREY), (v) => { for (const c of cs) { c.pressed = v; c.pressedSet = true; } changed(); })),
+        field('Label colour (all)', colorIn(isHex(first.text) ? first.text : TEXT, (v) => { for (const c of cs) c.text = v; changed(); }))),
+      h('div', { class: 'tpe-actions' },
+        tbtn('Straighten (0°)', () => { for (const c of cs) c.rot = 0; save(); snap = snapshot(cs); angle = 0; showGroup(cs); pad.render(); placeHandle(); }),
+        tbtn('Duplicate', () => {
+          const copies = cs.map((c) => ({ ...structuredClone(c), id: nid(), x: c.x + 0.6, y: c.y + 0.6 }));
+          list().push(...copies); save(); select(copies.map((c) => c.id));
+        }),
+        tbtn('Delete all', () => { const l = list(); for (const c of cs) l.splice(l.indexOf(c), 1); save(); select([]); bar.hidden = false; }, 'danger')));
+  }
+
+  // ---- Whole layout ----
   function showGlobal() {
     sheet.hidden = false;
     bar.hidden = true;
     sheet.classList.remove('top', 'left');
     const pct = (v) => `${Math.round(v * 100)}%`;
     const sizeOut = h('output', {}, pct(layout.scale || 1)), opOut = h('output', {}, pct(layout.opacity ?? 0.75));
-    fill(sheet, 
+    fill(sheet,
       h('div', { class: 'tpe-sheet-head' }, h('strong', {}, 'Whole layout'), h('button', { type: 'button', class: 'tpe-x', 'aria-label': 'Close', onclick: () => { sheet.hidden = true; bar.hidden = false; } }, '×')),
       h('div', { class: 'tpe-grid' },
         field(h('span', {}, 'Size of everything ', sizeOut), range(0.6, 1.6, 0.05, layout.scale || 1, (v) => { layout.scale = v; sizeOut.textContent = pct(v); save(); pad.render(); })),
         field(h('span', {}, 'Opacity ', opOut), range(0.15, 1, 0.05, layout.opacity ?? 0.75, (v) => { layout.opacity = v; opOut.textContent = pct(v); save(); pad.render(); }))),
       h('label', { class: 'tpe-check' }, h('input', { type: 'checkbox', checked: layout.haptics !== false, onchange: (e) => { layout.haptics = e.target.checked; save(); } }), 'Vibrate when a button is pressed (phones that support it)'),
       h('label', { class: 'tpe-check' }, h('input', { type: 'checkbox', checked: layout.hideWithPad !== false, onchange: (e) => { layout.hideWithPad = e.target.checked; save(); } }), 'Hide while a game controller is being used'),
-      h('div', { class: 'tpe-actions' }, tbtn('Reset to the original layout', () => {
-        if (!confirm(`Put the ${sys.short} on-screen controls back the way they started (portrait and landscape)?`)) return;
-        layout = resetLayout(system, { cMode: layout.cMode });
-        controlsFor(layout, true);
-        sheet.hidden = true;
-        select(null);
-        refresh();
-      }, 'danger')),
-      h('p', { class: 'tpe-note' }, 'Drag a control to move it, tap it to change it. Portrait and landscape each have their own layout: turn the screen to edit the other one. Controls stay near the edge you put them by, so a layout suits other screen sizes too. Saved in this browser.'));
+      h('div', { class: 'tpe-actions' },
+        tbtn('Select all', () => { sheet.hidden = true; select(list().map((c) => c.id)); }),
+        tbtn('Reset to the original layout', () => {
+          if (!confirm(`Put the ${sys.short} on-screen controls back the way they started (portrait and landscape)?`)) return;
+          layout = resetLayout(system, { cMode: layout.cMode });
+          controlsFor(layout, true);
+          sheet.hidden = true;
+          select([]);
+          bar.hidden = false;
+          refresh();
+        }, 'danger')),
+      h('p', { class: 'tpe-note' }, 'Drag a control to move it, tap it to change it, and use ↻ to rotate it. To move or turn several together, use “Select several” (or Shift-click), or drag a box around them. Portrait and landscape each have their own layout: turn the screen to edit the other one. Saved in this browser.'));
   }
 
   let close = function closeEditor() {
@@ -653,10 +818,20 @@ export function openEditor({ system, host = document.body, accent = '#e5a00d', o
     removeEventListener('keydown', onKey, true);
     onDone?.(layout);
   };
-  const onKey = (e) => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); if (!sheet.hidden) { select(null); bar.hidden = false; } else close(); } };
+  const onKey = (e) => {
+    if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); if (!sheet.hidden || selected.size) { select([]); bar.hidden = false; } else close(); }
+    // Arrow keys nudge the selection (Shift: further).
+    const step = e.shiftKey ? 20 : 4;
+    const d = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] }[e.key];
+    if (d && selected.size && !/INPUT|SELECT/.test(document.activeElement?.tagName || '')) {
+      e.preventDefault();
+      for (const c of chosen()) { const p = placeOf(c, pad.u); setPx(c, p.x + d[0], p.y + d[1], pad.u); }
+      save(); pad.render(); placeHandle();
+    }
+  };
   addEventListener('keydown', onKey, true);
 
-  const onTurn = () => { controlsFor(layout, true); pad.render(); select(null); drawBar(); };
+  const onTurn = () => { controlsFor(layout, true); pad.render(); select([]); bar.hidden = false; drawBar(); };
   addEventListener('resize', onTurn);
   const closeBase = close;
   close = () => { removeEventListener('resize', onTurn); closeBase(); };

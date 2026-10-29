@@ -122,7 +122,7 @@ function tv(root, model, app) {
     if (c) {
       rows.append(h('h2', { class: 'tv-row-title' }, `${c.name} · ${c.games.length}`), h('div', { class: 'tv-grid' }, c.games.map((g) => app.gameTile(g, { cls: 'tv-tile', wide: true }))));
       showHero(c.games[0]);
-      return { onBack: () => { st.grid = null; app.saveUi(); app.render(`col:${c.id}`); }, onFocus: (el) => el?.dataset.game && showHero(gameOf(app, el)), onTab: (d) => moveGrid(d) };
+      return { system: () => c.system || null, onBack: () => { st.grid = null; app.saveUi(); app.render(`col:${c.id}`); }, onFocus: (el) => el?.dataset.game && showHero(gameOf(app, el)), onTab: (d) => moveGrid(d) };
     }
   }
   function moveGrid(d) {
@@ -144,7 +144,7 @@ function tv(root, model, app) {
   if (!rows.children.length) rows.append(emptyRow(model));
   showHero(model.collections[0]?.games[0]);
   // L / R jump straight into a console's full grid.
-  return { onFocus: (el) => { if (el?.dataset.game) showHero(gameOf(app, el)); }, onTab: (d) => { const first = model.collections.find((c) => c.system); if (first) { st.grid = first.id; moveGrid(d > 0 ? 0 : -1); } } };
+  return { system: () => null, onFocus: (el) => { if (el?.dataset.game) showHero(gameOf(app, el)); }, onTab: (d) => { const first = model.collections.find((c) => c.system); if (first) { st.grid = first.id; moveGrid(d > 0 ? 0 : -1); } } };
 }
 
 // ---------------------------------------------------------------------------
@@ -229,7 +229,7 @@ function channels(root, model, app) {
       h('div', { class: 'ch-banner' }, h('h1', {}, open.name), h('span', {}, `${open.games.length} game${open.games.length === 1 ? '' : 's'}`)),
       h('div', { class: 'ch-games' }, open.games.length ? open.games.map((g) => app.gameTile(g, { cls: 'ch-game' })) : emptyRow(model)),
       h('div', { class: 'ch-bottom' }, back, h('div', { class: 'ch-clock' }, timeEl), h('div', { class: 'ch-round' }, app.chrome()[0]))));
-    return { onBack: () => back.onActivate(), onTab: (d) => { const cs = model.collections; const i = cs.indexOf(open); st.open = cs[(i + d + cs.length) % cs.length].id; app.saveUi(); app.render(); }, destroy: tickClock(timeEl) };
+    return { system: () => open.system || null, onBack: () => back.onActivate(), onTab: (d) => { const cs = model.collections; const i = cs.indexOf(open); st.open = cs[(i + d + cs.length) % cs.length].id; app.saveUi(); app.render(); }, destroy: tickClock(timeEl) };
   }
   const grid = h('div', { class: 'ch-grid' });
   for (const c of model.collections) {
@@ -244,7 +244,7 @@ function channels(root, model, app) {
   const filler = Math.max(0, 12 - model.collections.length);
   for (let i = 0; i < filler; i++) grid.append(h('div', { class: 'ch-tile blank' }));
   root.append(h('div', { class: 'ch' }, grid, bottom));
-  return { destroy: tickClock(timeEl) };
+  return { system: () => null, destroy: tickClock(timeEl) };
 }
 
 function tickClock(el) {

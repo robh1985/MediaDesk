@@ -10,6 +10,8 @@ import { SYSTEMS, ORDER, CORES, CORE_NAMES, SHADERS, buttonsFor, keyName, padNam
 import { bindings, setBinding, resetBindings, captureKey, capturePad, pads, PLAYERS, isCustomised } from './controls.js';
 import { Nav, blip } from './input.js';
 import { THEMES, THEME_LIST } from './themes.js';
+import { sectionBackground, peekBackground, forgetBackgrounds } from './consoleart.js';
+import { pickFile, fileUrl, filesEnabled } from '../../fileapi.js';
 
 const UI_KEY = 'mediadesk.console.ui';
 const readUi = () => { try { return JSON.parse(localStorage.getItem(UI_KEY)) || {}; } catch { return {}; } };
@@ -40,6 +42,33 @@ export const consoleApp = {
     win.on('reopen', (o) => { if (o?.game) app.openGameById(o.game); });
   },
 };
+
+// Pictures you choose are scaled down (smoothly, in halves) to at most 1600 px on the long side,
+// keeping their shape; small ones are kept as they are.
+async function shrinkPicture(blob, max = 1600) {
+  let bmp;
+  try { bmp = await createImageBitmap(blob); } catch { throw new Error('That file isn’t a picture this browser can read'); }
+  const long = Math.max(bmp.width, bmp.height);
+  if (long <= max && blob.size < 3 * 1024 * 1024 && /image\/(png|jpeg|webp|gif)/.test(blob.type)) return blob;
+  const scale = Math.min(1, max / long);
+  let src = bmp, w = bmp.width, hgt = bmp.height;
+  const tw = Math.round(bmp.width * scale), th = Math.round(bmp.height * scale);
+  while (w / 2 >= tw) {
+    const c = document.createElement('canvas');
+    c.width = Math.round(w / 2); c.height = Math.round(hgt / 2);
+    const x = c.getContext('2d');
+    x.imageSmoothingQuality = 'high';
+    x.drawImage(src, 0, 0, c.width, c.height);
+    src = c; w = c.width; hgt = c.height;
+  }
+  const out = document.createElement('canvas');
+  out.width = tw; out.height = th;
+  const x = out.getContext('2d');
+  x.imageSmoothingQuality = 'high';
+  x.drawImage(src, 0, 0, tw, th);
+  const png = blob.type === 'image/png';
+  return new Promise((resolve) => out.toBlob((b) => resolve(b || blob), png ? 'image/png' : 'image/jpeg', 0.92));
+}
 
 class GameConsole {
   constructor(win, opts) {
@@ -133,6 +162,7 @@ class GameConsole {
     const theme = THEMES[this.ui.theme];
     this.stage.append(h('div', { class: 'gc-theme' }));
     this.themeInst = theme.render(this.stage.firstChild, this.model, this) || {};
+    this.applySysBg();
     // Start on a game (the theme may say which), not on a tab.
     const first = this.themeInst.initial?.() || this.stage.querySelector('.gc-theme [data-nav^="game:"]')?.dataset.nav;
     requestAnimationFrame(() => this.nav.restore(keep || first));
@@ -145,6 +175,46 @@ class GameConsole {
       h('p', {}, 'Put your games in a folder on the MediaDesk server (one folder per console works best, like “SNES” or “PlayStation”), then choose that folder in Settings.'),
       this.navBtn('Choose the games folder', () => openApp('settings', { tab: 'console' }), 'setup', 'primary')));
     this.nav.restore('setup');
+  }
+
+  // A console's section has a picture of the console behind it.
+  currentSystem() {
+    if (this.themeInst?.system) return this.themeInst.system();
+    const cols = this.model.collections;
+    const sel = this.stateFor(this.ui.theme).sel;
+    return (cols.find((c) => c.id === sel) || cols[0])?.system || null;
+  }
+
+  // The picture goes between the theme's own background and its content: the theme's
+  // background moves to the theme root, and the picture layer sits on top of it.
+  applySysBg() {
+    const root = this.stage.querySelector('.gc-theme');
+    if (!root) return;
+    const main = [...root.children].find((c) => !c.classList.contains('gc-sysbg') && !c.classList.contains('gc-sysbg-credit'));
+    const system = this.currentSystem();
+    const token = (this.bgToken = {});
+    const show = (bg) => {
+      if (token !== this.bgToken || !root.isConnected) return;
+      root.querySelector('.gc-sysbg')?.remove();
+      root.querySelector('.gc-sysbg-credit')?.remove();
+      root.classList.toggle('has-sysbg', Boolean(bg));
+      if (!bg || !main) return;
+      if (!main.dataset.bgMoved) {
+        root.style.background = getComputedStyle(main).background;
+        main.style.background = 'transparent';
+        main.dataset.bgMoved = '1';
+      }
+      // Photos with a light backdrop (most are white) get a soft spotlight; dark ones fill.
+      const rgb = (bg.edge || '').match(/\d+/g)?.map(Number);
+      const tone = rgb ? (0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2] > 150 ? 'edge-light' : 'edge-dark') : '';
+      const layer = h('div', { class: `gc-sysbg ${bg.kind} ${tone}`, style: { '--sysbg-img': `url("${bg.url.replace(/"/g, '%22')}")`, '--sysbg-edge': bg.edge || 'transparent', '--sys': SYSTEMS[system]?.color || '#555' } });
+      root.prepend(layer);
+      if (bg.credit) root.append(h('div', { class: 'gc-sysbg-credit' }, bg.credit));
+    };
+    if (!system) return show(null);
+    const cfg = this.lib.systems?.[system] || {};
+    // Already known: no flicker between screens.
+    (peekBackground(system, cfg) || sectionBackground(system, cfg)).then(show);
   }
 
   // Theme helpers -----------------------------------------------------------
@@ -173,12 +243,18 @@ class GameConsole {
       h('span', { class: 'gc-cover-band' }, sys.short || ''),
       h('span', { class: 'gc-cover-title' }, game.title),
       h('span', { class: 'gc-cover-maker' }, sys.maker || ''));
-    if (!this.model.demo && !GameConsole.noArt.has(game.id)) {
+    // Box art is scaled to fit the frame (nothing cut off) over a blurred copy of itself, unless
+    // you chose otherwise for this game (Box art… in its details).
+    const prefs = this.lib?.artPrefs?.[game.id] || {};
+    el.classList.add(`fit-${prefs.fit || 'fit'}`, `artbg-${prefs.bg || 'blur'}`);
+    if (!prefs.none && (!this.model.demo || prefs.v) && !GameConsole.noArt.has(game.id)) {
+      const src = `/portal/games/art?id=${game.id}${prefs.v ? `&v=${prefs.v}` : ''}`;
       const img = h('img', { alt: '', loading: 'lazy', decoding: 'async', draggable: 'false' });
+      const blur = h('i', { class: 'gc-cover-blur', style: { 'background-image': `url("${src}")` } });
       img.onload = () => el.classList.add('has-art');
-      img.onerror = () => { GameConsole.noArt.add(game.id); img.remove(); };
-      img.src = `/portal/games/art?id=${game.id}`;
-      el.append(img);
+      img.onerror = () => { GameConsole.noArt.add(game.id); img.remove(); blur.remove(); };
+      img.src = src;
+      el.append(blur, img);
     }
     return el;
   }
@@ -276,8 +352,9 @@ class GameConsole {
       fav.onActivate = async () => { await this.toggleFavorite(game, false); paintFav(); };
       const actions = h('div', { class: 'gc-actions' }, h('div', { class: 'gc-spin small' }));
       const statesBox = h('div', { class: 'gc-states' });
+      const artBox = h('div', { class: 'gc-details-art' }, this.cover(game));
       box.append(h('div', { class: 'gc-details-in' },
-        h('div', { class: 'gc-details-art' }, this.cover(game)),
+        artBox,
         h('div', { class: 'gc-details-info' },
           this.sysBadge(game.system),
           h('h2', {}, game.title),
@@ -298,7 +375,9 @@ class GameConsole {
         playable && auto ? this.navBtn(`▶ Continue (${timeAgo(auto.at)})`, () => this.play(game, 'auto'), 'd:continue', 'primary') : null,
         playable ? this.navBtn(auto ? 'Start over' : '▶ Play', () => this.play(game), 'd:play', auto ? '' : 'primary') : null,
         fav,
-        this.navBtn(`${sys.short || 'Console'} settings`, () => this.openSettings({ tab: 'consoles', system: game.system }), 'd:settings'));
+        this.navBtn('Box art…', () => this.openArtEditor(game, () => clear(artBox, this.cover(game))), 'd:art'),
+        this.navBtn(`${sys.short || 'Console'} settings`, () => this.openSettings({ tab: 'consoles', system: game.system }), 'd:settings'),
+        this.navBtn('Back', () => this.closeLayer(), 'd:back'));
       const slots = saves.states.filter((s) => s.slot !== 'auto');
       if (slots.length && playable) {
         statesBox.append(h('h3', {}, 'Saved states'), h('div', { class: 'gc-state-row' }, slots.map((s) => {
@@ -310,6 +389,98 @@ class GameConsole {
         })));
       }
       this.nav.restore(playable ? (auto ? 'd:continue' : 'd:play') : 'd:fav');
+    });
+  }
+
+  // A console's own background picture, from the shared folders or this device.
+  async setConsolePicture(system, from, layer) {
+    let blob = null;
+    if (from === 'shared') {
+      const pick = await pickFile({ title: `Background for ${SYSTEMS[system].short}`, accept: (e) => e.dir || /\.(png|jpe?g|webp|gif)$/i.test(e.name) });
+      if (!pick) return;
+      const r = await fetch(fileUrl(pick.root, pick.path), { credentials: 'same-origin' });
+      if (r.ok) blob = await r.blob();
+    } else {
+      blob = await new Promise((resolve) => {
+        const input = h('input', { type: 'file', accept: 'image/png,image/jpeg,image/webp,image/gif', style: { display: 'none' } });
+        input.onchange = () => { resolve(input.files?.[0] || null); input.remove(); };
+        document.body.append(input);
+        input.click();
+      });
+    }
+    if (!blob) return;
+    try {
+      const small = await shrinkPicture(blob, 2400);
+      this.lib.systems = (await api(`/console-art/${system}`, { method: 'PUT', body: new Uint8Array(await small.arrayBuffer()), headers: { 'Content-Type': 'application/octet-stream' } })).systems;
+      toast('Background changed', { icon: appIcon.console, timeout: 1500 });
+      this.applySysBg();
+      layer?.refresh?.();
+    } catch (err) { toastError(err, 'Couldn’t use that picture'); }
+  }
+
+  // ---- Box art ----
+
+  // Change a game's box art: your own picture (from the shared folders or this device), the
+  // downloaded one again, or none; and how it's shown — scaled to fit with nothing cut off (the
+  // space around it filled with a blurred copy, the console's colour, black or white), or
+  // filling the frame.
+  openArtEditor(game, onChanged) {
+    this.openLayer('art', (box, layer) => {
+      const preview = h('div', { class: 'gc-art-preview' });
+      const status = h('div', { class: 'gc-small gc-art-status' });
+      const prefs = () => this.lib.artPrefs?.[game.id] || {};
+      const paint = () => {
+        clear(preview, this.cover(game));
+        const p = prefs();
+        status.textContent = p.none ? 'No picture: the drawn cover is shown.' : p.v ? 'Showing the picture you chose (or the downloaded one, if you went back to it).' : 'Showing the downloaded box art, or a picture with the same name in your games folder.';
+      };
+      const changed = (r) => {
+        this.lib.artPrefs = r.art;
+        GameConsole.noArt.delete(game.id);
+        layer.dirty = true;
+        paint();
+      };
+      const busy = async (label, fn) => {
+        try { toast(label, { icon: appIcon.console, timeout: 1200 }); changed(await fn()); } catch (err) { if (err) toastError(err, 'Couldn’t change the box art'); }
+      };
+      const upload = async (blob) => changed(await api(`/art?id=${game.id}`, { method: 'PUT', body: new Uint8Array(await (await shrinkPicture(blob)).arrayBuffer()), headers: { 'Content-Type': 'application/octet-stream' } }));
+      const settings = (values) => busy('Saving…', () => api('/art-settings', { method: 'POST', body: JSON.stringify({ id: game.id, ...values }) }));
+      const fromDevice = () => {
+        const input = h('input', { type: 'file', accept: 'image/png,image/jpeg,image/webp,image/gif', style: { display: 'none' } });
+        input.onchange = async () => { const f = input.files?.[0]; input.remove(); if (f) try { await upload(f); toast('Box art changed', { icon: appIcon.console, timeout: 1500 }); } catch (err) { toastError(err, 'Couldn’t use that picture'); } };
+        document.body.append(input);
+        input.click();
+      };
+      const fromShared = async () => {
+        const pick = await pickFile({ title: `Box art for ${game.title}`, accept: (e) => e.dir || /\.(png|jpe?g|webp|gif)$/i.test(e.name) });
+        if (!pick) return;
+        try {
+          const r = await fetch(fileUrl(pick.root, pick.path), { credentials: 'same-origin' });
+          if (!r.ok) throw new Error(`HTTP ${r.status}`);
+          await upload(await r.blob());
+          toast('Box art changed', { icon: appIcon.console, timeout: 1500 });
+        } catch (err) { toastError(err, 'Couldn’t use that picture'); }
+      };
+      const p = prefs();
+      box.append(h('div', { class: 'gc-art-in' },
+        preview,
+        h('div', { class: 'gc-art-opts' },
+          h('h2', {}, 'Box art'), h('div', { class: 'gc-small' }, game.title),
+          status,
+          h('h3', {}, 'Picture'),
+          h('div', { class: 'gc-row gc-wrap' },
+            filesEnabled() ? this.navBtn('From shared folders…', fromShared, 'art:shared') : null,
+            this.navBtn('From this device…', fromDevice, 'art:upload'),
+            this.navBtn('Download again', () => settings({ refetch: true }), 'art:refetch'),
+            this.navBtn('No picture', () => settings({ none: !prefs().none }), 'art:none')),
+          h('h3', {}, 'How it’s shown'),
+          this.optionRow('art:fit', 'Size', [['fit', 'Scale to fit (whole picture)'], ['fill', 'Fill the frame (trims the edges)']], p.fit || 'fit', (v) => settings({ fit: v })),
+          this.optionRow('art:bg', 'Around it', [['blur', 'Blurred copy of the picture'], ['console', 'The console’s colour'], ['black', 'Black'], ['white', 'White']], p.bg || 'blur', (v) => settings({ bg: v }),
+            'Fills the space when the picture’s shape differs from the frame'),
+          h('div', { class: 'gc-row' }, this.navBtn('Done', () => this.closeLayer(), 'art:done', 'primary')))));
+      paint();
+      layer.onClose = () => { if (layer.dirty) { onChanged?.(); this.render(); } };
+      this.nav.restore(filesEnabled() ? 'art:shared' : 'art:upload');
     });
   }
 
@@ -405,7 +576,11 @@ class GameConsole {
       const tabs = [['appearance', 'Appearance'], ['controls', 'Controls'], ['consoles', 'Consoles'], ['library', 'Games & storage'], ['about', 'About']];
       const side = h('div', { class: 'gc-set-tabs' });
       const pane = h('div', { class: 'gc-set-pane' });
-      box.append(h('div', { class: 'gc-set' }, h('div', { class: 'gc-set-head' }, h('h2', {}, 'Settings'), h('span', { class: 'gc-small' }, 'B / Esc to go back')), h('div', { class: 'gc-set-body' }, side, pane)));
+      // Changes are saved as they're made; this just leaves (B / Esc do the same).
+      const exit = this.navBtn('Save & exit', () => { toast('Settings saved', { icon: appIcon.console, timeout: 1500 }); this.closeLayer(); }, 'set:exit', 'primary');
+      box.append(h('div', { class: 'gc-set' },
+        h('div', { class: 'gc-set-head' }, h('h2', {}, 'Settings'), h('span', { class: 'gc-small gc-set-hint' }, 'Saved as you change them · B / Esc to go back'), exit),
+        h('div', { class: 'gc-set-body' }, side, pane)));
       const show = (id, extra = {}) => {
         layer.tab = id;
         side.querySelectorAll('.gc-set-tab').forEach((t) => t.classList.toggle('active', t.dataset.tab === id));
@@ -572,6 +747,15 @@ class GameConsole {
       this.optionRow('con:ff', 'Fast-forward speed', [['1.5', '1.5×'], ['2.0', '2×'], ['3.0', '3×'], ['4.0', '4×'], ['6.0', '6×'], ['8.0', '8×']], cfg.ffRatio || '3.0', (v) => save({ ffRatio: v })),
       this.optionRow('con:touch', 'On-screen controls', [['auto', 'On touch screens'], [true, 'Always'], [false, 'Never']], cfg.touchControls ?? 'auto', (v) => save({ touchControls: v === 'auto' ? undefined : v }),
         `Move, resize, relabel, recolour and remap them with “Customize on-screen controls”${sys === 'n64' ? ' (including C buttons as four buttons or a stick)' : ''}`),
+      this.optionRow('con:bg', 'Background in its section', [['auto', 'Photo of the console'], ['drawn', 'Drawing of the console'], ['custom', 'My picture'], ['none', 'None']], cfg.background || 'auto',
+        async (v) => { await save({ background: v }); this.applySysBg(); },
+        'Photos are public-domain pictures from Wikimedia Commons, downloaded by the server the first time (a drawing is used offline)'),
+      h('div', { class: 'gc-row gc-wrap' },
+        filesEnabled() ? this.navBtn('My picture from shared folders…', () => this.setConsolePicture(sys, 'shared', layer), 'con:bgshared') : null,
+        this.navBtn('My picture from this device…', () => this.setConsolePicture(sys, 'device', layer), 'con:bgupload'),
+        cfg.background === 'custom' ? this.navBtn('Remove my picture', async () => {
+          try { this.lib.systems = (await api(`/console-art/${sys}`, { method: 'DELETE' })).systems; this.applySysBg(); layer.refresh(); } catch (err) { toastError(err); }
+        }, 'con:bgremove') : null),
       this.optionRow('con:volume', 'Volume', [20, 40, 60, 80, 100].map((v) => [v, `${v}%`]), cfg.volume ?? 80, (v) => save({ volume: Number(v) })),
       this.optionRow('con:hidden', 'Show on the home screen', [[false, 'Yes'], [true, 'No']], Boolean(cfg.hidden), (v) => save({ hidden: v })),
       h('div', { class: 'gc-row' },

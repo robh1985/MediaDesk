@@ -19,6 +19,56 @@ const { pipeline } = require('node:stream/promises');
 const EJS_VERSION = '4.2.3';
 const REGISTRY = (process.env.NPM_REGISTRY || 'https://registry.npmjs.org').replace(/\/+$/, '');
 const ART_HOST = 'https://thumbnails.libretro.com';
+// Console photos for the console sections: public-domain pictures on Wikimedia Commons (most by
+// Evan Amos), downloaded the first time a console's section is opened and kept. The first title
+// that exists is used; failing those, a search for the console's photos by Evan Amos.
+const COMMONS = 'https://commons.wikimedia.org/w/api.php';
+const COMMONS_UA = 'MediaDesk/1.0 (self-hosted media portal; https://github.com/robh1985/MediaDesk)';
+const CONSOLE_PHOTOS = {
+  nes: ['NES-Console-Set.jpg', 'NES-Console-Set.png'],
+  snes: ['SNES-Mod1-Console-Set.jpg', 'Nintendo-Super-Famicom-Set-FL.jpg'],
+  n64: ['N64-Console-Set.jpg', 'Nintendo-64-wController-L.jpg'],
+  gb: ['Game-Boy-FL.jpg', 'Nintendo-Game-Boy-Color-FL.jpg'],
+  gba: ['Nintendo-Game-Boy-Advance-Purple-FL.jpg', 'Game-Boy-Advance-Purple-FL.jpg'],
+  nds: ['Nintendo-DS-Fat-Blue.jpg', 'Nintendo-DS-Lite-Black-Open.jpg'],
+  vb: ['Virtual-Boy-Set.jpg', 'Virtual-Boy-wController.jpg'],
+  segaMD: ['Sega-Genesis-Mod1-Set.jpg', 'Sega-Mega-Drive-JP-Mk1-Console-Set.jpg'],
+  segaMS: ['Sega-Master-System-Set.jpg', 'Sega-Master-System-II-wController-L.jpg'],
+  segaGG: ['Game-Gear-Handheld.jpg', 'Sega-Game-Gear-WB.png'],
+  segaCD: ['Sega-CD-Model1-Set.jpg', 'Sega-CD-Model2-Set.jpg'],
+  sega32x: ['Sega-Genesis-Model2-32X.jpg', 'Sega-32X-Mod1-Set.jpg'],
+  segaSaturn: ['Sega-Saturn-Console-Set-Mk1.jpg', 'Sega-Saturn-JP-Mk1-Console-Set.jpg'],
+  dreamcast: ['Dreamcast-Console-Set.png', 'Dreamcast-Console-Set.jpg'],
+  psx: ['PSX-Console-wController.jpg', 'PlayStation-SCPH-1000-with-Controller.jpg'],
+  psp: ['Sony-PSP-1000-Body.png', 'PSP-1000.jpg'],
+  pce: ['TurboGrafx16-Console-Set.jpg', 'PC-Engine-Console-Set.png'],
+  atari2600: ['Atari-2600-Wood-4Sw-Set.jpg', 'Atari-2600-Wood-4Sw-Console-Set.jpg'],
+  atari5200: ['Atari-5200-4-Port-wController-L.jpg', 'Atari-5200-Console-Set.jpg'],
+  atari7800: ['Atari-7800-Console-Set.jpg', 'Atari-7800-Console-wController-FL.jpg'],
+  lynx: ['Atari-Lynx-I-Handheld.jpg', 'Atari-Lynx-II-Handheld-Angled.jpg'],
+  jaguar: ['Atari-Jaguar-Console-Set.jpg', 'Atari-Jaguar-Console-wController-FL.jpg'],
+  ngp: ['Neo-Geo-Pocket-Color-Blue-Left.jpg', 'Neo-Geo-Pocket-Color-Blue.jpg'],
+  ws: ['WonderSwan-Color-Blue-Left.jpg', 'WonderSwan-Color-Blue.jpg'],
+  coleco: ['ColecoVision-wController-L.jpg', 'ColecoVision-Console-Set.jpg'],
+  '3do': ['3DO-FZ1-Console-Set.jpg', 'Panasonic-FZ-1-3DO.jpg'],
+  arcade: [],
+};
+const PHOTO_SEARCH = {
+  nes: 'Nintendo Entertainment System console', snes: 'Super Nintendo console', n64: 'Nintendo 64 console', gb: 'Game Boy', gba: 'Game Boy Advance', nds: 'Nintendo DS',
+  vb: 'Virtual Boy', segaMD: 'Sega Genesis console', segaMS: 'Sega Master System', segaGG: 'Game Gear', segaCD: 'Sega CD', sega32x: 'Sega 32X', segaSaturn: 'Sega Saturn',
+  dreamcast: 'Dreamcast console', psx: 'PlayStation console', psp: 'PlayStation Portable', pce: 'TurboGrafx-16 console', atari2600: 'Atari 2600', atari5200: 'Atari 5200',
+  atari7800: 'Atari 7800', lynx: 'Atari Lynx', jaguar: 'Atari Jaguar console', ngp: 'Neo Geo Pocket Color', ws: 'WonderSwan Color', coleco: 'ColecoVision', '3do': '3DO console',
+};
+// Your own pictures: what the first bytes of a picture look like.
+function imageType(buf) {
+  if (buf.length < 12) return null;
+  if (buf[0] === 0x89 && buf.toString('latin1', 1, 4) === 'PNG') return 'png';
+  if (buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return 'jpg';
+  if (buf.toString('latin1', 0, 4) === 'RIFF' && buf.toString('latin1', 8, 12) === 'WEBP') return 'webp';
+  if (buf.toString('latin1', 0, 4) === 'GIF8') return 'gif';
+  return null;
+}
+const stripHtml = (s) => String(s || '').replace(/<[^>]*>/g, '').replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&#0?39;/g, "'").replace(/\s+/g, ' ').trim();
 
 // ---------------------------------------------------------------------------
 // Consoles
@@ -202,6 +252,8 @@ function createGames({ dataDir, getFolder, mock = false, sample = null }) {
   const gamesData = path.join(dataDir, 'games');
   const savesDir = path.join(gamesData, 'saves');
   const artDir = path.join(gamesData, 'art');
+  const customDir = path.join(gamesData, 'custom-art');     // your own box art and console pictures
+  const photoDir = path.join(gamesData, 'console-photos');  // downloaded console photos
   const settingsFile = path.join(gamesData, 'settings.json');
   const emuDir = path.join(dataDir, 'emulator', EJS_VERSION);
   let cache = null; // { folder, at, games, bios }
@@ -326,7 +378,7 @@ function createGames({ dataDir, getFolder, mock = false, sample = null }) {
   async function readSettings() {
     if (settingsCache) return settingsCache;
     try { settingsCache = JSON.parse(await fsp.readFile(settingsFile, 'utf8')); } catch { settingsCache = {}; }
-    settingsCache.systems ||= {}; settingsCache.favorites ||= []; settingsCache.played ||= {};
+    settingsCache.systems ||= {}; settingsCache.favorites ||= []; settingsCache.played ||= {}; settingsCache.art ||= {};
     return settingsCache;
   }
   async function writeSettings(s) {
@@ -346,6 +398,8 @@ function createGames({ dataDir, getFolder, mock = false, sample = null }) {
     for (const k of ['rewind', 'autosave', 'hidden', 'fastForwardAudio', 'touchControls']) if (typeof v[k] === 'boolean') out[k] = v[k];
     if (['1.5', '2.0', '3.0', '4.0', '6.0', '8.0'].includes(String(v.ffRatio))) out.ffRatio = String(v.ffRatio);
     if (Number.isInteger(v.volume) && v.volume >= 0 && v.volume <= 100) out.volume = v.volume;
+    if (['auto', 'photo', 'drawn', 'custom', 'none'].includes(v.background)) out.background = v.background;
+    if (Number.isInteger(v.backgroundV)) out.backgroundV = v.backgroundV;
     return out;
   }
 
@@ -377,7 +431,35 @@ function createGames({ dataDir, getFolder, mock = false, sample = null }) {
   // ---- Cover art ----
 
   const artName = (s) => s.replace(/[&*/:`<>?\\|"]/g, '_');
+  // Box art you chose (or "no picture") comes first.
+  async function findCustom(name) {
+    for (const ext of ['png', 'jpg', 'webp', 'gif']) {
+      const f = path.join(customDir, `${name}.${ext}`);
+      if (fs.existsSync(f)) return f;
+    }
+    return null;
+  }
+  async function saveCustom(name, buf) {
+    const type = imageType(buf);
+    if (!type) throw new GameError(415, 'That isn’t a picture MediaDesk can use (PNG, JPEG, WebP or GIF)');
+    await fsp.mkdir(customDir, { recursive: true });
+    for (const ext of ['png', 'jpg', 'webp', 'gif']) await fsp.rm(path.join(customDir, `${name}.${ext}`), { force: true });
+    await fsp.writeFile(path.join(customDir, `${name}.${type}`), buf);
+  }
+  async function removeCustom(name) {
+    for (const ext of ['png', 'jpg', 'webp', 'gif']) await fsp.rm(path.join(customDir, `${name}.${ext}`), { force: true });
+  }
+  const libretroFile = (game) => {
+    const sys = SYSTEMS[game.system];
+    const set = game.system === 'gb' && (game.color || extOf(game.file) === 'gbc') ? 'Nintendo - Game Boy Color' : sys?.art;
+    return set ? path.join(artDir, squash(set), `${idOf(game.base)}.png`) : null;
+  };
+
   async function sendArt(res, game) {
+    const prefs = (await readSettings()).art[game.id] || {};
+    if (prefs.none) throw new GameError(404, 'No cover');
+    const mine = await findCustom(`game-${game.id}`);
+    if (mine) return sendPlain(res, mine, 'max-age=31536000');
     const lib = await library();
     // A picture next to the game (same name) wins.
     if (game.art) {
@@ -387,7 +469,7 @@ function createGames({ dataDir, getFolder, mock = false, sample = null }) {
     const sys = SYSTEMS[game.system];
     if (!sys?.art || mock) throw new GameError(404, 'No cover');
     const set = game.system === 'gb' && (game.color || extOf(game.file) === 'gbc') ? 'Nintendo - Game Boy Color' : sys.art;
-    const file = path.join(artDir, squash(set), `${idOf(game.base)}.png`);
+    const file = libretroFile(game);
     const miss = `${file}.miss`;
     if (fs.existsSync(file)) return sendPlain(res, file, 'max-age=604800');
     // Don't keep asking for covers that don't exist (try again after a week).
@@ -409,10 +491,68 @@ function createGames({ dataDir, getFolder, mock = false, sample = null }) {
     throw new GameError(404, 'No cover');
   }
 
+  // ---- Console pictures ----
+
+  const photoPending = new Map();
+  async function consolePhoto(system) {
+    const meta = path.join(photoDir, `${system}.json`);
+    try {
+      const info = JSON.parse(await fsp.readFile(meta, 'utf8'));
+      if (info.file && fs.existsSync(path.join(photoDir, info.file))) return info;
+      if (info.missed && Date.now() - info.missed < 864e5) return null;
+    } catch { /* not fetched yet */ }
+    if (!photoPending.has(system)) photoPending.set(system, downloadPhoto(system, meta).finally(() => photoPending.delete(system)));
+    return photoPending.get(system);
+  }
+  async function commons(params) {
+    const r = await fetch(`${COMMONS}?${new URLSearchParams({ format: 'json', formatversion: '2', ...params })}`, { headers: { 'User-Agent': COMMONS_UA }, signal: AbortSignal.timeout(15e3) });
+    if (!r.ok) throw new Error(`Wikimedia Commons: HTTP ${r.status}`);
+    return r.json();
+  }
+  async function downloadPhoto(system, meta) {
+    await fsp.mkdir(photoDir, { recursive: true });
+    const ii = { prop: 'imageinfo', iiprop: 'url|extmetadata|mime', iiurlwidth: '1600' };
+    const free = (p) => {
+      const info = p?.imageinfo?.[0];
+      const lic = stripHtml(info?.extmetadata?.LicenseShortName?.value);
+      return info && /^image\/(jpeg|png|webp)$/.test(info.mime || '') && /public domain|^pd|cc0|cc[- ]by/i.test(lic) ? info : null;
+    };
+    let pages = [];
+    try {
+      const titles = (CONSOLE_PHOTOS[system] || []).map((t) => `File:${t}`);
+      if (titles.length) {
+        const j = await commons({ action: 'query', titles: titles.join('|'), ...ii });
+        // Keep the order of the list (the API doesn't).
+        const norm = (t) => t.replace(/_/g, ' ');
+        pages = titles.map((t) => (j.query?.pages || []).find((p) => norm(p.title) === norm(t))).filter((p) => free(p));
+      }
+      if (!pages.length && PHOTO_SEARCH[system]) {
+        const j = await commons({ action: 'query', generator: 'search', gsrsearch: `${PHOTO_SEARCH[system]} Evan-Amos`, gsrnamespace: '6', gsrlimit: '6', ...ii });
+        pages = (j.query?.pages || []).sort((a, b) => (a.index || 0) - (b.index || 0)).filter((p) => free(p) && /evan/i.test(stripHtml(p.imageinfo[0].extmetadata?.Artist?.value)));
+      }
+      for (const p of pages) {
+        const info = free(p);
+        const r = await fetch(info.thumburl || info.url, { headers: { 'User-Agent': COMMONS_UA }, signal: AbortSignal.timeout(30e3) });
+        if (!r.ok) continue;
+        const buf = Buffer.from(await r.arrayBuffer());
+        const type = imageType(buf);
+        if (!type || buf.length > 15 * 1024 * 1024) continue;
+        const file = `${system}.${type}`;
+        await fsp.writeFile(path.join(photoDir, file), buf);
+        const md = info.extmetadata || {};
+        const out = { file, title: p.title, credit: stripHtml(md.Artist?.value) || 'Wikimedia Commons', license: stripHtml(md.LicenseShortName?.value), page: info.descriptionurl, at: Date.now() };
+        await fsp.writeFile(meta, JSON.stringify(out));
+        return out;
+      }
+    } catch { /* offline or blocked: the app draws the console instead */ }
+    await fsp.writeFile(meta, JSON.stringify({ missed: Date.now() })).catch(() => {});
+    return null;
+  }
+
   async function sendPlain(res, abs, cache) {
     const st = await fsp.stat(abs);
     const ext = extOf(abs);
-    const type = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp' }[ext] || 'application/octet-stream';
+    const type = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp', gif: 'image/gif' }[ext] || 'application/octet-stream';
     res.writeHead(200, { 'Content-Type': type, 'Content-Length': st.size, 'Cache-Control': `private, ${cache}`, 'X-Content-Type-Options': 'nosniff' });
     await pipeline(fs.createReadStream(abs), res).catch(() => {});
   }
@@ -563,7 +703,7 @@ function createGames({ dataDir, getFolder, mock = false, sample = null }) {
         const s = await readSettings();
         return sendJson(res, 200, {
           configured: true, folder: lib.folder, demo: Boolean(lib.demo), games: lib.games, bios: lib.bios,
-          favorites: s.favorites, played: s.played, systems: s.systems, emulator: emulatorStatus(),
+          favorites: s.favorites, played: s.played, systems: s.systems, emulator: emulatorStatus(), artPrefs: s.art,
         });
       }
       // /file/<path> (the emulator names the game after the end of the address) or /file?path=
@@ -575,6 +715,66 @@ function createGames({ dataDir, getFolder, mock = false, sample = null }) {
       if (p === '/art' && req.method === 'GET') {
         const { game } = await findGame(q.get('id') || '');
         return await sendArt(res, game);
+      }
+      // Your own box art: PUT the picture; DELETE goes back to the downloaded / folder one.
+      if (p === '/art' && (req.method === 'PUT' || req.method === 'DELETE')) {
+        const { game } = await findGame(q.get('id') || '');
+        const s = await readSettings();
+        if (req.method === 'PUT') await saveCustom(`game-${game.id}`, await readBody(req, 15 * 1024 * 1024));
+        else await removeCustom(`game-${game.id}`);
+        s.art[game.id] = { ...s.art[game.id], none: false, v: Date.now() };
+        await writeSettings(s);
+        return sendJson(res, 200, { art: s.art });
+      }
+      // How box art is shown: fit (whole picture) or fill (cropped), what's behind it, none at
+      // all, or fetch the downloaded one again.
+      if (p === '/art-settings' && req.method === 'POST') {
+        const body = await readJson(req);
+        const { game } = await findGame(String(body.id || ''));
+        const s = await readSettings();
+        const cur = { ...s.art[game.id] };
+        if (['fit', 'fill'].includes(body.fit)) cur.fit = body.fit;
+        if (['blur', 'console', 'black', 'white'].includes(body.bg)) cur.bg = body.bg;
+        if (typeof body.none === 'boolean') cur.none = body.none;
+        if (body.refetch) {
+          const f = libretroFile(game);
+          if (f) { await fsp.rm(f, { force: true }); await fsp.rm(`${f}.miss`, { force: true }); }
+          await removeCustom(`game-${game.id}`);
+          cur.none = false;
+        }
+        cur.v = Date.now();
+        s.art[game.id] = cur;
+        await writeSettings(s);
+        return sendJson(res, 200, { art: s.art });
+      }
+      // Console pictures: /console-art/<console>?kind=photo|custom, /console-art/<console>/photo
+      // (downloads it if need be; says who took it), PUT / DELETE your own.
+      const cm = /^\/console-art\/([A-Za-z0-9]+)(\/photo)?$/.exec(p);
+      if (cm && SYSTEMS[cm[1]]) {
+        const system = cm[1];
+        if (cm[2]) {
+          const info = await consolePhoto(system);
+          return sendJson(res, 200, info ? { ok: true, credit: info.credit, license: info.license, page: info.page, v: info.at } : { ok: false });
+        }
+        if (req.method === 'GET') {
+          if (q.get('kind') === 'custom') {
+            const f = await findCustom(`console-${system}`);
+            if (!f) return sendJson(res, 404, { error: 'No picture' });
+            return await sendPlain(res, f, 'max-age=31536000');
+          }
+          const info = await consolePhoto(system);
+          if (!info) return sendJson(res, 404, { error: 'No photo' });
+          return await sendPlain(res, path.join(photoDir, info.file), 'max-age=31536000');
+        }
+        if (req.method === 'PUT' || req.method === 'DELETE') {
+          const s = await readSettings();
+          if (req.method === 'PUT') await saveCustom(`console-${system}`, await readBody(req, 15 * 1024 * 1024));
+          else await removeCustom(`console-${system}`);
+          const cur = s.systems[system] || {};
+          s.systems[system] = cleanSystemSettings(system, { ...cur, background: req.method === 'PUT' ? 'custom' : 'auto', backgroundV: Date.now() });
+          await writeSettings(s);
+          return sendJson(res, 200, { systems: s.systems });
+        }
       }
       if (p === '/settings' && req.method === 'POST') {
         const body = await readJson(req);

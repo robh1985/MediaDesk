@@ -115,3 +115,16 @@ html, body { margin: 0; height: 100%; background: #000; color: #f2f2f2; font: 15
 .tpe .tp { z-index: 1; }
 .tpe-bar[hidden] { display: none; }
 body.tp-on .ejs_menu_bar, body.tp-on .ejs_menu_button, body.tp-on .ejs_virtualGamepad_open { display: none !important; }
+.tp-c { transform: rotate(var(--rot, 0deg)); }
+.tpe-rotate { position: absolute; z-index: 2; width: 28px; height: 28px; display: grid; place-items: center; padding: 0; border-radius: 50%; border: 2px solid var(--accent); background: rgba(20, 20, 24, .92); color: var(--accent); cursor: grab; touch-action: none; box-shadow: 0 2px 8px rgba(0, 0, 0, .5); }
+.tpe-rotate[hidden] { display: none; }
+.tpe-rotate svg { width: 16px; height: 16px; }
+.tpe-marquee { position: absolute; z-index: 2; border: 1.5px dashed var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); pointer-events: none; }
+.tpe-marquee[hidden] { display: none; }
+.tpe { touch-action: none; }
+.tpe-rot { margin-top: 10px; }
+.tpe-rot-row { display: flex; align-items: center; gap: 6px; }
+.tpe-rot-row input[type=range] { flex: 1; min-width: 60px; accent-color: var(--accent); }
+.tpe-rot-row .tpe-btn { padding: 5px 8px; }
+.tpe-note.tpe-tight { margin: 0 0 8px; }
+.tpe-btn.primary-outline { border-color: var(--accent); color: var(--accent); }
