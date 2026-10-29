@@ -20,9 +20,8 @@
 .gc-sys { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px 3px 8px; border-radius: 999px; font-size: 12px; font-weight: 700; letter-spacing: .02em; background: color-mix(in srgb, var(--sys) 30%, rgba(255,255,255,.08)); color: inherit; border-left: 4px solid var(--sys); }
 
 /* Box art and drawn covers */
-.gc-cover { --sys: #555; container: cover / inline-size; position: relative; display: block; width: 100%; aspect-ratio: 5 / 7; border-radius: 6px; overflow: hidden; background: linear-gradient(160deg, color-mix(in srgb, var(--sys) 85%, #fff 15%), color-mix(in srgb, var(--sys) 70%, #000)); color: #fff; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .12); }
-.gc-cover.disc, .gc-cover.handheld { aspect-ratio: 1; }
-.gc-cover.arcade { aspect-ratio: 3 / 4; }
+.gc-cover { --sys: #555; container: cover / size; position: relative; display: block; width: 100%; aspect-ratio: var(--box, 5 / 7); border-radius: 6px; overflow: hidden; background: linear-gradient(160deg, color-mix(in srgb, var(--sys) 85%, #fff 15%), color-mix(in srgb, var(--sys) 70%, #000)); color: #fff; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .12); }
+.gc-cover.has-art { aspect-ratio: var(--art); }
 .gc-cover.wide { aspect-ratio: 16 / 10; }
 .gc-cover::before { content: ''; position: absolute; inset: 0; background: repeating-linear-gradient(115deg, rgba(255,255,255,.06) 0 10px, transparent 10px 22px); }
 .gc-cover.disc::after { content: ''; position: absolute; width: 46%; aspect-ratio: 1; right: -12%; bottom: -12%; border-radius: 50%; background: radial-gradient(circle, rgba(255,255,255,.85) 0 9%, transparent 10% 13%, rgba(255,255,255,.25) 14% 100%); opacity: .5; }
@@ -33,18 +32,15 @@
   .gc-cover-band, .gc-cover-maker { display: none; }
   .gc-cover-title { font-size: 9.5px; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 }
-/* Box art: scaled to fit (nothing cut off) over a blurred copy of itself, or another backdrop;
-   "fill" crops to the frame instead. */
-.gc-cover img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; opacity: 0; transition: opacity .25s; }
-.gc-cover.fit-fill img { object-fit: cover; }
-.gc-cover-blur { position: absolute; inset: -12%; background: center / cover no-repeat; filter: blur(14px) saturate(1.15) brightness(.78); opacity: 0; transition: opacity .25s; }
-.gc-cover.has-art .gc-cover-blur { opacity: 1; }
-.gc-cover.artbg-console { background: color-mix(in srgb, var(--sys) 45%, #000); }
-.gc-cover.artbg-black { background: #000; }
-.gc-cover.artbg-white { background: #fff; }
-.gc-cover:not(.artbg-blur) .gc-cover-blur, .gc-cover.fit-fill .gc-cover-blur { display: none; }
-.gc-cover.has-art img { opacity: 1; }
-.gc-cover.has-art > span { visibility: hidden; }
+/* Box art: the picture alone, whole and in its own shape. Where a theme's tile has another shape,
+   the picture is centred in it at the largest size that fits; the tile itself shows nothing. */
+.gc-cover-art { position: absolute; inset: 0; margin: auto; width: min(100cqw, 100cqh * var(--art)); height: min(100cqh, 100cqw / var(--art)); border-radius: 3px; overflow: hidden; opacity: 0; transition: opacity .25s, box-shadow .16s; }
+.gc-cover-art img { display: block; width: 100%; height: 100%; object-fit: contain; }
+.gc-cover.has-art { background: none !important; box-shadow: none !important; overflow: visible; border-radius: 0; }
+.gc-cover.has-art .gc-cover-art { opacity: 1; box-shadow: 0 6px 16px rgba(0, 0, 0, .38); }
+.focused .gc-cover.has-art .gc-cover-art, .gc-cover.has-art:focus .gc-cover-art { box-shadow: 0 0 0 3px var(--gc-focus), 0 14px 30px rgba(0, 0, 0, .5); }
+.gc-details-art .gc-cover.has-art .gc-cover-art, .tv-hero-art .gc-cover.has-art .gc-cover-art { box-shadow: 0 18px 40px rgba(0, 0, 0, .55); }
+.gc-cover.has-art > span:not(.gc-cover-art) { visibility: hidden; }
 .gc-cover.has-art::before, .gc-cover.has-art::after { display: none; }
 
 .gc-tile { position: relative; display: flex; flex-direction: column; gap: 6px; padding: 0; border: 0; background: none; text-align: left; min-width: 0; }
@@ -299,6 +295,7 @@
 .ch-tile.blank { background: repeating-linear-gradient(45deg, #f2f4f6 0 8px, #eceff2 8px 16px); border-color: #e2e6ea; }
 .ch-tile-art { position: absolute; inset: 8px 8px 30px; display: flex; gap: 6px; justify-content: center; align-items: center; background: color-mix(in srgb, var(--sys, #9bb) 18%, #fff); border-radius: 10px; overflow: hidden; }
 .ch-tile-art .gc-cover { width: 30%; aspect-ratio: auto; height: 82%; border-radius: 4px; }
+.ch-tile-art .gc-cover.has-art { aspect-ratio: auto; }
 .ch-tile-name { position: relative; z-index: 1; padding: 6px; font-weight: 700; color: #444; text-align: center; background: #fff; }
 .ch-tile.focused { border-color: #34bdf2; transform: scale(1.05); box-shadow: 0 0 0 4px rgba(52, 189, 242, .35), 0 8px 20px rgba(0,0,0,.15); animation: ch-glow 1.4s ease-in-out infinite; }
 @keyframes ch-glow { 50% { box-shadow: 0 0 0 7px rgba(52, 189, 242, .2), 0 8px 20px rgba(0,0,0,.15); } }
@@ -356,7 +353,7 @@
 .theme-spotlight .gc-btn.primary { color: #000; }
 .sp { overflow: hidden; }
 .sp-bg { position: absolute; inset: 0; overflow: hidden; background: radial-gradient(circle at 70% 40%, color-mix(in srgb, var(--sys, #3b5bdb) 60%, #000), #05060d 75%); transition: background .5s; }
-.sp-bg .gc-cover { position: absolute; right: -4%; top: 4%; height: 120%; width: auto; aspect-ratio: auto; opacity: .55; filter: blur(1px) saturate(1.2); transform: rotate(-6deg); border-radius: 18px; }
+.sp-bg .gc-cover { position: absolute; right: -4%; top: 4%; height: 120%; width: auto; aspect-ratio: var(--art); opacity: .55; filter: blur(1px) saturate(1.2); transform: rotate(-6deg); border-radius: 18px; }
 .sp-bg::after { content: ''; position: absolute; inset: 0; background: linear-gradient(90deg, #05060d 25%, rgba(5,6,13,.4) 60%, transparent), linear-gradient(0deg, #05060d, transparent 45%); }
 .sp-top { position: relative; z-index: 2; display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 16px 28px 6px; }
 .sp-tabs { display: flex; gap: 18px; overflow-x: auto; scrollbar-width: none; min-width: 0; }

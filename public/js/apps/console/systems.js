@@ -41,6 +41,18 @@ export const SYSTEMS = {
   arcade: { name: 'Arcade', short: 'Arcade', maker: 'Various', year: 1980, kind: 'arcade', color: '#d81b60', buttons: [[0, 'Button 1'], [8, 'Button 2'], [1, 'Button 3'], [9, 'Button 4'], [10, 'Button 5'], [11, 'Button 6'], [2, 'Insert coin'], [3, 'Start'], ...DPAD] },
 };
 
+// The usual shape of each console's game box (width ÷ height), North American releases: the
+// Super NES and N64 came in landscape boxes; NES, Genesis, Master System, Atari and most others
+// in tall boxes or cases; PlayStation, TurboGrafx-16 and Dreamcast in CD-style square cases (some
+// PlayStation games came in tall long boxes); PSP in tall UMD cases; Game Boy and DS in small,
+// nearly square boxes. A game's own box art, once loaded, uses its own shape.
+export const BOX = {
+  nes: 0.72, snes: 1.38, n64: 1.4, gb: 0.88, gba: 0.92, nds: 0.9, vb: 0.75,
+  segaMD: 0.72, segaMS: 0.72, segaGG: 0.72, segaCD: 0.73, sega32x: 0.72, segaSaturn: 0.72, dreamcast: 1,
+  psx: 1, psp: 0.58, pce: 1, atari2600: 0.72, atari5200: 0.72, atari7800: 0.72, lynx: 0.72, jaguar: 0.72,
+  ngp: 0.8, ws: 0.8, coleco: 0.75, '3do': 0.72, arcade: 0.72,
+};
+
 // Every console also gets these.
 export const HOTKEYS = [[24, 'Quick save'], [25, 'Quick load'], [26, 'Next save slot'], [27, 'Fast forward (hold)'], [28, 'Rewind (hold)'], [29, 'Slow motion (hold)']];
 

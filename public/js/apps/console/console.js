@@ -6,7 +6,7 @@
 import { h, clear, toast, toastError, timeAgo, formatBytes } from '../../ui.js';
 import { icon, appIcon } from '../../icons.js';
 import { openApp } from '../../wm.js';
-import { SYSTEMS, ORDER, CORES, CORE_NAMES, SHADERS, buttonsFor, keyName, padName, padStyle } from './systems.js';
+import { SYSTEMS, BOX, ORDER, CORES, CORE_NAMES, SHADERS, buttonsFor, keyName, padName, padStyle } from './systems.js';
 import { bindings, setBinding, resetBindings, captureKey, capturePad, pads, PLAYERS, isCustomised } from './controls.js';
 import { Nav, blip } from './input.js';
 import { THEMES, THEME_LIST } from './themes.js';
@@ -235,26 +235,28 @@ class GameConsole {
     return el;
   }
 
-  // Box art from the server, or a drawn cover in the console's colours.
+  // Box art from the server, or a drawn cover in the console's colours. Covers take the shape
+  // of the console's usual game box, and real box art its own shape, shown on its own (no
+  // backdrop); where a theme uses tiles of one shape, the art sits centred inside the tile.
   cover(game, { wide = false } = {}) {
     const sys = SYSTEMS[game.system] || {};
     const kind = sys.disc ? 'disc' : sys.kind === 'handheld' ? 'handheld' : sys.kind === 'arcade' ? 'arcade' : 'cart';
-    const el = h('span', { class: `gc-cover ${kind} ${wide ? 'wide' : ''}`, style: { '--sys': sys.color || '#555' } },
+    const box = BOX[game.system] || 0.72;
+    const el = h('span', { class: `gc-cover ${kind} ${wide ? 'wide' : ''}`, style: { '--sys': sys.color || '#555', '--box': String(box), '--art': String(box) } },
       h('span', { class: 'gc-cover-band' }, sys.short || ''),
       h('span', { class: 'gc-cover-title' }, game.title),
       h('span', { class: 'gc-cover-maker' }, sys.maker || ''));
-    // Box art is scaled to fit the frame (nothing cut off) over a blurred copy of itself, unless
-    // you chose otherwise for this game (Box art… in its details).
     const prefs = this.lib?.artPrefs?.[game.id] || {};
-    el.classList.add(`fit-${prefs.fit || 'fit'}`, `artbg-${prefs.bg || 'blur'}`);
     if (!prefs.none && (!this.model.demo || prefs.v) && !GameConsole.noArt.has(game.id)) {
-      const src = `/portal/games/art?id=${game.id}${prefs.v ? `&v=${prefs.v}` : ''}`;
       const img = h('img', { alt: '', loading: 'lazy', decoding: 'async', draggable: 'false' });
-      const blur = h('i', { class: 'gc-cover-blur', style: { 'background-image': `url("${src}")` } });
-      img.onload = () => el.classList.add('has-art');
-      img.onerror = () => { GameConsole.noArt.add(game.id); img.remove(); blur.remove(); };
-      img.src = src;
-      el.append(blur, img);
+      img.onload = () => {
+        if (img.naturalWidth && img.naturalHeight) el.style.setProperty('--art', String(Math.round((img.naturalWidth / img.naturalHeight) * 1000) / 1000));
+        el.classList.add('has-art');
+      };
+      img.onerror = () => { GameConsole.noArt.add(game.id); art.remove(); };
+      img.src = `/portal/games/art?id=${game.id}${prefs.v ? `&v=${prefs.v}` : ''}`;
+      const art = h('span', { class: 'gc-cover-art' }, img);
+      el.append(art);
     }
     return el;
   }
@@ -421,9 +423,7 @@ class GameConsole {
   // ---- Box art ----
 
   // Change a game's box art: your own picture (from the shared folders or this device), the
-  // downloaded one again, or none; and how it's shown — scaled to fit with nothing cut off (the
-  // space around it filled with a blurred copy, the console's colour, black or white), or
-  // filling the frame.
+  // downloaded one again, or none.
   openArtEditor(game, onChanged) {
     this.openLayer('art', (box, layer) => {
       const preview = h('div', { class: 'gc-art-preview' });
@@ -461,7 +461,6 @@ class GameConsole {
           toast('Box art changed', { icon: appIcon.console, timeout: 1500 });
         } catch (err) { toastError(err, 'Couldn’t use that picture'); }
       };
-      const p = prefs();
       box.append(h('div', { class: 'gc-art-in' },
         preview,
         h('div', { class: 'gc-art-opts' },
@@ -473,10 +472,7 @@ class GameConsole {
             this.navBtn('From this device…', fromDevice, 'art:upload'),
             this.navBtn('Download again', () => settings({ refetch: true }), 'art:refetch'),
             this.navBtn('No picture', () => settings({ none: !prefs().none }), 'art:none')),
-          h('h3', {}, 'How it’s shown'),
-          this.optionRow('art:fit', 'Size', [['fit', 'Scale to fit (whole picture)'], ['fill', 'Fill the frame (trims the edges)']], p.fit || 'fit', (v) => settings({ fit: v })),
-          this.optionRow('art:bg', 'Around it', [['blur', 'Blurred copy of the picture'], ['console', 'The console’s colour'], ['black', 'Black'], ['white', 'White']], p.bg || 'blur', (v) => settings({ bg: v }),
-            'Fills the space when the picture’s shape differs from the frame'),
+          h('p', { class: 'gc-small' }, 'Box art is always shown whole, in its own shape, with nothing around it.'),
           h('div', { class: 'gc-row' }, this.navBtn('Done', () => this.closeLayer(), 'art:done', 'primary')))));
       paint();
       layer.onClose = () => { if (layer.dirty) { onChanged?.(); this.render(); } };
