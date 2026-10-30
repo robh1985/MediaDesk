@@ -11,6 +11,7 @@ const fsp = require('node:fs/promises');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const { sniff } = require('./wallpapers');
+const { createFamilyAuth } = require('./family-auth');
 
 const COLLECTIONS = ['members', 'events', 'calendars', 'chores', 'chorelog', 'rewards', 'redemptions', 'lists', 'listitems', 'meals', 'recipes', 'photos'];
 const MAX_PHOTO = 25 * 1024 * 1024;
@@ -420,9 +421,23 @@ function createFamily({ dataDir, mock = false }) {
     } catch { return sendJson(res, 404, { error: 'That photo is gone' }); }
   }
 
-  async function handle(req, res, url, { sendJson, readJson, readBody }) {
+  // Settings anyone signed in may change; the rest are for parents.
+  const OPEN_SETTINGS = new Set(['calendarView', 'timeZone']);
+  const PARENT_COLLECTIONS = new Set(['members', 'calendars']);
+
+  // ctx: { portal: signed in to MediaDesk, ip }
+  async function handle(req, res, url, { sendJson, readJson, readBody, portal = false, ip = '' }) {
     const p = url.pathname.replace(/^\/portal\/family/, '') || '/';
     try {
+      if (p.startsWith('/auth/')) {
+        const done = await auth.route(req, res, p, { portal, ip }, { sendJson, readJson });
+        if (done === null) return sendJson(res, 404, { error: 'Not found' });
+        return done;
+      }
+      const me = auth.userFromReq(req);
+      if (!portal && !me) return sendJson(res, 401, { error: 'Sign in to the Family Organizer', signin: true });
+      const parent = portal || me.role === 'parent';
+      const needParent = () => { if (!parent) throw new FamilyError(403, 'Only a parent can change that'); };
       if (p === '/data' && req.method === 'GET') {
         const since = Number(url.searchParams.get('since'));
         if (since && since === load().rev) return sendJson(res, 200, { rev: since, same: true });
@@ -431,10 +446,12 @@ function createFamily({ dataDir, mock = false }) {
       if (p === '/batch' && req.method === 'POST') {
         const body = await readJson(req);
         if (!Array.isArray(body.ops) || !body.ops.length) throw new FamilyError(400, 'Nothing to change');
+        if (body.ops.some((o) => PARENT_COLLECTIONS.has(o.col))) needParent();
         return sendJson(res, 200, applyOps(body.ops));
       }
       if (p === '/settings' && req.method === 'POST') {
         const body = await readJson(req);
+        if (Object.keys(body || {}).some((k) => !OPEN_SETTINGS.has(k))) needParent();
         const d = load();
         for (const [k, v] of Object.entries(body || {})) { if (v === null) delete d.settings[k]; else d.settings[k] = v; }
         d.rev++;
@@ -442,6 +459,7 @@ function createFamily({ dataDir, mock = false }) {
         return sendJson(res, 200, { rev: d.rev, settings: d.settings });
       }
       if (p === '/feed-token' && req.method === 'POST') {
+        needParent();
         const d = load();
         d.feedToken = crypto.randomBytes(18).toString('base64url');
         d.rev++;
@@ -458,6 +476,7 @@ function createFamily({ dataDir, mock = false }) {
         return sendJson(res, 200, { feeds: list });
       }
       if (p === '/check-feed' && req.method === 'POST') {
+        needParent();
         const body = await readJson(req);
         const f = await feedEvents({ id: `check-${newId()}`, url: feedUrl(body.url) }, true);
         if (f.error) throw new FamilyError(400, f.error);
@@ -496,6 +515,9 @@ function createFamily({ dataDir, mock = false }) {
     if (!m || m[1].length !== d.feedToken.length || !crypto.timingSafeEqual(Buffer.from(m[1]), Buffer.from(d.feedToken))) return sendJson(res, 404, { error: 'Not found' });
     return sendFeed(res);
   }
+
+  const auth = createFamilyAuth({ load, persist });
+  if (mock) auth.seedDemo().catch(() => {});
 
   return { handle, feed };
 }

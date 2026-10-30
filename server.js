@@ -301,6 +301,14 @@ function serveIndex(req, res) {
   res.end(req.method === 'HEAD' ? undefined : indexHtml);
 }
 
+// The Family Organizer on its own page, with the same versioned assets as MediaDesk.
+let familyHtml = null;
+function serveFamilyPage(req, res) {
+  familyHtml ||= fs.readFileSync(path.join(PUBLIC_DIR, 'family.html'), 'utf8').replace(/(href|src)="(css|js)\//g, `$1="/v/${BUILD_ID}/$2/`);
+  res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store, max-age=0' });
+  res.end(req.method === 'HEAD' ? undefined : familyHtml);
+}
+
 function serveStatic(req, res, pathname) {
   let rel = decodeURIComponent(pathname);
   const versioned = /^\/v\/[A-Za-z0-9_-]{1,64}(\/.*)$/.exec(rel);
@@ -675,6 +683,13 @@ async function handle(req, res) {
     return sendJson(res, 200, { locked: true });
   }
 
+  // The Family Organizer has accounts of its own (for using it on its own at /family); someone
+  // signed in to MediaDesk counts as a parent.
+  if (p.startsWith('/portal/family/')) {
+    return family.handle(req, res, url, { sendJson, readJson, readBody, portal: isAuthed(req), ip: req.socket.remoteAddress || '' });
+  }
+  if (p === '/family' || p === '/family/') return serveFamilyPage(req, res);
+
   // The family calendar for phones: its address has its own secret instead of a login.
   if (p.startsWith('/family-feed/') && req.method === 'GET') return family.feed(req, res, p, { sendJson });
 
@@ -735,7 +750,6 @@ async function handle(req, res) {
   if (p.startsWith('/portal/plex/')) return plexSignIn(req, res, p);
   if (p.startsWith('/portal/games/')) return games.handle(req, res, url, { sendJson, readJson });
   if (p.startsWith('/portal/archive/')) return archive.handle(req, res, url, { sendJson, readJson });
-  if (p.startsWith('/portal/family/')) return family.handle(req, res, url, { sendJson, readJson, readBody });
 
   const m = p.match(/^\/api\/(radarr|sonarr|nzbget|jellyfin|plex|pikvm)(?:\/(.*))?$/);
   if (!m) return sendJson(res, 404, { error: 'Unknown endpoint' });

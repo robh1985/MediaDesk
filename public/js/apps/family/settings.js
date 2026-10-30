@@ -5,6 +5,7 @@ import { h, clear, toast, toastError } from '../../ui.js';
 import { sheet, field, input, select, toggle, avatar, memberPicker, emojiButton, colorPicker, COLORS, ICONS, parentGate, lockParent } from './shared.js';
 import { SLOTS } from './meals.js';
 import { portal, state, appPref } from '../../api.js';
+import { familyAuth } from './store.js';
 
 const PROVIDERS = [
   ['Google Calendar', 'On a computer, open Google Calendar → Settings → pick the calendar → “Integrate calendar” → copy the “Secret address in iCal format”.'],
@@ -24,7 +25,10 @@ export class SettingsView {
   render(el, section) {
     this.el = el;
     if (section) this.section = section;
-    const sections = [['profiles', 'Profiles'], ['calendars', 'Calendars'], ['general', 'General'], ['display', 'Photo frame & sleep'], ['parents', 'Parent PIN']];
+    const session = this.app.session || {};
+    const sections = [['profiles', 'Profiles'], ['calendars', 'Calendars'], ['general', 'General'], ['display', 'Photo frame & sleep'], ['parents', 'Parent PIN'],
+      session.parent ? ['users', 'Users'] : null, session.user ? ['account', 'My account'] : null].filter(Boolean);
+    if (!sections.some(([id]) => id === this.section)) this.section = sections[0][0];
     const nav = h('div', { class: 'fam-seg fam-settings-nav' }, sections.map(([id, label]) => h('button', { class: this.section === id ? 'on' : '', onclick: () => { this.section = id; this.render(el); } }, label)));
     const body = h('div', { class: 'fam-settings' });
     clear(el, h('div', { class: 'fam-toolbar' }, h('div', { class: 'fam-toolbar-title' }, 'Settings'), h('div', { class: 'fam-spacer' }), nav), body);
@@ -210,7 +214,7 @@ export class SettingsView {
         s.location ? h('button', { class: 'fam-btn', onclick: () => { this.save({ location: null }, 'Weather off'); this.app.loadWeather(true); place.value = ''; } }, 'Turn weather off') : null),
       this.card('Meals', h('div', { class: 'fam-row-wrap' }, SLOTS.map((sl) => toggle(`${sl.emoji} ${sl.label}`, slots.has(sl.id), (v) => { if (v) slots.add(sl.id); else slots.delete(sl.id); this.save({ mealSlots: SLOTS.map((x) => x.id).filter((id) => slots.has(id)) }, null); })))),
       this.card('Chores', toggle('Celebrate when a chore is done', s.celebrate !== false, (v) => this.save({ celebrate: v }, null)),
-        toggle('Show the Family widget on the desktop', appPref('family', 'widget') !== false, async (v) => {
+        !this.app.session?.portal ? null : toggle('Show the Family widget on the desktop', appPref('family', 'widget') !== false, async (v) => {
           try { state.config = await portal.saveConfig({ appSettings: { family: { widget: v } } }); window.dispatchEvent(new Event('mediadesk:family-changed')); } catch (err) { toastError(err); }
         }),
         toggle('Remind me about events while the organizer is open', s.reminders !== false, (v) => { this.save({ reminders: v }, null); if (v && 'Notification' in window && Notification.permission === 'default') Notification.requestPermission(); })));
@@ -237,6 +241,120 @@ export class SettingsView {
         toggle('Sleep every night', sleep.on, (v) => saveSleep({ on: v })),
         h('div', { class: 'fam-row-wrap' }, field('From', from), field('Until', to)),
         h('button', { class: 'fam-btn', onclick: () => this.app.sleep(true) }, h('span', { html: ICONS.sleep }), 'Sleep now')));
+  }
+
+  // --- Users (parents only) -----------------------------------------------------------
+
+  async draw_users(body) {
+    const card = this.card('Accounts', h('div', { class: 'fam-muted' }, 'Loading…'));
+    const invites = this.card('Invites waiting');
+    const make = this.card('Invite someone');
+    body.append(make, invites, card);
+    let data;
+    try { data = await familyAuth.users(); } catch (err) { clear(card, h('h3', {}, 'Accounts'), h('div', { class: 'fam-error' }, err.message)); return; }
+    const members = this.store.members();
+    const profileName = (id) => this.store.member(id)?.name || '';
+    const origin = location.origin;
+    const linkFor = (code) => `${origin}/family?invite=${encodeURIComponent(code)}`;
+    const copy = (text, what) => navigator.clipboard?.writeText(text).then(() => toast(`${what} copied`, { type: 'success', timeout: 1500 }), () => toast('Select it and copy it'));
+
+    // Make an invite: for a parent or a family member, optionally tied to a profile.
+    const role = select([['member', 'Family member'], ['parent', 'Parent (can manage accounts and settings)']], 'member');
+    const profile = select([['', 'No profile'], ...members.map((m) => [m.id, `${m.emoji || ''} ${m.name}`.trim()])], '');
+    const days = select([['1', '1 day'], ['7', '7 days'], ['30', '30 days']], '7');
+    const result = h('div', { class: 'fam-invite-result' });
+    clear(make, h('h3', {}, 'Invite someone'),
+      h('p', { class: 'fam-muted' }, 'Make an invite code and give it to the person. They open the Family Organizer’s own page and create their account with it, entering their name, email, a username and a password. Each code works once.'),
+      h('div', { class: 'fam-row-wrap' }, field('They’ll be', role), field('Their profile', profile), field('Code works for', days)),
+      h('button', { class: 'fam-btn primary', onclick: async () => {
+        try {
+          const { invite } = await familyAuth.createInvite({ role: role.value, profile: profile.value || null, days: Number(days.value) });
+          clear(result, h('div', { class: 'fam-invite-code' }, invite.code),
+            h('div', { class: 'fam-copy-row' }, input({ value: linkFor(invite.code), readonly: true, onfocus: (e) => e.target.select() }),
+              h('button', { class: 'fam-btn', onclick: () => copy(linkFor(invite.code), 'Link') }, h('span', { html: ICONS.copy }), 'Copy link'),
+              h('button', { class: 'fam-btn', onclick: () => copy(invite.code, 'Code') }, 'Copy code')));
+          // Keep showing the new code after the list of invites is redrawn.
+          this.lastInvite = result;
+          this.render(this.el, 'users');
+        } catch (err) { toastError(err, 'Couldn’t make the invite'); }
+      } }, h('span', { html: ICONS.plus }), 'Make invite code'), result);
+    if (this.lastInvite) result.replaceWith(this.lastInvite);
+
+    clear(invites, h('h3', {}, 'Invites waiting'), data.invites.length ? h('div', { class: 'fam-cal-list' }, data.invites.map((i) => h('div', { class: 'fam-cal-row' },
+      h('div', { class: 'fam-profile-main' }, h('b', { class: 'fam-mono' }, i.code),
+        h('small', {}, [i.role === 'parent' ? 'Parent' : 'Family member', i.profile ? profileName(i.profile) : null, `works until ${new Date(i.expires).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`, i.by ? `by ${i.by}` : null].filter(Boolean).join(' · '))),
+      h('button', { class: 'fam-icon-btn', title: 'Copy link', html: ICONS.copy, onclick: () => copy(linkFor(i.code), 'Link') }),
+      h('button', { class: 'fam-icon-btn', title: 'Cancel invite', html: ICONS.trash, onclick: async () => { try { await familyAuth.deleteInvite(i.code); this.render(this.el, 'users'); } catch (err) { toastError(err); } } })))) : h('div', { class: 'fam-muted small' }, 'None.'));
+    if (!data.invites.length) invites.hidden = true;
+
+    clear(card, h('h3', {}, 'Accounts'),
+      h('p', { class: 'fam-muted' }, `Everyone who signs in to the Family Organizer’s own page (${origin}/family). Parents can manage accounts, settings, profiles and calendars; family members can use everything else.`),
+      data.users.length ? h('div', { class: 'fam-cal-list' }, data.users.map((u) => {
+        const m = u.profile ? this.store.member(u.profile) : null;
+        return h('div', { class: `fam-cal-row ${u.disabled ? 'fam-off' : ''}`, style: { '--c': m?.color || '#868e96' } },
+          m ? avatar(m, 'sm') : h('span', { class: 'fam-avatar sm' }, (u.first[0] || '?').toUpperCase()),
+          h('div', { class: 'fam-profile-main' }, h('b', {}, `${u.first} ${u.last}`, u.id === data.me ? ' (you)' : ''),
+            h('small', {}, [u.username, u.email, u.role === 'parent' ? 'Parent' : 'Family member', u.disabled ? 'Turned off' : null, u.lastLogin ? `last signed in ${new Date(u.lastLogin).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}` : null].filter(Boolean).join(' · '))),
+          h('button', { class: 'fam-icon-btn', title: 'Edit', html: ICONS.edit, onclick: () => this.editUser(u, data.me) }));
+      })) : h('div', { class: 'fam-muted small' }, 'No accounts yet. Make an invite code for a parent above, then create the account with it on the Family Organizer’s own page.'));
+  }
+
+  async editUser(u, meId) {
+    const first = input({ value: u.first, required: true, maxlength: 60 });
+    const last = input({ value: u.last, required: true, maxlength: 60 });
+    const email = input({ type: 'email', value: u.email, required: true, maxlength: 200 });
+    const role = select([['member', 'Family member'], ['parent', 'Parent']], u.role);
+    const profile = select([['', 'No profile'], ...this.store.members().map((m) => [m.id, `${m.emoji || ''} ${m.name}`.trim()])], u.profile || '');
+    const off = toggle('Turn this account off (they can’t sign in)', u.disabled);
+    const password = input({ type: 'password', autocomplete: 'new-password', placeholder: 'Leave empty to keep their password', minlength: 8 });
+    const err = h('div', { class: 'fam-error' });
+    const out = await sheet(this.app.root, {
+      title: `${u.first} ${u.last}`,
+      body: h('div', { class: 'fam-form' }, h('div', { class: 'fam-muted' }, `Username: ${u.username}`),
+        h('div', { class: 'fam-row-wrap' }, field('First name', first), field('Last name', last)), field('Email', email),
+        h('div', { class: 'fam-row-wrap' }, field('Role', role), field('Profile', profile)),
+        u.id === meId ? null : off, field('New password', password, 'At least 8 characters. Signs them out everywhere.'), err),
+      actions: [u.id === meId ? null : { label: 'Remove account', danger: true, left: true, value: 'delete' }, { label: 'Cancel' }, { label: 'Save', primary: true, submit: true, onClick: async (close) => {
+        try {
+          await familyAuth.updateUser(u.id, { first: first.value, last: last.value, email: email.value, role: role.value, profile: profile.value || null, ...(u.id === meId ? {} : { disabled: off.querySelector('input').checked }), ...(password.value ? { password: password.value } : {}) });
+          close('saved');
+        } catch (e) { err.textContent = e.message; }
+      } }],
+    });
+    if (out === 'delete') {
+      const sure = await sheet(this.app.root, { title: 'Remove account?', body: h('p', {}, `${u.first} ${u.last} won’t be able to sign in. Their family profile, events and chores stay.`), actions: [{ label: 'Cancel' }, { label: 'Remove', danger: true, value: true }] });
+      if (sure) { try { await familyAuth.deleteUser(u.id); } catch (e) { toastError(e); } }
+    }
+    if (out) this.render(this.el, 'users');
+  }
+
+  // --- My account -----------------------------------------------------------------------
+
+  draw_account(body) {
+    const u = this.app.session.user;
+    const first = input({ value: u.first, maxlength: 60, autocomplete: 'given-name' });
+    const last = input({ value: u.last, maxlength: 60, autocomplete: 'family-name' });
+    const email = input({ type: 'email', value: u.email, maxlength: 200, autocomplete: 'email' });
+    const current = input({ type: 'password', autocomplete: 'current-password' });
+    const next = input({ type: 'password', autocomplete: 'new-password', minlength: 8 });
+    const again = input({ type: 'password', autocomplete: 'new-password' });
+    const err = h('div', { class: 'fam-error' });
+    body.append(this.card('My account',
+      h('div', { class: 'fam-muted' }, `Username: ${u.username} · ${u.role === 'parent' ? 'Parent' : 'Family member'}`),
+      h('div', { class: 'fam-row-wrap' }, field('First name', first), field('Last name', last)), field('Email', email),
+      h('h3', {}, 'Change password'), field('Current password', current), h('div', { class: 'fam-row-wrap' }, field('New password', next), field('New password again', again)), err,
+      h('div', { class: 'fam-row-wrap' },
+        h('button', { class: 'fam-btn primary', onclick: async () => {
+          err.textContent = '';
+          if (next.value && next.value !== again.value) { err.textContent = 'The new passwords don’t match'; return; }
+          try {
+            const r = await familyAuth.updateMe({ first: first.value, last: last.value, email: email.value, ...(next.value ? { password: current.value, newPassword: next.value } : {}) });
+            this.app.session.user = r.user;
+            toast('Saved', { type: 'success', timeout: 1500 });
+            this.render(this.el, 'account');
+          } catch (e) { err.textContent = e.message; }
+        } }, 'Save'),
+        h('button', { class: 'fam-btn danger', onclick: async () => { try { await familyAuth.logout(); } catch { /* signed out anyway */ } location.reload(); } }, 'Sign out'))));
   }
 
   // --- Parent PIN ------------------------------------------------------------------------

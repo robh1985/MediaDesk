@@ -6,14 +6,14 @@
 
 import { h, clear, toast } from '../../ui.js';
 import { appIcon } from '../../icons.js';
-import { Store } from './store.js';
+import { Store, familyAuth } from './store.js';
 import { CalendarView } from './calendar.js';
 import { ChoresView, RewardsView } from './chores.js';
 import { MealsView } from './meals.js';
 import { ListsView } from './lists.js';
 import { PhotosView, photoFrame, sleepScreen } from './photos.js';
 import { SettingsView } from './settings.js';
-import { avatar, sheet, ICONS, weatherIcon } from './shared.js';
+import { avatar, sheet, ICONS, weatherIcon, setParentSession } from './shared.js';
 import { expand, addDays, fmtTime } from './dates.js';
 
 let cssLoaded = false;
@@ -61,7 +61,14 @@ class FamilyOrganizer {
     win.body.classList.add('fam-window');
     clear(win.body, this.root);
     clear(this.root, h('div', { class: 'fam-loading' }, h('div', { class: 'spinner' }), 'Opening the family organizer…'));
-    this.store.load().then(() => this.start(opts)).catch((err) => {
+    this.standalone = Boolean(opts.standalone);
+    Promise.all([familyAuth.session(), this.store.load()]).then(([session]) => {
+      // Who's using it: a family account (on its own at /family) or MediaDesk's own sign-in.
+      this.session = session;
+      // A parent's own account skips the parent PIN; MediaDesk (often a shared screen) still asks.
+      setParentSession(session.user?.role === 'parent');
+      this.start(opts);
+    }).catch((err) => {
       clear(this.root, h('div', { class: 'fam-empty' }, h('div', { class: 'fam-empty-emoji' }, '😕'), `The organizer couldn’t load: ${err.message}`, h('button', { class: 'fam-btn primary', onclick: () => { this.destroy(); familyApp.open(win, opts); } }, 'Try again')));
     });
   }
@@ -119,10 +126,28 @@ class FamilyOrganizer {
       this.filterEl,
       h('button', { class: 'fam-btn fam-quick-btn', title: 'Type events the way you’d say them', onclick: () => this.calendar.quickAdd() }, h('span', { html: ICONS.sparkle }), h('span', { class: 'fam-hide-sm' }, 'Quick add')),
       h('button', { class: 'fam-btn primary', onclick: () => this.add() }, h('span', { html: ICONS.plus }), h('span', { class: 'fam-hide-sm' }, 'Add')),
-      h('button', { class: 'fam-icon-btn fam-hide-sm', title: 'Full screen', html: ICONS.expand, onclick: () => this.fullscreen() }));
+      h('button', { class: 'fam-icon-btn fam-hide-sm', title: 'Full screen', html: ICONS.expand, onclick: () => this.fullscreen() }),
+      this.session?.user ? h('button', { class: 'fam-account-btn', title: `Signed in as ${this.session.user.first} ${this.session.user.last}`, onclick: () => this.accountMenu() },
+        `${this.session.user.first[0] || ''}${this.session.user.last[0] || ''}`.toUpperCase()) : null);
     this.main = h('main', { class: 'fam-main' });
     clear(this.root, this.rail, h('div', { class: 'fam-content' }, this.header, this.main));
     this.drawFilter();
+  }
+
+  // The signed-in account: your details, and signing out.
+  accountMenu() {
+    const u = this.session.user;
+    sheet(this.root, {
+      title: `${u.first} ${u.last}`,
+      body: h('div', { class: 'fam-form' },
+        h('div', { class: 'fam-muted' }, `${u.username} · ${u.email}`),
+        h('div', { class: 'fam-muted small' }, u.role === 'parent' ? 'Parent' : 'Family member')),
+      actions: [
+        { label: 'Sign out', danger: true, left: true, onClick: async (close) => { close(); try { await familyAuth.logout(); } catch { /* signed out anyway */ } location.reload(); } },
+        { label: 'My account', onClick: (close) => { close(); this.go('settings', 'account'); } },
+        u.role === 'parent' ? { label: 'Users', primary: true, onClick: (close) => { close(); this.go('settings', 'users'); } } : { label: 'Close', primary: true },
+      ],
+    });
   }
 
   go(tab, section) {

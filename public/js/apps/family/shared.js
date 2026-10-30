@@ -135,9 +135,12 @@ export function weatherIcon(code, day = true) {
 // Parent PIN: when one is set, settings, rewards and other grown-up things ask for it (once
 // every few minutes).
 let unlockedUntil = 0;
+// Signed in as a parent (or to MediaDesk itself): no PIN needed.
+let parentSession = false;
+export const setParentSession = (v) => { parentSession = Boolean(v); };
 export async function parentGate(host, store, why = 'This needs a parent') {
   const pin = store.settings.parentPin;
-  if (!pin || Date.now() < unlockedUntil) return true;
+  if (parentSession || !pin || Date.now() < unlockedUntil) return true;
   const box = input({ type: 'password', inputmode: 'numeric', autocomplete: 'off', maxlength: 8, autofocus: true, class: 'fam-input fam-pin' });
   const err = h('div', { class: 'fam-error' });
   const ok = await sheet(host, {

@@ -9,9 +9,26 @@ async function call(path, { method = 'GET', body, raw } = {}) {
   const res = await fetch(`${BASE}/${path}`, { method, headers, credentials: 'same-origin', body: raw ? body : body !== undefined ? JSON.stringify(body) : undefined });
   const data = await res.json().catch(() => ({}));
   if (data.code === 'stale-page') window.dispatchEvent(new Event('mediadesk:stale'));
+  // Signed out (the session ended, or the account was turned off): the page shows the sign-in.
+  if (res.status === 401 && data.signin) window.dispatchEvent(new Event('family:signedout'));
   if (!res.ok) throw Object.assign(new Error(data.error || `HTTP ${res.status}`), { status: res.status });
   return data;
 }
+
+// Accounts (for the organizer on its own, at /family).
+export const familyAuth = {
+  session: () => call('auth/session'),
+  login: (username, password) => call('auth/login', { method: 'POST', body: { username, password } }),
+  logout: () => call('auth/logout', { method: 'POST', body: {} }),
+  invite: (code) => call(`auth/invite?code=${encodeURIComponent(code)}`),
+  signup: (details) => call('auth/signup', { method: 'POST', body: details }),
+  updateMe: (details) => call('auth/me', { method: 'POST', body: details }),
+  users: () => call('auth/users'),
+  updateUser: (id, patch) => call(`auth/users/${id}`, { method: 'POST', body: patch }),
+  deleteUser: (id) => call(`auth/users/${id}`, { method: 'DELETE' }),
+  createInvite: (opts) => call('auth/invites', { method: 'POST', body: opts }),
+  deleteInvite: (code) => call(`auth/invites/${encodeURIComponent(code)}`, { method: 'DELETE' }),
+};
 
 export class Store {
   constructor() {
