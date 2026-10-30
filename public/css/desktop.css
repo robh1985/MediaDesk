@@ -2033,3 +2033,4 @@ button.notes-st:hover { background: var(--hover); color: var(--text); }
   .cv-lists { grid-template-columns: 1fr 1fr; min-height: 200px; }
   .cv-sym { display: none; }
 }
+.about-actions { justify-content: center; }

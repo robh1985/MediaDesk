@@ -798,5 +798,8 @@ function renderAbout(container) {
       h('div', {}, h('kbd', {}, 'Alt'), ' + ', h('kbd', {}, 'W'), ' Close window'),
       h('div', {}, 'Drag a window to a screen edge to snap it; to the top to maximise.'),
       h('div', {}, 'On touch screens, press and hold for the right-click menu.')),
-    state.config.auth ? h('button', { class: 'btn', onclick: () => portal.logout().then(() => location.reload()) }, h('span', { html: icon.lock }), 'Log out') : null));
+    h('div', { class: 'btn-row about-actions' },
+      // The same as "Reload now" after an update: loads MediaDesk afresh.
+      h('button', { class: 'btn', title: 'Load MediaDesk again (picks up an update)', onclick: () => location.reload() }, h('span', { html: icon.refresh }), 'Reload'),
+      state.config.auth ? h('button', { class: 'btn', onclick: () => portal.logout().then(() => location.reload()) }, h('span', { html: icon.lock }), 'Log out') : null)));
 }
