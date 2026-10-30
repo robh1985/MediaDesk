@@ -15,6 +15,7 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const zlib = require('node:zlib');
 const { pipeline } = require('node:stream/promises');
+const { bestMatch, indexNames } = require('./artmatch');
 
 const EJS_VERSION = '4.2.3';
 const REGISTRY = (process.env.NPM_REGISTRY || 'https://registry.npmjs.org').replace(/\/+$/, '');
@@ -461,7 +462,7 @@ function createGames({ dataDir, getFolder, mock = false, sample = null }) {
         color: f.ext === 'gbc' || /\bcolor\b/i.test(tags.join(' ')) ? true : undefined,
         art: pic ? true : undefined, parts: tracks,
         // Where its saves and box art go in the layout: Saves/<console>/<saveFolder>/<saveName> - …
-        saveFolder: folderName || fileBase, saveName: base,
+        saveFolder: folderName || fileBase, saveName: base, fileBase,
       });
     }
     games.sort((a, b) => a.title.localeCompare(b.title, undefined, { sensitivity: 'base', numeric: true }));
@@ -661,17 +662,36 @@ function createGames({ dataDir, getFolder, mock = false, sample = null }) {
     if (!sys?.art || mock) throw new GameError(404, 'No cover');
     const set = game.system === 'gb' && (game.color || extOf(game.file) === 'gbc') ? 'Nintendo - Game Boy Color' : sys.art;
     const file = libretroFile(game);
-    const miss = `${file}.miss`;
+    const miss = `${file}.nomatch`;
     if (fs.existsSync(file)) return sendPlain(res, file, 'max-age=604800');
     // Don't keep asking for covers that don't exist (try again after a week).
     const missed = await fsp.stat(miss).catch(() => null);
     if (missed && Date.now() - missed.mtimeMs < 7 * 864e5) throw new GameError(404, 'No cover');
-    const names = [game.base, game.base.replace(/\s*\[[^\]]*\]/g, '').trim()];
+    // The closest name in libretro's list for this console, then the game's own names as they are.
+    const index = await artIndex(set);
+    const match = index ? bestMatch(index, [...new Set([game.base, game.fileBase || game.base])]) : null;
+    const names = [match, game.base, game.base.replace(/\s*\[[^\]]*\]/g, '').trim(), game.fileBase].filter(Boolean);
     for (const n of [...new Set(names)]) {
       try {
-        const r = await fetch(`${ART_HOST}/${encodeURIComponent(set)}/Named_Boxarts/${encodeURIComponent(artName(n))}.png`, { signal: AbortSignal.timeout(10e3) });
-        if (!r.ok || !/image/.test(r.headers.get('content-type') || 'image/png')) continue;
-        const buf = Buffer.from(await r.arrayBuffer());
+        // From libretro's thumbnail server, or the same picture from its GitHub repository.
+        let buf = null;
+        for (const url of [`${ART_HOST}/${encodeURIComponent(set)}/Named_Boxarts/${encodeURIComponent(artName(n))}.png`,
+          `https://raw.githubusercontent.com/libretro-thumbnails/${encodeURIComponent(set.replace(/ /g, '_'))}/master/Named_Boxarts/${encodeURIComponent(artName(n))}.png`]) {
+          try {
+            const r = await fetch(url, { signal: AbortSignal.timeout(15e3) });
+            if (!r.ok || !/image|text\/plain/.test(r.headers.get('content-type') || 'image/png')) continue;
+            let b = Buffer.from(await r.arrayBuffer());
+            // In the repository, some pictures are links: the file holds the real picture's name.
+            for (let hop = 0; hop < 2 && !imageType(b) && b.length < 512 && /\.png\s*$/i.test(b.toString('utf8')); hop++) {
+              const target = b.toString('utf8').trim().split('/').pop();
+              const r2 = await fetch(url.slice(0, url.lastIndexOf('/') + 1) + encodeURIComponent(target), { signal: AbortSignal.timeout(15e3) });
+              if (!r2.ok) break;
+              b = Buffer.from(await r2.arrayBuffer());
+            }
+            if (imageType(b)) { buf = b; break; }
+          } catch { /* the next one */ }
+        }
+        if (!buf) continue;
         await fsp.mkdir(path.dirname(file), { recursive: true });
         await fsp.writeFile(file, buf);
         return sendPlain(res, file, 'max-age=604800');
@@ -680,6 +700,51 @@ function createGames({ dataDir, getFolder, mock = false, sample = null }) {
     await fsp.mkdir(path.dirname(miss), { recursive: true }).catch(() => {});
     await fsp.writeFile(miss, '').catch(() => {});
     throw new GameError(404, 'No cover');
+  }
+
+  // libretro-thumbnails' list of box art names for a console, kept for a month.
+  const indexes = new Map(); // set -> { at, index } or a pending promise
+  async function artIndex(set) {
+    const mem = indexes.get(set);
+    if (mem && !(mem instanceof Promise) && Date.now() - mem.at < 864e5) return mem.index;
+    if (mem instanceof Promise) return mem;
+    const work = (async () => {
+      const file = path.join(artDir, squash(set), 'boxart-names.json');
+      const st = await fsp.stat(file).catch(() => null);
+      let names = null;
+      if (st && Date.now() - st.mtimeMs < 30 * 864e5) names = JSON.parse(await fsp.readFile(file, 'utf8').catch(() => 'null'));
+      if (!names) {
+        try {
+          const r = await fetch(`${ART_HOST}/${encodeURIComponent(set)}/Named_Boxarts/`, { signal: AbortSignal.timeout(30e3) });
+          if (r.ok) {
+            const html = await r.text();
+            names = [...new Set([...html.matchAll(/href="([^"?#]+?)\.png"/gi)].map((m) => { try { return decodeURIComponent(m[1]).split('/').pop(); } catch { return null; } }).filter(Boolean))];
+            if (names.length) { await fsp.mkdir(path.dirname(file), { recursive: true }); await fsp.writeFile(file, JSON.stringify(names)); }
+          }
+        } catch { /* try GitHub */ }
+        // The same names from libretro-thumbnails' repository on GitHub.
+        if (!names?.length) {
+          try {
+            const api = `https://api.github.com/repos/libretro-thumbnails/${encodeURIComponent(set.replace(/ /g, '_'))}/git/trees`;
+            const opts = { headers: { Accept: 'application/vnd.github+json', 'User-Agent': COMMONS_UA }, signal: AbortSignal.timeout(30e3) };
+            const root = await (await fetch(`${api}/HEAD`, opts)).json();
+            const sha = root.tree?.find((t) => t.path === 'Named_Boxarts')?.sha;
+            if (sha) {
+              const tree = await (await fetch(`${api}/${sha}`, opts)).json();
+              names = (tree.tree || []).map((t) => t.path).filter((n) => /\.png$/i.test(n)).map((n) => n.slice(0, -4));
+              if (names.length) { await fsp.mkdir(path.dirname(file), { recursive: true }); await fsp.writeFile(file, JSON.stringify(names)); }
+            }
+          } catch { /* offline: try the game's own names */ }
+        }
+        // An older list is better than none.
+        if (!names?.length && st) names = JSON.parse(await fsp.readFile(file, 'utf8').catch(() => 'null'));
+      }
+      const index = names?.length ? indexNames(names) : null;
+      indexes.set(set, { at: index ? Date.now() : Date.now() - 864e5 + 10 * 60e3, index });
+      return index;
+    })();
+    indexes.set(set, work);
+    return work;
   }
 
   // ---- Console pictures ----
@@ -1086,7 +1151,7 @@ function createGames({ dataDir, getFolder, mock = false, sample = null }) {
         if (typeof body.none === 'boolean') cur.none = body.none;
         if (body.refetch) {
           const f = libretroFile(game);
-          if (f) { await fsp.rm(f, { force: true }); await fsp.rm(`${f}.miss`, { force: true }); }
+          if (f) { await fsp.rm(f, { force: true }); await fsp.rm(`${f}.nomatch`, { force: true }); }
           await removeGameArt(game);
           cur.none = false;
         }

@@ -4,7 +4,7 @@ FROM node:22-alpine
 ARG WITH_OFFICE=false
 RUN apk add --no-cache ffmpeg 7zip && if [ "$WITH_OFFICE" = "true" ]; then apk add --no-cache libreoffice ttf-dejavu ttf-liberation; fi
 WORKDIR /app
-COPY package.json server.js files.js appsettings.js notify.js mock.js mock-plex.js mock-games.js mock-pikvm.js games.js pikvm.js wallpapers.js media.js archive.js family.js ./
+COPY package.json server.js files.js appsettings.js notify.js mock.js mock-plex.js mock-games.js mock-pikvm.js games.js pikvm.js wallpapers.js media.js archive.js family.js artmatch.js ./
 COPY public ./public
 ENV NODE_ENV=production PORT=8080 CONFIG_PATH=/config/config.json
 VOLUME /config
