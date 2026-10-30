@@ -55,7 +55,7 @@ const ALLOWED = {
   'pikvm.video': ['stream', 'snapshots'],
   'plex.quality': ['original', '20000', '12000', '8000', '4000', '2000', '1500', '720'],
   'screensaver.timeoutMin': [1, 2, 3, 5, 10, 15, 20, 30, 45, 60],
-  'screensaver.saver': ['random', 'toasters', 'maze', 'pipes', 'starfield', 'mystify', 'text3d', 'bubbles', 'ribbons', 'flurry', 'hello'],
+  'screensaver.saver': ['random', 'toasters', 'maze', 'pipes', 'starfield', 'mystify', 'text3d', 'bubbles', 'ribbons', 'flurry', 'hello', 'matrix'],
 };
 
 // Stored settings merged over the defaults.

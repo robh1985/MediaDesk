@@ -553,6 +553,86 @@ function hello(container) {
 }
 
 // ---------------------------------------------------------------------------
+// Matrix — the falling green code from The Matrix: columns of mirrored half-width katakana,
+// digits and symbols raining down at different speeds, each led by a bright white-green
+// character, with trails that fade and flicker as their characters change.
+// ---------------------------------------------------------------------------
+
+const MATRIX_GLYPHS = [...'ｦｱｳｴｵｶｷｹｺｻｼｽｾｿﾀﾂﾃﾅﾆﾇﾈﾊﾋﾎﾏﾐﾑﾒﾓﾔﾕﾗﾘﾜ0123456789Z:・.="*+-<>¦|╌ç'];
+const glyph = () => MATRIX_GLYPHS[(Math.random() * MATRIX_GLYPHS.length) | 0];
+
+function matrix(container) {
+  const { ctx: g, canvas, size, dispose } = canvasIn(container, { dprCap: 1.25 });
+  let fs, cols, rows, cells, drops;
+  // Each cell remembers its character and how bright it is; brightness fades over time.
+  const build = () => {
+    fs = Math.max(14, Math.min(26, Math.round(Math.min(size.w, size.h) / 42)));
+    cols = Math.ceil(size.w / fs);
+    rows = Math.ceil(size.h / fs) + 1;
+    cells = Array.from({ length: cols * rows }, () => ({ ch: glyph(), b: 0, fade: 1 }));
+    drops = [];
+    for (let c = 0; c < cols; c++) {
+      drops.push(newDrop(c, -rand(0, rows * 1.5)));
+      // Some columns carry a second stream.
+      if (Math.random() < 0.18) drops.push(newDrop(c, -rand(rows * 0.8, rows * 2.4)));
+    }
+  };
+  const newDrop = (c, y = -rand(0, rows * 0.6)) => ({ c, y, last: Math.floor(y), speed: rand(7, 24), fade: rand(0.35, 1.1) });
+  build();
+  let built = `${size.w}x${size.h}`;
+  const font = () => `${fs}px "Matrix Code NFI", "MS Gothic", "Hiragino Kaku Gothic ProN", "Hiragino Sans", "Noto Sans Mono CJK JP", "Noto Sans JP", "Yu Gothic", monospace`;
+  g.fillStyle = '#000';
+  g.fillRect(0, 0, size.w, size.h);
+  const stop = loop((dt) => {
+    if (built !== `${size.w}x${size.h}`) { build(); built = `${size.w}x${size.h}`; }
+    // Move the streams; each cell a head passes gets a new character at full brightness.
+    for (const d of drops) {
+      d.y += d.speed * dt;
+      const row = Math.floor(d.y);
+      for (let r = Math.max(0, d.last + 1); r <= row && r < rows; r++) {
+        const cell = cells[r * cols + d.c];
+        cell.ch = glyph(); cell.b = 1; cell.fade = d.fade; cell.head = performance.now();
+      }
+      d.last = row;
+      // Once its whole trail has left the screen, it starts again from the top after a pause.
+      if (d.y > rows + d.speed / (d.fade * 0.9)) Object.assign(d, newDrop(d.c));
+    }
+    // Draw: mirrored, as in the film.
+    const dpr = canvas.width / size.w;
+    g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    g.fillStyle = '#000';
+    g.fillRect(0, 0, size.w, size.h);
+    g.setTransform(-dpr, 0, 0, dpr, canvas.width, 0);
+    g.font = font();
+    g.textAlign = 'center';
+    g.textBaseline = 'top';
+    const now = performance.now();
+    const heads = [];
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        const cell = cells[r * cols + c];
+        if (cell.b <= 0.02) continue;
+        cell.b -= dt * cell.fade * 0.9;
+        // Characters in the trail keep changing now and then.
+        if (Math.random() < 0.012) cell.ch = glyph();
+        const x = c * fs + fs / 2, y = r * fs;
+        if (now - cell.head < 70) { heads.push([cell.ch, x, y]); continue; }
+        const b = Math.max(0, cell.b);
+        g.fillStyle = `rgba(${Math.round(30 * b * b)}, ${Math.round(110 + 145 * b)}, ${Math.round(60 * b * b)}, ${Math.min(1, b * 1.15)})`;
+        g.fillText(cell.ch, x, y);
+      }
+    }
+    // The leading characters glow white-green.
+    g.shadowColor = '#7dff9b';
+    g.shadowBlur = fs * 0.6;
+    g.fillStyle = '#e6ffe9';
+    for (const [ch, x, y] of heads) g.fillText(ch, x, y);
+    g.shadowBlur = 0;
+  });
+  return () => { stop(); dispose(); };
+}
+
+// ---------------------------------------------------------------------------
 
 export const SCREENSAVERS = [
   { id: 'toasters', name: 'Flying Toasters', origin: 'After Dark (Mac & Windows)', start: flyingToasters },
@@ -565,4 +645,5 @@ export const SCREENSAVERS = [
   { id: 'ribbons', name: 'Ribbons', origin: 'Windows Vista & 7', start: ribbons },
   { id: 'flurry', name: 'Flurry', origin: 'macOS', start: flurry },
   { id: 'hello', name: 'Hello', origin: 'macOS', start: hello },
+  { id: 'matrix', name: 'Matrix', origin: 'The Matrix (1999)', start: matrix },
 ];
