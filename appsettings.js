@@ -39,6 +39,9 @@ const DEFAULTS = {
   music: {
     visAutoSeconds: 20, visQuality: 'medium', nowPlayingInMenuBar: true,
   },
+  family: {
+    widget: true,                  // the Family widget on the desktop
+  },
   screensaver: {
     enabled: false, timeoutMin: 10, saver: 'toasters', requirePassword: false, skipVideo: true, text: 'MediaDesk',
   },

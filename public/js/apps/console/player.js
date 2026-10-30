@@ -3,7 +3,7 @@
 // states on the MediaDesk server, and adds a console-style pause menu (Esc, or the Home /
 // Select+Start buttons on a controller).
 
-import { SYSTEMS, CORES, buttonsFor, keyName, padName, padStyle } from './systems.js';
+import { SYSTEMS, CORES, buttonsFor, keyName, padName, padStyle, findDcBios } from './systems.js';
 import { emulatorControls, bindings, pads } from './controls.js';
 import { Nav, blip } from './input.js';
 import { TouchPad, loadLayout, openEditor } from './touchpad.js';
@@ -87,13 +87,24 @@ async function start() {
   ]);
 
   const bios = settings.bios && lib.bios.some((b) => b.path === settings.bios) ? settings.bios : null;
+  const dreamcast = system === 'dreamcast';
+  if (sys.webgl2 && !document.createElement('canvas').getContext('webgl2')) {
+    return fail(`${sys.short} games need WebGL 2`, 'This browser or its graphics driver doesn’t offer WebGL 2. Try an up-to-date Chrome, Edge, Firefox or Safari, with hardware acceleration on.');
+  }
+  if (dreamcast) {
+    const dcBios = findDcBios(lib.bios);
+    if (!dcBios.boot || !dcBios.flash) {
+      return fail('Dreamcast games need the Dreamcast BIOS', 'Put your own dc_boot.bin and dc_flash.bin (copied from your Dreamcast) in a “BIOS” folder in your games folder, then try again.');
+    }
+    prepareDreamcast(dcBios, battery);
+  }
   Object.assign(window, {
     EJS_player: '#game',
     EJS_core: core,
     EJS_gameUrl: fileUrl(game.path),
     EJS_gameName: game.base,
     EJS_pathtodata: `/portal/games/emulator/${EJS_VERSION}/data/`,
-    EJS_biosUrl: bios ? fileUrl(bios) : '',
+    EJS_biosUrl: bios && !dreamcast ? fileUrl(bios) : '',
     EJS_externalFiles: game.parts?.length ? Object.fromEntries(game.parts.map((p) => [`/${p.split('/').pop()}`, fileUrl(p)])) : undefined,
     EJS_startOnLoaded: true,
     EJS_defaultControls: emulatorControls(system),
@@ -113,6 +124,7 @@ async function start() {
       'ff-ratio': settings.ffRatio || '3.0',
       // MediaDesk draws its own on-screen controls (see touchpad.js).
       'virtual-gamepad': 'disabled',
+      ...(dreamcast ? flycastOptions() : {}),
     },
     // MediaDesk's pause menu does saving, loading, controls and quitting.
     EJS_Buttons: { saveState: false, loadState: false, gamepad: false, cheat: false, cacheManager: false, saveSavFiles: false, loadSavFiles: false, exitEmulation: false, netplay: false, screenRecord: false, settings: false, quickSave: false, quickLoad: false, restart: false, fullscreen: false, screenshot: false, contextMenu: false, diskButton: true },
@@ -121,7 +133,7 @@ async function start() {
       emu = window.EJS_emulator;
       startedAt = Date.now();
       const gm = emu.gameManager;
-      if (battery?.byteLength) {
+      if (battery?.byteLength && !dreamcast) {
         try {
           const p = gm.getSaveFilePath();
           gm.FS.writeFile(p, new Uint8Array(battery));
@@ -206,7 +218,7 @@ const quickHash = (u8) => { let x = 2166136261 >>> 0; for (let i = 0; i < u8.len
 
 async function syncBattery() {
   try {
-    const data = emu?.gameManager?.getSaveFile();
+    const data = system === 'dreamcast' ? readVmu() : emu?.gameManager?.getSaveFile();
     if (!data?.length) return;
     const hash = quickHash(data);
     if (hash === lastBatteryHash) return;
@@ -390,3 +402,97 @@ addEventListener('message', (e) => {
 addEventListener('pagehide', () => { syncBattery(); });
 
 start();
+
+// ---- Dreamcast (Flycast) ----
+
+// Flycast's settings for the browser, as flycast-wasm recommends them. Its built-in BIOS
+// ("HLE") doesn't work in this build, so the Dreamcast's own BIOS is always used.
+function flycastOptions() {
+  return {
+    reicast_boot_to_bios: 'disabled',
+    reicast_hle_bios: 'disabled',
+    reicast_threaded_rendering: 'disabled',
+    reicast_synchronous_rendering: 'disabled',
+    reicast_internal_resolution: '640x480',
+    reicast_mipmapping: 'disabled',
+    reicast_anisotropic_filtering: '1',
+    reicast_texupscale: 'disabled',
+    reicast_enable_rttb: 'disabled',
+    reicast_enable_purupuru: 'disabled',
+    reicast_alpha_sorting: 'per-strip (fast, least accurate)',
+    reicast_delay_frame_swapping: 'disabled',
+    reicast_frame_skipping: 'enabled',
+    reicast_framerate: 'normal',
+  };
+}
+
+// The memory card (VMU in slot A1), kept on the server as this game's battery save. Flycast
+// looks for it in its data folder; it's put in each place it might look, and read back from
+// whichever one the game last wrote.
+const VMU_PATHS = ['/dc/vmu_save_A1.bin', '/data/saves/vmu_save_A1.bin', '/data/saves/dc/vmu_save_A1.bin'];
+function readVmu() {
+  const FS = emu?.gameManager?.FS;
+  if (!FS) return null;
+  let best = null;
+  for (const p of VMU_PATHS) {
+    try {
+      const st = FS.stat(p);
+      if (!best || st.mtime > best.mtime) best = { p, mtime: st.mtime };
+    } catch { /* not there */ }
+  }
+  return best ? FS.readFile(best.p) : null;
+}
+
+function prepareDreamcast(dcBios, battery) {
+  // flycast-wasm's WebGL 2 fixes, which must be in place before the emulator makes its canvas:
+  // report OpenGL ES 3.0 (so Flycast picks its ES shaders), ignore the INVALID_ENUM errors WebGL
+  // raises for framebuffer calls that desktop OpenGL allows, and skip texture settings made with
+  // no texture bound (which WebGL reports as an error on every frame).
+  const getContext = HTMLCanvasElement.prototype.getContext;
+  HTMLCanvasElement.prototype.getContext = function patched(type, attrs) {
+    const ctx = getContext.call(this, type, attrs);
+    if (!ctx || (type !== 'webgl2' && type !== 'experimental-webgl2') || ctx.__mediadeskFlycast) return ctx;
+    ctx.__mediadeskFlycast = true;
+    const getParameter = ctx.getParameter.bind(ctx);
+    ctx.getParameter = (pname) => (pname === ctx.VERSION ? 'OpenGL ES 3.0 WebGL 2.0' : pname === ctx.SHADING_LANGUAGE_VERSION ? 'OpenGL ES GLSL ES 3.00' : getParameter(pname));
+    const getError = ctx.getError.bind(ctx);
+    ctx.getError = () => { let e = getError(); while (e === ctx.INVALID_ENUM) e = getError(); return e; };
+    const bound = { [ctx.TEXTURE_2D]: ctx.TEXTURE_BINDING_2D, [ctx.TEXTURE_CUBE_MAP]: ctx.TEXTURE_BINDING_CUBE_MAP, [ctx.TEXTURE_3D]: ctx.TEXTURE_BINDING_3D, [ctx.TEXTURE_2D_ARRAY]: ctx.TEXTURE_BINDING_2D_ARRAY };
+    for (const fn of ['texParameteri', 'texParameterf']) {
+      const orig = ctx[fn].bind(ctx);
+      ctx[fn] = (target, pname, param) => { const b = bound[target]; if (b && !getParameter(b)) return undefined; return orig(target, pname, param); };
+    }
+    return ctx;
+  };
+  const warn = console.warn;
+  console.warn = (...args) => { if (typeof args[0] === 'string' && (args[0].includes('__syscall_mprotect') || args[0].includes('is not a valid value'))) return; warn.apply(console, args); };
+
+  // Just before the game starts: the BIOS files (and memory card) go in Flycast's "dc" folder,
+  // and RetroArch is told that its system folder is the top of the file system.
+  const files = Promise.all([dcBios.boot, dcBios.flash].map((p) => (p ? api(fileUrl(p)).then((r) => r.arrayBuffer()).catch(() => null) : null)));
+  const wait = setInterval(() => {
+    const e = window.EJS_emulator;
+    if (!e || e.__mediadeskFlycast) return;
+    e.__mediadeskFlycast = true;
+    clearInterval(wait);
+    const startGame = e.startGame;
+    e.startGame = async function startWithBios(...args) {
+      try {
+        const FS = this.gameManager.FS;
+        const mk = (d) => { try { if (!FS.analyzePath(d).exists) FS.mkdir(d); } catch { /* there already */ } };
+        mk('/dc'); mk('/data'); mk('/data/saves'); mk('/data/saves/dc');
+        const [boot, flash] = await files;
+        if (boot) FS.writeFile('/dc/dc_boot.bin', new Uint8Array(boot));
+        if (flash) FS.writeFile('/dc/dc_flash.bin', new Uint8Array(flash));
+        if (battery?.byteLength) {
+          for (const p of VMU_PATHS) { try { FS.writeFile(p, new Uint8Array(battery)); } catch { /* folder missing */ } }
+          lastBatteryHash = quickHash(new Uint8Array(battery));
+        }
+        const cfg = '/home/web_user/.config/retroarch/retroarch.cfg';
+        const text = new TextDecoder().decode(FS.readFile(cfg));
+        if (!text.includes('system_directory')) FS.writeFile(cfg, `${text}system_directory = "/"\n`);
+      } catch (err) { console.error('Dreamcast set-up failed', err); }
+      return startGame.apply(this, args);
+    };
+  }, 30);
+}

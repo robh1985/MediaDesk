@@ -90,7 +90,7 @@ const SYSTEMS = {
   segaCD: { ext: [], alias: ['segacd', 'megacd', 'scd'], cores: ['genesis_plus_gx', 'picodrive'], art: 'Sega - Mega-CD - Sega CD', disc: true },
   sega32x: { ext: ['32x'], alias: ['32x', 'sega32x'], cores: ['picodrive'], art: 'Sega - 32X' },
   segaSaturn: { ext: [], alias: ['saturn', 'segasaturn', 'ss'], cores: ['yabause'], art: 'Sega - Saturn', disc: true },
-  dreamcast: { ext: ['gdi', 'cdi'], alias: ['dreamcast', 'dc', 'segadreamcast'], cores: [], art: 'Sega - Dreamcast', disc: true },
+  dreamcast: { ext: ['gdi', 'cdi'], alias: ['dreamcast', 'dc', 'segadreamcast'], cores: ['flycast'], art: 'Sega - Dreamcast', disc: true },
   psx: { ext: ['pbp'], alias: ['psx', 'ps1', 'ps', 'playstation', 'sonyplaystation', 'playstation1'], cores: ['pcsx_rearmed', 'mednafen_psx_hw'], art: 'Sony - PlayStation', disc: true },
   psp: { ext: ['cso'], alias: ['psp', 'playstationportable'], cores: ['ppsspp'], art: 'Sony - PlayStation Portable', disc: true },
   pce: { ext: ['pce', 'sgx'], alias: ['pce', 'pcengine', 'tg16', 'turbografx', 'turbografx16', 'tgcd', 'pcenginecd', 'supergrafx'], cores: ['mednafen_pce'], art: 'NEC - PC Engine - TurboGrafx 16' },
@@ -106,6 +106,39 @@ const SYSTEMS = {
   arcade: { ext: [], alias: ['arcade', 'mame', 'fbneo', 'fba', 'finalburn', 'neogeo', 'cps1', 'cps2', 'cps3'], cores: ['fbneo', 'mame2003_plus'], art: 'FBNeo - Arcade Games' },
 };
 const ALL_CORES = new Set(Object.values(SYSTEMS).flatMap((s) => s.cores));
+// Cores that don't come from EmulatorJS: Flycast for the Dreamcast is the WebAssembly build by
+// Nick Somers (https://github.com/nasomers/flycast-wasm, GPL-2.0), downloaded from its GitHub
+// release the first time a Dreamcast game is played and checked against these hashes.
+// MediaDesk packs it the way EmulatorJS packs its own cores (a zip with core.json).
+const EXTERNAL_CORES = {
+  flycast: {
+    name: 'Flycast (flycast-wasm)',
+    base: 'https://github.com/nasomers/flycast-wasm/releases/download/v1.0',
+    license: 'https://raw.githubusercontent.com/nasomers/flycast-wasm/v1.0/LICENSE',
+    repo: 'https://github.com/nasomers/flycast-wasm',
+    files: {
+      'flycast_libretro.js': '1f2ae9afafa85c8ff577ca3961be0343c2ac394ddc79285981f0d55ad75dbd7b',
+      'flycast_libretro.wasm': 'db2b87d8d2742087a56c4eeed317da14e3549ee037e36de3d77c1e6e5291bead',
+    },
+    core: { name: 'flycast', extensions: ['cdi', 'gdi', 'chd', 'cue', 'iso', 'elf', 'bin', 'lst', 'zip', '7z', 'dat'], options: {}, save: 'state', license: 'GPLv2', repo: 'https://github.com/nasomers/flycast-wasm' },
+    build: { minimumEJSVersion: '4.0.0', version: '1.0' },
+    // Flycast draws with WebGL 2, so EmulatorJS must not fall back to its WebGL 1 build.
+    report: { options: { defaultWebGL2: true } },
+    // This build has no zip library, and opening a zip stops the emulator outright. MediaDesk
+    // makes "open a zip" fail cleanly instead, so Flycast reports the problem (a zipped game, for
+    // example) rather than crashing. Changing this changes `patch` below.
+    patch: 1,
+    patchFile(name, buf) {
+      if (name !== 'flycast_libretro.js') return buf;
+      let js = buf.toString('utf8');
+      for (const fn of ['zip_source_buffer_create', 'zip_source_filep_create', 'zip_open_from_source']) {
+        js = js.replace(`function _${fn}(){abort("missing function: ${fn}")}`, `function _${fn}(){return 0}`);
+      }
+      return Buffer.from(js, 'utf8');
+    },
+  },
+};
+
 // Cores that need SharedArrayBuffer (and so a cross-origin isolated page).
 const THREADED = new Set(['ppsspp']);
 
@@ -247,6 +280,36 @@ async function referencedFiles(abs, ext) {
 // ---------------------------------------------------------------------------
 // Library
 // ---------------------------------------------------------------------------
+
+// A zip of the given files (deflated), for EmulatorJS to unpack in the browser.
+const CRC_TABLE = Array.from({ length: 256 }, (_, n) => { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; return c >>> 0; });
+const crc32 = zlib.crc32 || ((buf) => { let c = 0xffffffff; for (const b of buf) c = CRC_TABLE[(c ^ b) & 0xff] ^ (c >>> 8); return (c ^ 0xffffffff) >>> 0; });
+function makeZip(entries) {
+  const local = [];
+  const central = [];
+  let offset = 0;
+  for (const [name, data] of entries) {
+    const nameBuf = Buffer.from(name, 'utf8');
+    const packed = zlib.deflateRawSync(data, { level: 9 });
+    const crc = crc32(data) >>> 0;
+    const head = Buffer.alloc(30);
+    head.writeUInt32LE(0x04034b50, 0); head.writeUInt16LE(20, 4); head.writeUInt16LE(0x0800, 6); head.writeUInt16LE(8, 8);
+    head.writeUInt32LE(0, 10); head.writeUInt32LE(crc, 14); head.writeUInt32LE(packed.length, 18); head.writeUInt32LE(data.length, 22);
+    head.writeUInt16LE(nameBuf.length, 26); head.writeUInt16LE(0, 28);
+    const dir = Buffer.alloc(46);
+    dir.writeUInt32LE(0x02014b50, 0); dir.writeUInt16LE(20, 4); dir.writeUInt16LE(20, 6); dir.writeUInt16LE(0x0800, 8); dir.writeUInt16LE(8, 10);
+    dir.writeUInt32LE(0, 12); dir.writeUInt32LE(crc, 16); dir.writeUInt32LE(packed.length, 20); dir.writeUInt32LE(data.length, 24);
+    dir.writeUInt16LE(nameBuf.length, 28); dir.writeUInt32LE(offset, 42);
+    local.push(head, nameBuf, packed);
+    central.push(dir, nameBuf);
+    offset += head.length + nameBuf.length + packed.length;
+  }
+  const centralBuf = Buffer.concat(central);
+  const end = Buffer.alloc(22);
+  end.writeUInt32LE(0x06054b50, 0); end.writeUInt16LE(entries.length, 8); end.writeUInt16LE(entries.length, 10);
+  end.writeUInt32LE(centralBuf.length, 12); end.writeUInt32LE(offset, 16);
+  return Buffer.concat([...local, centralBuf, end]);
+}
 
 function createGames({ dataDir, getFolder, mock = false, sample = null }) {
   const gamesData = path.join(dataDir, 'games');
@@ -650,10 +713,39 @@ function createGames({ dataDir, getFolder, mock = false, sample = null }) {
   }
 
   const coreReady = (core) => fs.existsSync(path.join(emuDir, 'data', 'cores', `${core}-wasm.data`)) || fs.existsSync(path.join(emuDir, 'data', 'cores', `${core}-thread-wasm.data`));
+
+  // A core from its own project's release (see EXTERNAL_CORES): download, check, pack.
+  async function fetchExternalCore(core) {
+    const ext = EXTERNAL_CORES[core];
+    const entries = [];
+    for (const [file, sha] of Object.entries(ext.files)) {
+      const res = await fetch(`${ext.base}/${file}`, { signal: AbortSignal.timeout(300e3), redirect: 'follow' });
+      if (!res.ok) throw new GameError(502, `Couldn’t download ${ext.name} (GitHub said HTTP ${res.status})`);
+      const buf = Buffer.from(await res.arrayBuffer());
+      if (crypto.createHash('sha256').update(buf).digest('hex') !== sha) throw new GameError(502, `${ext.name} failed its integrity check (${file} isn’t the expected file)`);
+      entries.push([file, ext.patchFile ? ext.patchFile(file, buf) : buf]);
+    }
+    let license = `${ext.name} is licensed under the GNU General Public License, version 2. Source: ${ext.repo}\n`;
+    try {
+      const res = await fetch(ext.license, { signal: AbortSignal.timeout(30e3) });
+      if (res.ok) license = await res.text();
+    } catch { /* keep the short notice */ }
+    entries.push(['core.json', Buffer.from(JSON.stringify(ext.core))], ['build.json', Buffer.from(JSON.stringify(ext.build))], ['license.txt', Buffer.from(license)]);
+    const coresDir = path.join(emuDir, 'data', 'cores');
+    // The report's buildStart is EmulatorJS's cache key for the core: the files' hashes.
+    const report = { ...ext.report, buildStart: parseInt(crypto.createHash('sha1').update(`${Object.values(ext.files).join()}|${ext.patch || 0}`).digest('hex').slice(0, 12), 16) };
+    await writeAll(new Map([
+      [`${core}-wasm.data`, makeZip(entries)],
+      [`reports/${core}.json`, Buffer.from(JSON.stringify(report))],
+      [`licenses/${core}.txt`, Buffer.from(license)],
+    ]), () => true, (n) => path.join(coresDir, n));
+  }
+
   async function ensureCore(core) {
     if (!ALL_CORES.has(core)) throw new GameError(404, 'Unknown emulator core');
     await ensureRuntime();
     if (coreReady(core)) return;
+    if (EXTERNAL_CORES[core]) { await once(`core:${core}`, () => fetchExternalCore(core)); return; }
     await once(`core:${core}`, async () => {
       const files = await fetchPackage(`@emulatorjs/core-${core}`);
       await writeAll(files, (n) => /\.data$/.test(n) || /^reports\/.*\.json$/.test(n), (n) => path.join(emuDir, 'data', 'cores', n));
@@ -675,13 +767,16 @@ function createGames({ dataDir, getFolder, mock = false, sample = null }) {
   async function serveEmulator(req, res, rel, sendJson) {
     const parts = rel.split('/').filter(Boolean);
     if (parts.some((p) => p === '..' || p.startsWith('.'))) return sendJson(res, 400, { error: 'Invalid path' });
+    const m = /^data\/cores\/(?:reports\/)?([a-z0-9_]+?)(?:-thread)?(?:-legacy)?(?:-wasm\.data|\.json)$/.exec(parts.join('/'));
     try {
-      const m = /^data\/cores\/(?:reports\/)?([a-z0-9_]+?)(?:-thread)?(?:-legacy)?(?:-wasm\.data|\.json)$/.exec(parts.join('/'));
       if (m) await ensureCore(m[1]);
       else await ensureRuntime();
     } catch (err) {
-      return sendJson(res, err.status || 502, { error: `${err.message}. MediaDesk downloads emulators from ${REGISTRY} the first time; check the server’s internet connection.` });
+      return sendJson(res, err.status || 502, { error: `${err.message}. MediaDesk downloads emulators from ${m && EXTERNAL_CORES[m[1]] ? 'github.com' : REGISTRY} the first time; check the server’s internet connection.` });
     }
+    // Cores from elsewhere come in one build: asked for its threaded or WebGL 1 variant, send that.
+    const variant = /^data\/cores\/([a-z0-9_]+?)(?:-thread)?(?:-legacy)?-wasm\.data$/.exec(parts.join('/'));
+    if (variant && EXTERNAL_CORES[variant[1]]) parts.splice(0, parts.length, 'data', 'cores', `${variant[1]}-wasm.data`);
     const abs = path.join(emuDir, ...parts);
     if (!abs.startsWith(emuDir + path.sep) || !fs.existsSync(abs)) return sendJson(res, 404, { error: 'Not found' });
     const st = await fsp.stat(abs);

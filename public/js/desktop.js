@@ -13,6 +13,7 @@ import { startDesktopIcons, desktopMenuItems } from './deskicons.js';
 import { PLACEABLE_EXCLUDE } from './layout.js';
 import { itemImage, searchJellyfin } from './apps/jellyfin.js';
 import { SYSTEMS as GAME_SYSTEMS } from './apps/console/systems.js';
+import { familyWidget } from './familywidget.js';
 
 // ---------------------------------------------------------------------------
 // Appearance
@@ -297,13 +298,14 @@ function buildWidgets() {
   // Sharing the column's height: Now playing shows up to three sessions, giving some up when
   // Upcoming would otherwise have room for less than about two of each; Upcoming takes the
   // rest of the height and shows as many rows as fit (more on taller screens).
-  const fitters = { now: null, upcoming: null };
+  const fitters = { now: null, upcoming: null, family: null };
   let laying = 0;
   const relayout = () => { cancelAnimationFrame(laying); laying = requestAnimationFrame(layoutColumn); };
   function layoutColumn() {
     const phone = getComputedStyle(host).position === 'static';
     const up = fitters.upcoming?.el;
     fitters.now?.render(3);
+    fitters.family?.setCompact(false);
     if (phone || !up) return fitters.upcoming?.fit(Infinity, phone ? 4 : Infinity);
     const room = () => {
       const shown = [...host.children].filter((w) => !w.hidden);
@@ -312,6 +314,7 @@ function buildWidgets() {
     up.hidden = false;
     let n = fitters.now?.count() || 0;
     while (n > 1 && room() < 230) fitters.now.render(--n);
+    if (room() < 230) fitters.family?.setCompact(true);
     // Too short for even its summary lines: rather than a sliver, it steps aside.
     const left = room();
     up.hidden = left < 96;
@@ -320,6 +323,10 @@ function buildWidgets() {
   addEventListener('resize', relayout);
   const ro = new ResizeObserver(relayout);
   queueMicrotask(() => { for (const w of host.children) if (!w.classList.contains('widget-upcoming') && !w.classList.contains('widget-nowplaying')) ro.observe(w); });
+
+  // Family: today's events, chores and dinner from the Family Organizer.
+  fitters.family = familyWidget(widget, relayout);
+  host.append(fitters.family);
 
   // Downloads
   if (isConfigured('nzbget')) {

@@ -6,7 +6,7 @@
 import { h, clear, toast, toastError, timeAgo, formatBytes } from '../../ui.js';
 import { icon, appIcon } from '../../icons.js';
 import { openApp } from '../../wm.js';
-import { SYSTEMS, BOX, ORDER, CORES, CORE_NAMES, SHADERS, buttonsFor, keyName, padName, padStyle } from './systems.js';
+import { SYSTEMS, BOX, ORDER, CORES, CORE_NAMES, SHADERS, findDcBios, buttonsFor, keyName, padName, padStyle } from './systems.js';
 import { bindings, setBinding, resetBindings, captureKey, capturePad, pads, PLAYERS, isCustomised } from './controls.js';
 import { Nav, blip } from './input.js';
 import { THEMES, THEME_LIST } from './themes.js';
@@ -736,7 +736,7 @@ class GameConsole {
     detail.append(
       cores.length > 1 ? this.optionRow('con:core', 'Emulator', cores.map((c) => [c, CORE_NAMES[c] || c]), cfg.core || cores[0], (v) => save({ core: v })) : h('div', { class: 'gc-opt static' }, h('span', { class: 'gc-opt-label' }, 'Emulator'), h('span', {}, CORE_NAMES[cores[0]] || cores[0])),
       this.optionRow('con:shader', 'Screen', SHADERS, cfg.shader || 'disabled', (v) => save({ shader: v }), 'How pixels are drawn — try a CRT look'),
-      info.bios || biosFiles.length ? this.optionRow('con:bios', 'BIOS', [['', biosFiles.length ? 'None' : 'None found'], ...biosFiles.map((b) => [b.path, b.name])], cfg.bios || '', (v) => save({ bios: v }),
+      sys === 'dreamcast' ? this.dcBiosRow() : info.bios || biosFiles.length ? this.optionRow('con:bios', 'BIOS', [['', biosFiles.length ? 'None' : 'None found'], ...biosFiles.map((b) => [b.path, b.name])], cfg.bios || '', (v) => save({ bios: v }),
         info.bios ? 'This console needs one: put it in a “BIOS” folder in your games folder' : 'Optional') : null,
       this.optionRow('con:autosave', 'Save my place when I quit', [[true, 'On'], [false, 'Off']], cfg.autosave !== false, (v) => save({ autosave: v }), 'Lets you pick up exactly where you left off'),
       this.optionRow('con:rewind', 'Rewind', [[false, 'Off'], [true, 'On']], Boolean(cfg.rewind), (v) => save({ rewind: v }), 'Hold the rewind key to go back in time (uses more memory)'),
@@ -764,7 +764,16 @@ class GameConsole {
           catch (err) { btn.textContent = 'Download emulator now'; toastError(err, 'Download failed'); }
         }, 'con:dl')),
       sys === 'psp' ? h('p', { class: 'gc-note' }, 'PSP games open in their own browser tab — their emulator needs a page to itself.') : null,
-      ['psx', 'segaSaturn', 'segaCD', 'pce', '3do'].includes(sys) ? h('p', { class: 'gc-small' }, 'Tip: disc games load faster as .chd files (one compressed file per disc). Multi-disc games can use an .m3u playlist.') : null);
+      sys === 'dreamcast' ? h('p', { class: 'gc-note' }, 'Dreamcast games play with Flycast for WebAssembly (flycast-wasm by Nick Somers), downloaded from GitHub the first time. It needs a browser with WebGL 2 and a fast computer. Games that run on Windows CE (Sega Rally 2 and a few others) don’t work yet.') : null,
+      ['psx', 'segaSaturn', 'segaCD', 'pce', '3do', 'dreamcast'].includes(sys) ? h('p', { class: 'gc-small' }, `Tip: disc games load faster as .chd files (one compressed file per disc).${sys === 'dreamcast' ? ' .gdi (with its track files) and .cdi work too.' : ' Multi-disc games can use an .m3u playlist.'}`) : null);
+  }
+
+  // The Dreamcast needs two BIOS files, found by their names.
+  dcBiosRow() {
+    const { boot, flash } = findDcBios(this.lib.bios);
+    const status = boot && flash ? 'dc_boot.bin and dc_flash.bin found ✓' : boot ? 'dc_boot.bin found; dc_flash.bin missing' : flash ? 'dc_flash.bin found; dc_boot.bin missing' : 'Not found';
+    return h('div', { class: 'gc-opt static' }, h('span', { class: 'gc-opt-label' }, 'BIOS'),
+      h('span', {}, status, h('div', { class: 'gc-small' }, 'Needed to play. Put dc_boot.bin and dc_flash.bin (from your own Dreamcast) in a “BIOS” folder in your games folder.')));
   }
 
   setLibrary(pane) {

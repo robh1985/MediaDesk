@@ -95,6 +95,7 @@ export class Store {
       const r = await call('batch', { method: 'POST', body: { ops } });
       this.rev = r.rev;
       r.results.forEach((item, i) => { if (!item.deleted) this.data[ops[i].col][item.id] = item; });
+      window.dispatchEvent(new Event('mediadesk:family-changed'));
       return r.results;
     } catch (err) {
       for (const [c, id, old] of before) { if (!id) continue; if (old) this.data[c][id] = old; else delete this.data[c][id]; }

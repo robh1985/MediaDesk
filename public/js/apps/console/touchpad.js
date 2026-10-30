@@ -117,6 +117,12 @@ export function defaultLayout(system, { cMode = 'buttons' } = {}) {
     case 'segaMD': case 'segaCD': case 'sega32x': case 'segaSaturn':
       controls = GENESIS(system);
       break;
+    case 'dreamcast':
+      // Thumb on the analogue stick, D-pad above it; A red, B blue, X yellow, Y green.
+      controls = [stick('left'), dpad('l', 4.3, 'b', 3.4, { size: 1.8 }),
+        ...diamond(1.95, 1.95, 0.95, [[9, 'Y', col('#2b8a3e')], [8, 'B', col('#1f4fa0')], [0, 'A', col('#c92a2a')], [1, 'X', col('#d4a106')]]),
+        ...shoulders([12, 'L'], [13, 'R']), ...startSelect(null)];
+      break;
     case 'segaMS':
       controls = [dpad(), btn('1', 0, 'r', 2.4, 'b', 1.3), btn('2', 8, 'r', 1.1, 'b', 1.3)];
       break;

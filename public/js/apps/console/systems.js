@@ -25,7 +25,9 @@ export const SYSTEMS = {
   segaCD: { name: 'Sega CD / Mega-CD', short: 'Sega CD', maker: 'Sega', year: 1992, kind: 'home', color: '#24425e', disc: true, bios: true, buttons: [[1, 'A'], [0, 'B'], [8, 'C'], [10, 'X'], [9, 'Y'], [11, 'Z'], [3, 'Start'], [2, 'Mode'], ...DPAD] },
   sega32x: { name: 'Sega 32X', short: '32X', maker: 'Sega', year: 1994, kind: 'home', color: '#7a1f1f', buttons: [[1, 'A'], [0, 'B'], [8, 'C'], [10, 'X'], [9, 'Y'], [11, 'Z'], [3, 'Start'], [2, 'Mode'], ...DPAD] },
   segaSaturn: { name: 'Sega Saturn', short: 'Saturn', maker: 'Sega', year: 1995, kind: 'home', color: '#3a3f8f', disc: true, bios: true, buttons: [[1, 'A'], [0, 'B'], [8, 'C'], [9, 'X'], [10, 'Y'], [11, 'Z'], [12, 'L'], [13, 'R'], [3, 'Start'], ...DPAD] },
-  dreamcast: { name: 'Sega Dreamcast', short: 'Dreamcast', maker: 'Sega', year: 1999, kind: 'home', color: '#e05a0b', disc: true, unsupported: 'No Dreamcast emulator runs in a web browser yet, so these games are listed but can’t be played here. MediaDesk will play them as soon as one is available.', buttons: [] },
+  // Flycast reads the RetroPad by position: B is the Dreamcast's A, A its B, Y its X and X its Y;
+  // L2 and R2 are the analogue triggers.
+  dreamcast: { name: 'Sega Dreamcast', short: 'Dreamcast', maker: 'Sega', year: 1999, kind: 'home', color: '#e05a0b', disc: true, webgl2: true, stick: true, buttons: [[0, 'A'], [8, 'B'], [1, 'X'], [9, 'Y'], [12, 'L trigger'], [13, 'R trigger'], [3, 'Start'], ...DPAD, ...L_STICK] },
   psx: { name: 'PlayStation', short: 'PlayStation', maker: 'Sony', year: 1995, kind: 'home', color: '#5b6b7f', disc: true, buttons: [[0, '✕ Cross'], [8, '○ Circle'], [1, '□ Square'], [9, '△ Triangle'], [10, 'L1'], [11, 'R1'], [12, 'L2'], [13, 'R2'], [2, 'Select'], [3, 'Start'], ...DPAD, ...L_STICK, ...R_STICK, [14, 'L3'], [15, 'R3']] },
   psp: { name: 'PlayStation Portable', short: 'PSP', maker: 'Sony', year: 2005, kind: 'handheld', color: '#2c2c34', disc: true, threads: true, buttons: [[0, '✕ Cross'], [8, '○ Circle'], [1, '□ Square'], [9, '△ Triangle'], [10, 'L'], [11, 'R'], [2, 'Select'], [3, 'Start'], ...DPAD, ...L_STICK] },
   pce: { name: 'TurboGrafx-16 / PC Engine', short: 'TurboGrafx-16', maker: 'NEC', year: 1989, kind: 'home', color: '#e8762d', buttons: [[8, 'I'], [0, 'II'], [2, 'Select'], [3, 'Run'], ...DPAD] },
@@ -61,17 +63,24 @@ export const ORDER = ['nes', 'snes', 'n64', 'gb', 'gba', 'nds', 'vb', 'segaMS', 
 export const CORE_NAMES = {
   fceumm: 'FCEUmm (recommended)', nestopia: 'Nestopia', snes9x: 'Snes9x', mupen64plus_next: 'Mupen64Plus-Next (recommended)', parallel_n64: 'ParaLLEl N64',
   gambatte: 'Gambatte (recommended)', mgba: 'mGBA', melonds: 'melonDS (recommended)', desmume2015: 'DeSmuME 2015', beetle_vb: 'Beetle VB',
-  genesis_plus_gx: 'Genesis Plus GX (recommended)', picodrive: 'PicoDrive', smsplus: 'SMS Plus GX', yabause: 'Yabause',
+  genesis_plus_gx: 'Genesis Plus GX (recommended)', picodrive: 'PicoDrive', smsplus: 'SMS Plus GX', yabause: 'Yabause', flycast: 'Flycast (flycast-wasm)',
   pcsx_rearmed: 'PCSX ReARMed (recommended)', mednafen_psx_hw: 'Beetle PSX HW (accurate, needs a BIOS)', ppsspp: 'PPSSPP', mednafen_pce: 'Beetle PCE',
   stella2014: 'Stella', a5200: 'a5200', prosystem: 'ProSystem', handy: 'Handy', virtualjaguar: 'Virtual Jaguar', mednafen_ngp: 'Beetle NeoPop',
   mednafen_wswan: 'Beetle WonderSwan', gearcoleco: 'Gearcoleco', opera: 'Opera', fbneo: 'FinalBurn Neo (recommended)', mame2003_plus: 'MAME 2003-Plus',
 };
 
 // Cores per console, best first (the server decides which exist).
+// Dreamcast BIOS files, found by name in the games folder: the boot ROM and the flash memory.
+export const DC_BIOS = { boot: ['dc_boot.bin', 'dc_bios.bin'], flash: ['dc_flash.bin', 'dc_nvmem.bin'] };
+export const findDcBios = (bios = []) => {
+  const pick = (names) => bios.find((b) => names.includes(String(b.name || b.path.split('/').pop()).toLowerCase()))?.path || null;
+  return { boot: pick(DC_BIOS.boot), flash: pick(DC_BIOS.flash) };
+};
+
 export const CORES = {
   nes: ['fceumm', 'nestopia'], snes: ['snes9x'], n64: ['mupen64plus_next', 'parallel_n64'], gb: ['gambatte', 'mgba'], gba: ['mgba'], nds: ['melonds', 'desmume2015'],
   vb: ['beetle_vb'], segaMD: ['genesis_plus_gx', 'picodrive'], segaMS: ['smsplus', 'genesis_plus_gx'], segaGG: ['genesis_plus_gx'], segaCD: ['genesis_plus_gx', 'picodrive'],
-  sega32x: ['picodrive'], segaSaturn: ['yabause'], dreamcast: [], psx: ['pcsx_rearmed', 'mednafen_psx_hw'], psp: ['ppsspp'], pce: ['mednafen_pce'],
+  sega32x: ['picodrive'], segaSaturn: ['yabause'], dreamcast: ['flycast'], psx: ['pcsx_rearmed', 'mednafen_psx_hw'], psp: ['ppsspp'], pce: ['mednafen_pce'],
   atari2600: ['stella2014'], atari5200: ['a5200'], atari7800: ['prosystem'], lynx: ['handy'], jaguar: ['virtualjaguar'], ngp: ['mednafen_ngp'],
   ws: ['mednafen_wswan'], coleco: ['gearcoleco'], '3do': ['opera'], arcade: ['fbneo', 'mame2003_plus'],
 };
