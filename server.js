@@ -17,6 +17,7 @@ const media = require('./media');
 const { createGames } = require('./games');
 const { createPikvm } = require('./pikvm');
 const { createArchive } = require('./archive');
+const { createFamily } = require('./family');
 
 const ROOT = __dirname;
 
@@ -600,6 +601,7 @@ const games = createGames({
   sample: MOCK ? require('./mock-games').createSample() : null,
 });
 const pikvm = createPikvm({ getConfig: () => config.services.pikvm });
+const family = createFamily({ dataDir: MOCK ? path.join(require('node:os').tmpdir(), 'mediadesk-demo-data') : path.dirname(CONFIG_PATH), mock: MOCK });
 const archive = createArchive({ getConfig: () => config, resolveInShared: files.resolveInShared, filesEnabled: () => filesStatus().enabled });
 const wallpapers = createWallpapers(MOCK ? path.join(require('node:os').tmpdir(), 'mediadesk-demo-wallpapers') : path.join(path.dirname(CONFIG_PATH), 'wallpapers'));
 
@@ -673,6 +675,9 @@ async function handle(req, res) {
     return sendJson(res, 200, { locked: true });
   }
 
+  // The family calendar for phones: its address has its own secret instead of a login.
+  if (p.startsWith('/family-feed/') && req.method === 'GET') return family.feed(req, res, p, { sendJson });
+
   const isApi = p.startsWith('/api/') || p.startsWith('/portal/');
   if (!isApi) return serveStatic(req, res, p);
   // While locked, music that's already playing from Jellyfin may keep streaming; nothing else works.
@@ -730,6 +735,7 @@ async function handle(req, res) {
   if (p.startsWith('/portal/plex/')) return plexSignIn(req, res, p);
   if (p.startsWith('/portal/games/')) return games.handle(req, res, url, { sendJson, readJson });
   if (p.startsWith('/portal/archive/')) return archive.handle(req, res, url, { sendJson, readJson });
+  if (p.startsWith('/portal/family/')) return family.handle(req, res, url, { sendJson, readJson, readBody });
 
   const m = p.match(/^\/api\/(radarr|sonarr|nzbget|jellyfin|plex|pikvm)(?:\/(.*))?$/);
   if (!m) return sendJson(res, 404, { error: 'Unknown endpoint' });
