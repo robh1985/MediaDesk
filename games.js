@@ -144,11 +144,27 @@ const THREADED = new Set(['ppsspp']);
 
 const EXT_TO_SYSTEM = new Map();
 for (const [id, s] of Object.entries(SYSTEMS)) for (const e of s.ext) EXT_TO_SYSTEM.set(e, id);
+// The games folder's own layout (see README): ROMS, BIOS, Saves and Box Art, each with a folder
+// per console under these names. Disc games get a folder of their own inside their console's.
+const FOLDER_NAMES = {
+  nes: 'NES', snes: 'SNES', n64: 'N64', gb: 'Game Boy', gba: 'Game Boy Advance', nds: 'Nintendo DS', vb: 'Virtual Boy',
+  segaMS: 'Master System', segaMD: 'Genesis', segaCD: 'Sega CD', sega32x: '32X', segaGG: 'Game Gear', segaSaturn: 'Saturn', dreamcast: 'Dreamcast',
+  psx: 'PlayStation', psp: 'PSP', pce: 'TurboGrafx-16', atari2600: 'Atari 2600', atari5200: 'Atari 5200', atari7800: 'Atari 7800', lynx: 'Lynx',
+  jaguar: 'Jaguar', ngp: 'Neo Geo Pocket', ws: 'WonderSwan', coleco: 'ColecoVision', '3do': '3DO', arcade: 'Arcade',
+};
+const LAYOUT = { roms: 'ROMS', bios: 'BIOS', saves: 'Saves', art: 'Box Art' };
 const ALIAS_TO_SYSTEM = new Map();
 for (const [id, s] of Object.entries(SYSTEMS)) for (const a of s.alias) ALIAS_TO_SYSTEM.set(a, id);
+for (const [id, name] of Object.entries(FOLDER_NAMES)) if (!ALIAS_TO_SYSTEM.has(name.toLowerCase().replace(/[^a-z0-9]/g, ''))) ALIAS_TO_SYSTEM.set(name.toLowerCase().replace(/[^a-z0-9]/g, ''), id);
 const BIOS_DIRS = new Set(['bios', 'system', 'firmware', 'biosfiles']);
 const AMBIGUOUS = new Set(['bin', 'iso', 'img', 'cue', 'chd', 'm3u', 'zip', '7z', 'ccd', 'mds', 'rom', 'elf']);
 const ART_EXT = ['png', 'jpg', 'jpeg', 'webp'];
+// Files that can be a game in a console's folder (track files and the like are left out).
+const PLAYABLE = new Set(['cue', 'gdi', 'cdi', 'chd', 'iso', 'pbp', 'cso', 'm3u', 'ccd', 'mds', 'img', 'bin', 'zip', '7z', 'elf', 'rom']);
+// A cover picture inside a game's own folder.
+const FOLDER_ART = /^(cover|boxart|box|front|folder)\.(png|jpe?g|webp)$/i;
+// Names that work as file and folder names on Windows, macOS and Linux.
+const safeName = (n) => String(n || 'Game').replace(/[<>:"/\\|?*\u0000-\u001f]/g, '_').replace(/[. ]+$/, '').trim().slice(0, 150) || 'Game';
 const ART_DIRS = ['boxart', 'covers', 'media', 'images', 'art', 'boxarts', 'named_boxarts'];
 const SERVE_EXT = new Set([...EXT_TO_SYSTEM.keys(), ...AMBIGUOUS, 'sub', 'ccd', 'img', 'raw', 'iso', 'pbp', 'cso', 'gdi', 'cdi', 'mdf', 'toc', 'sbi', 'wav', 'ogg', 'ecm', 'ape', 'flac', 'mp3']);
 
@@ -254,6 +270,14 @@ async function classifyZip(abs, size) {
   return null;
 }
 
+// A console from a folder name ("SNES", "Super Nintendo", "Nintendo - Game Boy" ...).
+function systemFromFolder(name) {
+  const d = squash(name || '');
+  if (ALIAS_TO_SYSTEM.has(d)) return ALIAS_TO_SYSTEM.get(d);
+  for (const [alias, id] of ALIAS_TO_SYSTEM) if (alias.length > 5 && d.includes(alias)) return id;
+  return null;
+}
+
 function hintFromDirs(parts) {
   for (let i = parts.length - 2; i >= 0; i--) {
     const d = squash(parts[i]);
@@ -322,7 +346,8 @@ function createGames({ dataDir, getFolder, mock = false, sample = null }) {
   let cache = null; // { folder, at, games, bios }
   let scanning = null;
 
-  async function scan() {
+  // everything: the whole folder, even with the layout (to move games into it).
+  async function scan(everything = false) {
     const folder = getFolder();
     if (!folder) return { folder: '', games: [], bios: [], art: new Map() };
     const root = path.resolve(folder);
@@ -330,7 +355,13 @@ function createGames({ dataDir, getFolder, mock = false, sample = null }) {
     if (!st?.isDirectory()) throw new GameError(404, `The games folder ${root} can’t be found on the MediaDesk server`);
     const files = [];
     const art = new Map(); // lower-case base name -> rel path of a picture
+    const folderArt = new Map(); // a game folder's rel path -> its cover picture
     let count = 0;
+    // The folder's own layout, when it has a ROMS folder (names in any letter case).
+    const top = await fsp.readdir(root, { withFileTypes: true }).catch(() => []);
+    const findDir = (n) => top.find((e) => e.isDirectory() && lc(e.name) === lc(n))?.name || null;
+    const dirs = { roms: findDir(LAYOUT.roms), bios: findDir(LAYOUT.bios), saves: findDir(LAYOUT.saves), art: findDir(LAYOUT.art) };
+    const structured = Boolean(dirs.roms);
     const walk = async (dir, rel, depth) => {
       let entries;
       try { entries = await fsp.readdir(dir, { withFileTypes: true }); } catch { return; }
@@ -338,29 +369,55 @@ function createGames({ dataDir, getFolder, mock = false, sample = null }) {
         if (e.name.startsWith('.') || count > 50000) continue;
         const abs = path.join(dir, e.name);
         const r = rel ? `${rel}/${e.name}` : e.name;
-        if (e.isDirectory()) { if (depth < 8) await walk(abs, r, depth + 1); continue; }
+        if (e.isDirectory()) { if (depth < 8 && !(depth === 0 && dirs.saves && e.name === dirs.saves)) await walk(abs, r, depth + 1); continue; }
         if (!e.isFile() && !e.isSymbolicLink()) continue;
         count++;
         const ext = extOf(e.name);
-        if (ART_EXT.includes(ext)) { art.set(lc(e.name.slice(0, -(ext.length + 1))), r); continue; }
+        if (ART_EXT.includes(ext)) {
+          if (FOLDER_ART.test(e.name)) folderArt.set(rel, r);
+          art.set(lc(e.name.slice(0, -(ext.length + 1))), r);
+          continue;
+        }
         if (!SERVE_EXT.has(ext) && !KNOWN_BIOS[lc(e.name)]) continue;
         files.push({ abs, rel: r, name: e.name, ext });
       }
     };
-    await walk(root, '', 0);
+    if (structured && !everything) {
+      for (const d of [dirs.roms, dirs.bios, dirs.art]) if (d) await walk(path.join(root, d), d, 1);
+    } else await walk(root, '', 0);
 
     const consumed = new Set();
     for (const f of files) if (['cue', 'gdi', 'm3u'].includes(f.ext)) for (const r of await referencedFiles(f.abs, f.ext)) consumed.add(r);
+    // In the layout, a game folder (ROMS/<console>/<game>/) holding one game takes its name from
+    // the folder; holding several (the discs of one game), each disc keeps its file's name.
+    const isPlayable = (f) => EXT_TO_SYSTEM.has(f.ext) || PLAYABLE.has(f.ext);
+    const gameFolderOf = (parts) => (structured && parts[0] === dirs.roms && parts.length >= 4 ? parts.slice(0, 3).join('/') : null);
+    const perFolder = new Map();
+    for (const f of files) {
+      const gf = gameFolderOf(f.rel.split('/'));
+      if (gf && !consumed.has(f.abs) && isPlayable(f) && !KNOWN_BIOS[lc(f.name)]) perFolder.set(gf, (perFolder.get(gf) || 0) + 1);
+    }
     const games = [], bios = [];
     for (const f of files) {
       if (consumed.has(f.abs)) continue;
       const parts = f.rel.split('/');
-      const hint = hintFromDirs(parts);
       const known = KNOWN_BIOS[lc(f.name)];
+      if (structured && parts[0] === dirs.bios) {
+        bios.push({ path: f.rel, name: f.name, system: (parts.length > 2 && systemFromFolder(parts[1])) || known || null });
+        continue;
+      }
+      if (structured && parts[0] !== dirs.roms && (!everything || parts[0] === dirs.art)) continue;
+      const consoleSys = structured && parts.length > 2 ? systemFromFolder(parts[1]) : null;
+      const hint = consoleSys || hintFromDirs(parts);
       if (hint === 'bios' || (known && !EXT_TO_SYSTEM.has(f.ext))) { bios.push({ path: f.rel, name: f.name, system: known || null }); continue; }
       let system = EXT_TO_SYSTEM.get(f.ext) || null;
       let guessed = false;
       const size = (await fsp.stat(f.abs).catch(() => ({ size: 0 }))).size;
+      // In a console's folder, that console (unless the file type can only be another one's).
+      if (consoleSys && !system) {
+        if (!isPlayable(f)) continue;
+        system = consoleSys;
+      }
       if (!system && AMBIGUOUS.has(f.ext)) {
         if (hint) system = hint;
         else if (f.ext === 'zip') system = await classifyZip(f.abs, size);
@@ -376,9 +433,13 @@ function createGames({ dataDir, getFolder, mock = false, sample = null }) {
       if (!system) continue;
       // Genesis and Atari also use .bin; a folder name settles it.
       if (hint && SYSTEMS[hint] && f.ext === 'bin') system = hint;
-      const base = f.name.slice(0, f.name.length - (f.ext.length + 1));
+      const fileBase = f.name.slice(0, f.name.length - (f.ext.length + 1));
+      const gf = gameFolderOf(parts);
+      const folderName = gf ? gf.split('/').pop() : null;
+      const base = gf && perFolder.get(gf) === 1 ? folderName : fileBase;
       const { title, tags } = cleanTitle(base);
-      const pic = art.get(lc(base));
+      const pic = art.get(lc(base)) || (gf && folderArt.get(parts.slice(0, -1).join('/'))) || null;
+      if (pic && !art.has(lc(base))) art.set(lc(base), pic);
       // Track files a .cue / .gdi / .m3u needs alongside it (one level of .m3u -> .cue).
       let tracks;
       if (['cue', 'gdi', 'm3u'].includes(f.ext)) {
@@ -399,10 +460,12 @@ function createGames({ dataDir, getFolder, mock = false, sample = null }) {
         id: idOf(f.rel), path: f.rel, file: f.name, base, title, tags, system, size, guessed,
         color: f.ext === 'gbc' || /\bcolor\b/i.test(tags.join(' ')) ? true : undefined,
         art: pic ? true : undefined, parts: tracks,
+        // Where its saves and box art go in the layout: Saves/<console>/<saveFolder>/<saveName> - …
+        saveFolder: folderName || fileBase, saveName: base,
       });
     }
     games.sort((a, b) => a.title.localeCompare(b.title, undefined, { sensitivity: 'base', numeric: true }));
-    return { folder: root, games, bios, art };
+    return { folder: root, games, bios, art, structured, dirs };
   }
 
   async function library(refresh = false) {
@@ -470,17 +533,55 @@ function createGames({ dataDir, getFolder, mock = false, sample = null }) {
 
   const saveDir = (id) => path.join(savesDir, id.replace(/[^a-f0-9]/g, ''));
   const SLOT = /^(auto|[1-9])$/;
-  async function listStates(id) {
-    const dir = saveDir(id);
-    const names = await fsp.readdir(dir).catch(() => []);
-    const out = [];
-    for (const n of names) {
-      const m = /^state-(auto|[1-9])\.state$/.exec(n);
-      if (!m) continue;
-      const st = await fsp.stat(path.join(dir, n));
-      out.push({ slot: m[1], at: st.mtimeMs, size: st.size, shot: names.includes(`state-${m[1]}.png`) });
+  const SLOTS = ['auto', '1', '2', '3', '4', '5', '6', '7', '8', '9'];
+  // Saves kept with MediaDesk's settings (no layout, or a folder MediaDesk can't write to).
+  const LEGACY_NAMES = { battery: 'battery.sav', backup: 'battery.sav.bak', state: (n) => `state-${n}.state`, shot: (n) => `state-${n}.png` };
+  // Saves in the games folder: Saves/<console>/<game>/<game> - Save slot 1.state and so on.
+  const folderNames = (game) => {
+    const n = safeName(game.saveName);
+    const slot = (x) => (x === 'auto' ? 'Auto save' : `Save slot ${x}`);
+    return { battery: `${n} - Battery save.sav`, backup: `${n} - Battery save (previous).sav`, state: (x) => `${n} - ${slot(x)}.state`, shot: (x) => `${n} - ${slot(x)} (picture).png` };
+  };
+  const writable = new Map(); // folder -> { ok, at }
+  async function canWrite(dir) {
+    const c = writable.get(dir);
+    if (c && Date.now() - c.at < 60e3) return c.ok;
+    let ok = false;
+    try { await fsp.mkdir(dir, { recursive: true }); await fsp.access(dir, fs.constants.W_OK); ok = true; } catch { ok = false; }
+    writable.set(dir, { ok, at: Date.now() });
+    return ok;
+  }
+  const savesRoot = (lib) => path.join(lib.folder, lib.dirs?.saves || LAYOUT.saves);
+  // Where a game's saves are, and what they're called. Saves made before the layout (kept with
+  // MediaDesk's settings) move across the first time; `legacyId` is the game's id from before
+  // its files were moved into the layout.
+  async function savePlace(id, legacyId = id) {
+    const lib = await library();
+    const game = lib.games.find((g) => g.id === id);
+    if (!lib.structured || !game || mock || !(await canWrite(savesRoot(lib)))) return { dir: saveDir(id), names: LEGACY_NAMES, inFolder: false };
+    const dir = path.join(savesRoot(lib), safeName(FOLDER_NAMES[game.system] || game.system), safeName(game.saveFolder));
+    const names = folderNames(game);
+    const old = saveDir(legacyId);
+    if (fs.existsSync(old)) {
+      await fsp.mkdir(dir, { recursive: true });
+      const pairs = [[LEGACY_NAMES.battery, names.battery], [LEGACY_NAMES.backup, names.backup], ...SLOTS.flatMap((x) => [[LEGACY_NAMES.state(x), names.state(x)], [LEGACY_NAMES.shot(x), names.shot(x)]])];
+      for (const [a, b] of pairs) {
+        const from = path.join(old, a);
+        if (fs.existsSync(from) && !fs.existsSync(path.join(dir, b))) await fsp.copyFile(from, path.join(dir, b));
+      }
+      await fsp.rm(old, { recursive: true, force: true });
     }
-    const sram = await fsp.stat(path.join(dir, 'battery.sav')).catch(() => null);
+    return { dir, names, inFolder: true };
+  }
+  async function listStates(id) {
+    const { dir, names } = await savePlace(id);
+    const out = [];
+    for (const x of SLOTS) {
+      const st = await fsp.stat(path.join(dir, names.state(x))).catch(() => null);
+      if (!st) continue;
+      out.push({ slot: x, at: st.mtimeMs, size: st.size, shot: fs.existsSync(path.join(dir, names.shot(x))) });
+    }
+    const sram = await fsp.stat(path.join(dir, names.battery)).catch(() => null);
     return { states: out.sort((a, b) => b.at - a.at), battery: sram ? { at: sram.mtimeMs, size: sram.size } : null };
   }
 
@@ -512,6 +613,28 @@ function createGames({ dataDir, getFolder, mock = false, sample = null }) {
   async function removeCustom(name) {
     for (const ext of ['png', 'jpg', 'webp', 'gif']) await fsp.rm(path.join(customDir, `${name}.${ext}`), { force: true });
   }
+  // In the layout, box art you choose is kept as Box Art/<console>/<game>.png.
+  async function layoutArtBase(game) {
+    const lib = await library();
+    if (!lib.structured || mock) return null;
+    const dir = path.join(lib.folder, lib.dirs.art || LAYOUT.art, safeName(FOLDER_NAMES[game.system] || game.system));
+    return (await canWrite(dir)) ? path.join(dir, safeName(game.saveName)) : null;
+  }
+  async function saveGameArt(game, buf) {
+    const base = await layoutArtBase(game);
+    if (!base) return saveCustom(`game-${game.id}`, buf);
+    const type = imageType(buf);
+    if (!type || type === 'gif') throw new GameError(415, 'That isn’t a picture MediaDesk can use (PNG, JPEG or WebP)');
+    for (const ext of ['png', 'jpg', 'jpeg', 'webp']) await fsp.rm(`${base}.${ext}`, { force: true });
+    await fsp.writeFile(`${base}.${type}`, buf);
+    await removeCustom(`game-${game.id}`);
+    cache = null;
+  }
+  async function removeGameArt(game) {
+    await removeCustom(`game-${game.id}`);
+    const base = await layoutArtBase(game);
+    if (base) { for (const ext of ['png', 'jpg', 'jpeg', 'webp']) await fsp.rm(`${base}.${ext}`, { force: true }); cache = null; }
+  }
   const libretroFile = (game) => {
     const sys = SYSTEMS[game.system];
     const set = game.system === 'gb' && (game.color || extOf(game.file) === 'gbc') ? 'Nintendo - Game Boy Color' : sys?.art;
@@ -524,6 +647,11 @@ function createGames({ dataDir, getFolder, mock = false, sample = null }) {
     const mine = await findCustom(`game-${game.id}`);
     if (mine) return sendPlain(res, mine, 'max-age=31536000');
     const lib = await library();
+    // The layout's Box Art/<console>/<game> picture.
+    if (lib.structured && !mock) {
+      const b = path.join(lib.folder, lib.dirs.art || LAYOUT.art, safeName(FOLDER_NAMES[game.system] || game.system), safeName(game.saveName));
+      for (const ext of ['png', 'jpg', 'jpeg', 'webp']) if (fs.existsSync(`${b}.${ext}`)) return sendPlain(res, `${b}.${ext}`, 'no-cache');
+    }
     // A picture next to the game (same name) wins.
     if (game.art) {
       const rel = lib.art.get(lc(game.base));
@@ -785,6 +913,123 @@ function createGames({ dataDir, getFolder, mock = false, sample = null }) {
     await pipeline(fs.createReadStream(abs), res).catch(() => {});
   }
 
+  // ---- The folder layout ----
+
+  // Make ROMS, BIOS, Saves and Box Art, with a folder for each console in ROMS and BIOS.
+  async function setupLayout() {
+    const folder = getFolder();
+    if (!folder || mock) throw new GameError(400, 'Choose the games folder first');
+    const root = path.resolve(folder);
+    const top = await fsp.readdir(root, { withFileTypes: true }).catch(() => { throw new GameError(404, `The games folder ${root} can’t be found`); });
+    const existing = (n) => top.find((e) => e.isDirectory() && lc(e.name) === lc(n))?.name || n;
+    const biosConsoles = new Set([...Object.values(KNOWN_BIOS), 'psx', 'segaCD', 'segaSaturn', 'dreamcast', '3do', 'nds', 'gba', 'atari5200', 'lynx', 'coleco', 'pce']);
+    try {
+      for (const [id, name] of Object.entries(FOLDER_NAMES)) {
+        await fsp.mkdir(path.join(root, existing(LAYOUT.roms), name), { recursive: true });
+        if (biosConsoles.has(id)) await fsp.mkdir(path.join(root, existing(LAYOUT.bios), name), { recursive: true });
+      }
+      await fsp.mkdir(path.join(root, existing(LAYOUT.saves)), { recursive: true });
+      await fsp.mkdir(path.join(root, existing(LAYOUT.art)), { recursive: true });
+    } catch (err) {
+      throw new GameError(403, `MediaDesk can’t make folders in ${root} (${err.code === 'EROFS' ? 'it’s read-only' : err.code || err.message}). Give it permission to write there.`);
+    }
+    writable.clear();
+    cache = null;
+  }
+
+  // Move games, their track files and pictures, and BIOS files found elsewhere in the games folder
+  // into the layout; their saves, favourites, play history and box art go with them.
+  async function organize() {
+    await setupLayout();
+    const before = await scan(true);
+    const root = before.folder;
+    const romsDir = before.dirs.roms || LAYOUT.roms;
+    const biosDir = before.dirs.bios || LAYOUT.bios;
+    const artDir2 = before.dirs.art || LAYOUT.art;
+    const inside = (rel, d) => lc(rel.split('/')[0]) === lc(d);
+    const moved = [];
+    const skipped = [];
+    const emptied = new Set();
+    const move = async (from, to) => {
+      if (from === to) return;
+      await fsp.mkdir(path.dirname(to), { recursive: true });
+      try { await fsp.rename(from, to); } catch (err) {
+        if (err.code !== 'EXDEV') throw err;
+        await fsp.copyFile(from, to);
+        await fsp.rm(from);
+      }
+      emptied.add(path.dirname(from));
+    };
+    for (const g of before.games) {
+      if (inside(g.path, romsDir)) continue;
+      const primary = path.join(root, ...g.path.split('/'));
+      const all = [primary, ...(g.parts || []).map((r) => path.join(root, ...r.split('/')))];
+      const baseDir = path.dirname(primary);
+      if (all.some((f) => path.relative(baseDir, f).startsWith('..'))) { skipped.push({ path: g.path, reason: 'its track files are in another folder' }); continue; }
+      const consoleDir = path.join(root, romsDir, FOLDER_NAMES[g.system] || g.system);
+      const disc = SYSTEMS[g.system]?.disc && (g.parts?.length || ['cue', 'gdi', 'cdi', 'chd', 'iso', 'pbp', 'cso', 'm3u', 'ccd', 'mds', 'img', 'bin'].includes(extOf(g.file)));
+      const target = disc ? path.join(consoleDir, safeName(g.title)) : consoleDir;
+      const dest = all.map((f) => path.join(target, path.relative(baseDir, f)));
+      if (dest.some((d, i) => d !== all[i] && fs.existsSync(d))) { skipped.push({ path: g.path, reason: 'a file with the same name is already there' }); continue; }
+      try {
+        for (let i = 0; i < all.length; i++) await move(all[i], dest[i]);
+      } catch (err) { skipped.push({ path: g.path, reason: err.message }); continue; }
+      const newRel = path.relative(root, dest[0]).split(path.sep).join('/');
+      moved.push({ oldId: g.id, newRel, system: g.system });
+      // Its picture (same name, next to it or in a covers folder) goes to Box Art.
+      const pic = g.art ? before.art.get(lc(g.base)) : null;
+      if (pic && !inside(pic, artDir2) && !inside(pic, romsDir)) {
+        const from = path.join(root, ...pic.split('/'));
+        const to = path.join(root, artDir2, FOLDER_NAMES[g.system] || g.system, `${safeName(disc ? g.title : g.base)}.${extOf(pic)}`);
+        if (!fs.existsSync(to)) await move(from, to).catch(() => {});
+      }
+    }
+    let biosMoved = 0;
+    for (const b of before.bios) {
+      // Into BIOS/<console>/ (one already in its console's folder, or of no known console, stays).
+      if (inside(b.path, biosDir) && (b.path.split('/').length > 2 || !b.system)) continue;
+      const to = path.join(root, biosDir, ...(b.system ? [FOLDER_NAMES[b.system] || b.system] : []), b.name);
+      if (fs.existsSync(to)) continue;
+      try { await move(path.join(root, ...b.path.split('/')), to); biosMoved++; } catch { /* leave it */ }
+    }
+    // Folders left empty go (never the games folder itself or the layout's folders).
+    const keep = new Set([root, ...[romsDir, biosDir, artDir2, LAYOUT.saves].map((d) => path.join(root, d))]);
+    for (const d of [...emptied].sort((a, b) => b.length - a.length)) {
+      let cur = d;
+      while (cur.startsWith(root + path.sep) && !keep.has(cur)) {
+        try { await fsp.rmdir(cur); } catch { break; }
+        cur = path.dirname(cur);
+      }
+    }
+    // The games' new places: carry over saves, favourites, play history and box art choices.
+    const after = await library(true);
+    const s = await readSettings();
+    const remap = new Map();
+    for (const m of moved) {
+      const g = after.games.find((x) => x.path === m.newRel);
+      if (!g) continue;
+      remap.set(m.oldId, g.id);
+      await savePlace(g.id, m.oldId).catch(() => {});
+      const mine = await findCustom(`game-${m.oldId}`);
+      if (mine) { await saveGameArt(g, await fsp.readFile(mine)).catch(() => {}); await removeCustom(`game-${m.oldId}`); }
+    }
+    s.favorites = s.favorites.map((id) => remap.get(id) || id);
+    for (const [from, to] of remap) {
+      if (s.played[from]) { s.played[to] = s.played[from]; delete s.played[from]; }
+      if (s.art[from]) { s.art[to] = { ...s.art[from], v: Date.now() }; delete s.art[from]; }
+    }
+    for (const sys of Object.values(s.systems)) {
+      if (sys.bios && !after.bios.some((b) => b.path === sys.bios)) {
+        const name = sys.bios.split('/').pop();
+        const found = after.bios.find((b) => b.name === name);
+        if (found) sys.bios = found.path;
+      }
+    }
+    await writeSettings(s);
+    cache = null;
+    return { moved: moved.length, skipped, bios: biosMoved };
+  }
+
   // ---- HTTP ----
 
   async function handle(req, res, url, { sendJson, readJson }) {
@@ -799,7 +1044,15 @@ function createGames({ dataDir, getFolder, mock = false, sample = null }) {
         return sendJson(res, 200, {
           configured: true, folder: lib.folder, demo: Boolean(lib.demo), games: lib.games, bios: lib.bios,
           favorites: s.favorites, played: s.played, systems: s.systems, emulator: emulatorStatus(), artPrefs: s.art,
+          layout: lib.structured ? { dirs: lib.dirs, savesInFolder: !mock && await canWrite(savesRoot(lib)) } : null,
+          folderNames: FOLDER_NAMES,
         });
+      }
+      if (p === '/layout' && req.method === 'POST') {
+        const body = await readJson(req);
+        if (body.organize) return sendJson(res, 200, await organize());
+        await setupLayout();
+        return sendJson(res, 200, { ok: true });
       }
       // /file/<path> (the emulator names the game after the end of the address) or /file?path=
       if (p.startsWith('/file') && (req.method === 'GET' || req.method === 'HEAD')) {
@@ -815,8 +1068,8 @@ function createGames({ dataDir, getFolder, mock = false, sample = null }) {
       if (p === '/art' && (req.method === 'PUT' || req.method === 'DELETE')) {
         const { game } = await findGame(q.get('id') || '');
         const s = await readSettings();
-        if (req.method === 'PUT') await saveCustom(`game-${game.id}`, await readBody(req, 15 * 1024 * 1024));
-        else await removeCustom(`game-${game.id}`);
+        if (req.method === 'PUT') await saveGameArt(game, await readBody(req, 15 * 1024 * 1024));
+        else await removeGameArt(game);
         s.art[game.id] = { ...s.art[game.id], none: false, v: Date.now() };
         await writeSettings(s);
         return sendJson(res, 200, { art: s.art });
@@ -834,7 +1087,7 @@ function createGames({ dataDir, getFolder, mock = false, sample = null }) {
         if (body.refetch) {
           const f = libretroFile(game);
           if (f) { await fsp.rm(f, { force: true }); await fsp.rm(`${f}.miss`, { force: true }); }
-          await removeCustom(`game-${game.id}`);
+          await removeGameArt(game);
           cur.none = false;
         }
         cur.v = Date.now();
@@ -907,22 +1160,22 @@ function createGames({ dataDir, getFolder, mock = false, sample = null }) {
       const sm = /^\/saves\/([a-f0-9]{16})(?:\/(state|shot|battery)(?:\/(auto|[1-9]))?)?$/.exec(p);
       if (sm) {
         const [, id, kind, slot] = sm;
-        const dir = saveDir(id);
+        const { dir, names } = await savePlace(id);
         if (!kind && req.method === 'GET') return sendJson(res, 200, await listStates(id));
         if (kind === 'battery') {
-          const file = path.join(dir, 'battery.sav');
+          const file = path.join(dir, names.battery);
           if (req.method === 'GET') { if (!fs.existsSync(file)) { res.writeHead(204); return res.end(); } return await sendRange(req, res, file); }
           if (req.method === 'PUT') {
             const data = await readBody(req, 64 * 1024 * 1024);
             await fsp.mkdir(dir, { recursive: true });
             // Keep the previous one, in case a game wipes its own save.
-            if (fs.existsSync(file)) await fsp.copyFile(file, `${file}.bak`).catch(() => {});
+            if (fs.existsSync(file)) await fsp.copyFile(file, path.join(dir, names.backup)).catch(() => {});
             await fsp.writeFile(file, data);
             return sendJson(res, 200, { ok: true, size: data.length });
           }
         }
         if ((kind === 'state' || kind === 'shot') && SLOT.test(slot || '')) {
-          const file = path.join(dir, `state-${slot}.${kind === 'state' ? 'state' : 'png'}`);
+          const file = path.join(dir, kind === 'state' ? names.state(slot) : names.shot(slot));
           if (req.method === 'GET') {
             if (!fs.existsSync(file)) return sendJson(res, 404, { error: 'Nothing saved in that slot' });
             return kind === 'shot' ? await sendPlain(res, file, 'no-cache') : await sendRange(req, res, file);
@@ -935,8 +1188,8 @@ function createGames({ dataDir, getFolder, mock = false, sample = null }) {
             return sendJson(res, 200, await listStates(id));
           }
           if (req.method === 'DELETE') {
-            await fsp.rm(path.join(dir, `state-${slot}.state`), { force: true });
-            await fsp.rm(path.join(dir, `state-${slot}.png`), { force: true });
+            await fsp.rm(path.join(dir, names.state(slot)), { force: true });
+            await fsp.rm(path.join(dir, names.shot(slot)), { force: true });
             return sendJson(res, 200, await listStates(id));
           }
         }

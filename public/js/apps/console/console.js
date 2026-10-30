@@ -3,7 +3,7 @@
 // and play with a keyboard or any USB / Bluetooth controller. Games run in EmulatorJS
 // (player.js); saves live on the server so they follow you between devices.
 
-import { h, clear, toast, toastError, timeAgo, formatBytes } from '../../ui.js';
+import { h, clear, toast, toastError, timeAgo, formatBytes, confirmDialog } from '../../ui.js';
 import { icon, appIcon } from '../../icons.js';
 import { openApp } from '../../wm.js';
 import { SYSTEMS, BOX, ORDER, CORES, CORE_NAMES, SHADERS, findDcBios, buttonsFor, keyName, padName, padStyle } from './systems.js';
@@ -787,19 +787,65 @@ class GameConsole {
         this.navBtn('Look for new games', async () => { toast('Scanning the games folder…', { timeout: 1500 }); await this.load(true); this.openSettings({ tab: 'library' }); }, 'lib:rescan', 'primary'),
         this.navBtn('Change folder (MediaDesk Settings)', () => openApp('settings', { tab: 'console' }), 'lib:folder')),
       h('div', { class: 'gc-counts' }, ORDER.filter((s) => counts[s]).map((s) => h('div', { class: 'gc-count' }, this.sysBadge(s), h('strong', {}, counts[s])))),
+      ...this.layoutSection(lib),
       h('h3', {}, 'Emulators'),
       h('p', { class: 'gc-small' }, `The first time you play a console, the MediaDesk server downloads its emulator (EmulatorJS ${em.version || ''}) and keeps it, so later games start quickly and work offline. ${em.bytes ? `Using ${formatBytes(em.bytes)}.` : 'Nothing downloaded yet.'}`),
       h('div', { class: 'gc-row' }, this.navBtn('Remove downloaded emulators', async () => {
         try { this.lib.emulator = await api('/emulator-cache', { method: 'DELETE' }); toast('Emulators removed — they’ll download again when needed'); this.layers.at(-1).refresh(); } catch (err) { toastError(err); }
       }, 'lib:clear')),
       h('h3', {}, 'Saves'),
-      h('p', { class: 'gc-small' }, 'Save states, your place when you quit, and in-game (battery) saves are kept on the MediaDesk server, next to its settings — so they’re on every device you play on.'));
+      h('p', { class: 'gc-small' }, lib.layout?.savesInFolder
+        ? `Save states, your place when you quit, and in-game (battery) saves are kept in the games folder, in ${['Saves', '<console>', '<game>'].join(lib.folder.includes('\\') ? '\\' : '/')}, with names like “Super Mario World - Save slot 1.state” — on every device you play on.`
+        : 'Save states, your place when you quit, and in-game (battery) saves are kept on the MediaDesk server, next to its settings — so they’re on every device you play on.'));
+  }
+
+  // The games folder's layout: ROMS, BIOS, Saves and Box Art, with a folder for each console.
+  layoutSection(lib) {
+    if (lib.demo || !lib.folder) return [];
+    const L = lib.layout?.dirs;
+    const sep = lib.folder.includes('\\') ? '\\' : '/';
+    const paths = [
+      ['Cartridge games', `${L?.roms || 'ROMS'}${sep}<console>${sep}<game files>`],
+      ['Disc games', `${L?.roms || 'ROMS'}${sep}<console>${sep}<game name>${sep}<disc files>`],
+      ['BIOS files', `${L?.bios || 'BIOS'}${sep}<console>${sep}<BIOS files>`],
+      ['Saves', `${L?.saves || 'Saves'}${sep}<console>${sep}<game name>${sep}<save files>`],
+      ['Box art', `${L?.art || 'Box Art'}${sep}<console>${sep}<game name>.png`],
+    ];
+    const setUp = async (organize) => {
+      if (organize) {
+        const ok = await confirmDialog({
+          title: 'Move your games into these folders?',
+          message: 'MediaDesk moves each game it recognises (with its track files and cover picture) into ROMS, and BIOS files into BIOS, each under its console. Saves, favourites and play history go with them. Files it doesn’t recognise are left where they are.',
+          confirm: 'Move my games',
+        });
+        if (!ok) return;
+      }
+      try {
+        toast(organize ? 'Moving your games…' : 'Making the folders…', { timeout: 2000 });
+        const r = await api('/layout', { method: 'POST', body: JSON.stringify({ organize }) });
+        if (organize) {
+          toast(`Moved ${r.moved} game${r.moved === 1 ? '' : 's'}${r.bios ? ` and ${r.bios} BIOS file${r.bios === 1 ? '' : 's'}` : ''}`, { type: 'success',
+            body: r.skipped.length ? `Left ${r.skipped.length} where ${r.skipped.length === 1 ? 'it was' : 'they were'}: ${r.skipped.slice(0, 3).map((x) => `${x.path.split('/').pop()} (${x.reason})`).join('; ')}${r.skipped.length > 3 ? '…' : ''}` : '', timeout: 9000 });
+        } else toast('Folders made', { type: 'success', body: 'Put games in ROMS and BIOS files in BIOS, each in its console’s folder.' });
+        await this.load(true);
+        this.openSettings({ tab: 'library' });
+      } catch (err) { toastError(err, organize ? 'Couldn’t move the games' : 'Couldn’t make the folders'); }
+    };
+    return [
+      h('h3', {}, 'Folder layout'),
+      h('p', { class: 'gc-small' }, L ? 'Your games folder uses the layout:' : 'Keep everything in one tidy layout inside the games folder:'),
+      h('div', { class: 'gc-help gc-layout' }, paths.map(([what, where]) => h('div', {}, h('strong', {}, what), h('span', {}, where)))),
+      h('p', { class: 'gc-small' }, 'Console folders: ', Object.values(lib.folderNames || {}).join(', '), '.'),
+      h('div', { class: 'gc-row' },
+        this.navBtn(L ? 'Make any missing folders' : 'Make these folders', () => setUp(false), 'lib:setup'),
+        this.navBtn('Move my games into these folders', () => setUp(true), 'lib:organize')),
+    ];
   }
 
   setAbout(pane) {
     pane.append(h('h3', {}, 'The Game Console'),
       h('p', {}, 'Plays games for ', ORDER.filter((s) => !SYSTEMS[s].unsupported).map((s) => SYSTEMS[s].short).join(', '), '.'),
-      h('p', { class: 'gc-small' }, 'Emulation by EmulatorJS (GPL-3.0) and the libretro cores it packages, each under its own licence; they’re downloaded to your server from npm, not included with MediaDesk. Cover art comes from the libretro-thumbnails project when your server can reach it. Dreamcast games are listed but can’t be played yet — no Dreamcast emulator runs in a browser today.'),
+      h('p', { class: 'gc-small' }, 'Emulation by EmulatorJS (GPL-3.0) and the libretro cores it packages, each under its own licence; they’re downloaded to your server from npm, not included with MediaDesk. Dreamcast games play with flycast-wasm (Flycast for WebAssembly, GPL-2.0), downloaded from GitHub. Cover art comes from the libretro-thumbnails project when your server can reach it.'),
       h('h3', {}, 'Buttons'),
       h('div', { class: 'gc-help' },
         h('div', {}, h('strong', {}, 'Move'), h('span', {}, 'D-pad, left stick or arrow keys')),

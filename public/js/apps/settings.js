@@ -392,7 +392,7 @@ function renderConsole(container) {
   if (cfg.mock) container.append(h('div', { class: 'notice' }, 'Demo mode: The Game Console shows sample games plus a small test cartridge that MediaDesk makes itself, and the folder can’t be changed.'));
   container.append(
     section('Games folder',
-      h('p', { class: 'muted small' }, 'The folder on the computer running MediaDesk that holds your games (ROMs and disc images), as a full path. MediaDesk only reads it. Sub-folders named after each console help it tell games apart — for example “NES”, “SNES”, “N64”, “Genesis”, “PlayStation”, “Game Boy”. Put BIOS files in a “BIOS” sub-folder.'),
+      h('p', { class: 'muted small' }, 'The root folder for The Game Console on the computer running MediaDesk, as a full path. Inside it: ROMS\\<console>\\<game files> for cartridge games, ROMS\\<console>\\<game name>\\<disc files> for disc games, BIOS\\<console>\\<BIOS files>, Saves\\<console>\\<game name>\\<save files> and Box Art\\<console>\\<game name>.png. In The Game Console, Settings → Library makes these folders and can move games you already have into them. A folder without a ROMS folder still works the old way (read only, with saves kept by MediaDesk).'),
       h('label', { class: 'field' }, h('span', {}, 'Folder'), input),
       status,
       h('div', { class: 'btn-row' }, save, h('button', { class: 'btn', onclick: () => import('../wm.js').then((wm) => wm.openApp('console')) }, h('span', { html: icon.external }), 'Open The Game Console'))),

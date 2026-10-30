@@ -7,7 +7,7 @@ services:
       - "8080:8080"
     volumes:
       - ./config:/config
-      # - /mnt/games:/games:ro   # The Game Console: your games folder (then set GAMES_DIR below)
+      # - /mnt/games:/games      # The Game Console: its root folder (then set GAMES_DIR below); writable, for saves
       # Folders for the Files app: mount them here, then add the container path (e.g. /media) in Settings > Files.
       # - /mnt/media:/media
     environment:
