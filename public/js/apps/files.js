@@ -466,6 +466,8 @@ class FileBrowser {
       !e.dir && /\.(log|lo_|txt)$/i.test(e.name) ? { label: 'Open in Log Viewer', icon: appIcon.logs, disabled: many, action: () => openApp('logs', { root: this.root, path: join(this.path, e.name), key: `${this.root}:${join(this.path, e.name)}` }) } : null,
       !e.dir && kindOf(e) !== 'text' ? { label: 'Open in Notes', icon: appIcon.notes, disabled: many, action: () => openApp('notes', { root: this.root, path: join(this.path, e.name) }) } : null,
       ...this.archiveItems(e, many),
+      !e.dir && /\.(png|jpe?g|gif|webp|bmp|svg|avif|ora)$/i.test(e.name) ? { label: 'Edit in Paint Pro', icon: appIcon.paintpro, disabled: many, action: () => openApp('paintpro', { root: this.root, path: join(this.path, e.name) }) } : null,
+      !e.dir && /\.(png|jpe?g|gif|webp|bmp)$/i.test(e.name) ? { label: 'Edit in Paint', icon: appIcon.paint, disabled: many, action: () => openApp('paint', { root: this.root, path: join(this.path, e.name) }) } : null,
       kindOf(e) === 'image' && extOf(e.name) !== 'ico' && extOf(e.name) !== 'tbn' ? { label: 'Set as desktop wallpaper', icon: icon.image, disabled: many, action: () => this.setWallpaper(e) } : null,
       ...(this.selectedAudio().length ? ['-',
         { label: 'Play in Music', icon: icon.play, action: () => this.toMusic(true) },
@@ -518,6 +520,8 @@ class FileBrowser {
     if (e.dir) return this.go(this.root, join(this.path, e.name));
     // Log files open in the Log Viewer (Notes is still in the right-click menu).
     if (/\.(log|lo_)$/i.test(e.name)) return openApp('logs', { root: this.root, path: join(this.path, e.name), key: `${this.root}:${join(this.path, e.name)}` });
+    // OpenRaster pictures (layered) open in Paint Pro.
+    if (/\.ora$/i.test(e.name)) return openApp('paintpro', { root: this.root, path: join(this.path, e.name) });
     // Archives open in the Archive Expander, like double-clicking them with 7-Zip installed.
     if (isArchiveName(e.name) && state.config.archive?.available) return openApp('archive', { root: this.root, path: join(this.path, e.name) });
     this.preview(e);
