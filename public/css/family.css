@@ -333,6 +333,7 @@ select.fam-input { padding-right: 28px; }
 
 /* Meals */
 .fam-meals-body { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: 10px; }
+.fam-meals-body > * { flex-shrink: 0; } /* a long recipe list scrolls; nothing above it gets squeezed */
 .fam-meal-grid { display: grid; grid-template-columns: 64px repeat(var(--slots), minmax(150px, 1fr)); gap: 6px; background: var(--f-panel); padding: 12px; border-radius: var(--f-radius); box-shadow: var(--f-shadow); }
 .fam-meal-slot-head { font-weight: 700; padding: 4px 6px; color: var(--f-muted); font-size: 13px; text-transform: uppercase; }
 .fam-meal-day { display: flex; flex-direction: column; align-items: center; justify-content: center; border-radius: 12px; color: var(--f-muted); font-size: 12px; }

@@ -121,7 +121,7 @@ export class RecipeBox {
     };
     q.addEventListener('input', () => { this.q = q.value; draw(); });
     draw();
-    clear(body, shelf, head, filters, status, grid);
+    clear(body, shelf, book ? head : null, filters, status, grid);
     this.drawStatus(status);
   }
 
