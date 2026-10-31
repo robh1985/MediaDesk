@@ -231,9 +231,31 @@ export class ChoresView {
       partRow.hidden = type.value !== 'routine';
     };
     const partRow = field('Part of the day', part);
+    // Quick picks (Settings → Quick picks): choosing one fills in the whole chore.
+    const picks = this.store.quickPicks().filter((q) => q.title);
+    const quick = c || !picks.length ? null : field('Quick pick', select([['', 'Choose a ready-made chore… (or make your own below)'],
+      ...picks.map((q) => [q.id, `${q.emoji ? `${q.emoji} ` : ''}${q.title}${q.stars ? ` · ${q.stars} ★` : ''}${q.kind === 'routine' ? ' · routine' : ''}`])], '', {
+      class: 'fam-input fam-quick-pick',
+      onchange: (e) => {
+        const q = picks.find((x) => x.id === e.target.value);
+        if (!q) return;
+        emoji.value = q.emoji || ''; emoji.textContent = q.emoji || '➕';
+        title.value = q.title;
+        stars.value = q.stars ?? 1;
+        type.value = q.kind === 'routine' ? 'routine' : 'chore';
+        if (q.part && q.part !== 'anytime') part.value = q.part;
+        const qr = q.repeat || { kind: 'daily' };
+        kind.value = qr.kind || 'daily';
+        if (qr.kind === 'weekly') { days.clear(); for (const d of qr.days || []) days.add(d); }
+        if (qr.kind === 'every') everyN.value = qr.n || 2;
+        if (qr.kind === 'monthly') monthDay.value = qr.day || 1;
+        drawRepeat();
+      },
+    }));
     kind.addEventListener('change', drawRepeat);
     type.addEventListener('change', drawRepeat);
     const body = h('div', { class: 'fam-form' },
+      quick,
       h('div', { class: 'fam-title-row' }, emoji, title),
       field('Type', type),
       selfOnly ? h('p', { class: 'fam-note' }, `This chore is for you. A parent needs to approve it before its stars count${c ? '' : ' — you can still tick it off meanwhile'}.`)

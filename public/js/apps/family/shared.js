@@ -44,7 +44,10 @@ export function sheet(host, { title, body, actions = [], wide = false, onClose, 
   return result;
 }
 
-export const field = (label, control, hint) => h('label', { class: 'fam-field' }, h('span', { class: 'fam-label' }, label), control, hint ? h('span', { class: 'fam-hint' }, hint) : null);
+// A <label> only around a single input: a label around buttons (the people chips, weekdays) would
+// pass every click on to its first button.
+const labelable = (c) => c instanceof HTMLInputElement || c instanceof HTMLSelectElement || c instanceof HTMLTextAreaElement;
+export const field = (label, control, hint) => h(labelable(control) ? 'label' : 'div', { class: 'fam-field' }, h('span', { class: 'fam-label' }, label), control, hint ? h('span', { class: 'fam-hint' }, hint) : null);
 export const input = (attrs = {}) => h('input', { class: 'fam-input', ...attrs });
 export const select = (options, value, attrs = {}) => {
   const s = h('select', { class: 'fam-input', ...attrs }, options.map(([v, l]) => h('option', { value: v }, l)));

@@ -5,7 +5,8 @@ import { h, clear, toast, toastError } from '../../ui.js';
 import { sheet, field, input, select, toggle, avatar, memberPicker, emojiButton, colorPicker, COLORS, ICONS, parentGate, lockParent } from './shared.js';
 import { SLOTS } from './meals.js';
 import { portal, state, appPref } from '../../api.js';
-import { familyAuth } from './store.js';
+import { familyAuth, DEFAULT_QUICK_PICKS } from './store.js';
+import { describeChoreRepeat, PARTS, DAY_SHORT } from './dates.js';
 
 const PROVIDERS = [
   ['Google Calendar', 'On a computer, open Google Calendar → Settings → pick the calendar → “Integrate calendar” → copy the “Secret address in iCal format”.'],
@@ -26,7 +27,7 @@ export class SettingsView {
     this.el = el;
     if (section) this.section = section;
     const session = this.app.session || {};
-    const sections = [['profiles', 'Profiles'], ['calendars', 'Calendars'], ['general', 'General'], ['display', 'Photo frame & sleep'], ['parents', 'Parent PIN'],
+    const sections = [['profiles', 'Profiles'], ['calendars', 'Calendars'], ['general', 'General'], ['display', 'Photo frame & sleep'], ['quickpicks', 'Quick picks'], ['parents', 'Parent PIN'],
       session.parent ? ['users', 'Users'] : null, session.user ? ['account', 'My account'] : null].filter(Boolean);
     if (!sections.some(([id]) => id === this.section)) this.section = sections[0][0];
     const nav = h('div', { class: 'fam-seg fam-settings-nav' }, sections.map(([id, label]) => h('button', { class: this.section === id ? 'on' : '', onclick: () => { this.section = id; this.render(el); } }, label)));
@@ -355,6 +356,70 @@ export class SettingsView {
           } catch (e) { err.textContent = e.message; }
         } }, 'Save'),
         h('button', { class: 'fam-btn danger', onclick: async () => { try { await familyAuth.logout(); } catch { /* signed out anyway */ } location.reload(); } }, 'Sign out'))));
+  }
+
+  // --- Quick picks ---------------------------------------------------------------------
+
+  draw_quickpicks(body) {
+    const picks = this.store.quickPicks();
+    const parent = this.app.session?.parent;
+    const canEdit = !this.app.session?.user || parent;
+    const save = async (next, msg) => {
+      if (!(await parentGate(this.app.root, this.store, 'Changing quick picks needs a parent.'))) return;
+      await this.save({ quickPicks: next }, msg);
+      this.render(this.el, 'quickpicks');
+    };
+    body.append(this.card('Quick picks',
+      h('p', { class: 'fam-muted' }, 'Ready-made chores and routine steps to choose from when adding a chore. Choosing one fills in its name, emoji, stars, how often and part of the day; everything can still be changed before saving.'),
+      h('div', { class: 'fam-cal-list' }, picks.length ? picks.map((q, i) => h('div', { class: 'fam-cal-row' },
+        h('span', { class: 'fam-chore-emoji' }, q.emoji || '✔️'),
+        h('div', { class: 'fam-profile-main' }, h('b', {}, q.title),
+          h('small', {}, [q.kind === 'routine' ? `Routine · ${PARTS.find((p) => p.id === q.part)?.label || 'Morning'}` : 'Chore', describeChoreRepeat(q.repeat), q.stars ? `${q.stars} ★` : 'No stars'].join(' · '))),
+        canEdit ? h('div', { class: 'fam-profile-move' },
+          h('button', { class: 'fam-icon-btn', title: 'Move up', disabled: i === 0, html: ICONS.left, onclick: () => { const n = [...picks]; [n[i - 1], n[i]] = [n[i], n[i - 1]]; save(n, null); } }),
+          h('button', { class: 'fam-icon-btn', title: 'Move down', disabled: i === picks.length - 1, html: ICONS.right, onclick: () => { const n = [...picks]; [n[i + 1], n[i]] = [n[i], n[i + 1]]; save(n, null); } })) : null,
+        canEdit ? h('button', { class: 'fam-icon-btn', title: 'Edit', html: ICONS.edit, onclick: () => this.editQuickPick(q, picks, save) }) : null))
+        : h('div', { class: 'fam-muted small' }, 'No quick picks.')),
+      canEdit ? h('div', { class: 'fam-row-wrap' },
+        h('button', { class: 'fam-btn primary', onclick: () => this.editQuickPick(null, picks, save) }, h('span', { html: ICONS.plus }), 'Add a quick pick'),
+        h('button', { class: 'fam-btn', onclick: async () => {
+          const ok = await sheet(this.app.root, { title: 'Use the suggested quick picks?', body: h('p', {}, 'Your quick picks are replaced with MediaDesk’s suggestions. Chores you’ve already made aren’t changed.'), actions: [{ label: 'Cancel' }, { label: 'Use suggestions', primary: true, value: true }] });
+          if (ok) save(DEFAULT_QUICK_PICKS.map((q) => ({ ...q })), 'Suggestions restored');
+        } }, 'Restore suggestions'))
+        : h('p', { class: 'fam-muted small' }, 'A parent can change these.')));
+  }
+
+  async editQuickPick(q, picks, save) {
+    const emoji = emojiButton(q?.emoji || '🧹');
+    const title = input({ value: q?.title || '', placeholder: 'e.g. Feed the fish', required: true, autofocus: true, maxlength: 120 });
+    const stars = input({ type: 'number', min: 0, max: 100, value: q?.stars ?? 1, class: 'fam-input tiny' });
+    const type = select([['chore', 'Chore'], ['routine', 'Routine step']], q?.kind || 'chore');
+    const part = select(PARTS.map((p) => [p.id, `${p.emoji} ${p.label}`]), q?.part && q.part !== 'anytime' ? q.part : 'morning');
+    const r = q?.repeat || { kind: 'daily' };
+    const kind = select([['daily', 'Every day'], ['weekly', 'On these days'], ['once', 'Just once']], ['daily', 'weekly', 'once'].includes(r.kind) ? r.kind : 'daily');
+    const days = new Set(r.kind === 'weekly' ? r.days : [1, 2, 3, 4, 5]);
+    const dayRow = h('div', { class: 'fam-weekdays' });
+    const partRow = field('Part of the day', part);
+    const draw = () => {
+      clear(dayRow, kind.value !== 'weekly' ? null : DAY_SHORT.map((d, i) => h('button', { type: 'button', class: days.has(i) ? 'on' : '', onclick: () => { if (days.has(i)) days.delete(i); else days.add(i); draw(); } }, d.slice(0, 2))));
+      partRow.hidden = type.value !== 'routine';
+    };
+    kind.addEventListener('change', draw);
+    type.addEventListener('change', draw);
+    draw();
+    const out = await sheet(this.app.root, {
+      title: q ? 'Edit quick pick' : 'New quick pick',
+      body: h('div', { class: 'fam-form' }, h('div', { class: 'fam-title-row' }, emoji, title), field('Type', type), partRow, field('How often', h('div', {}, kind, dayRow)), field('Stars', stars)),
+      actions: [q ? { label: 'Delete', danger: true, left: true, value: 'delete' } : null, { label: 'Cancel' }, { label: 'Save', primary: true, submit: true, onClick: (close) => {
+        if (!title.value.trim()) { title.focus(); return; }
+        const repeat = { kind: kind.value };
+        if (kind.value === 'weekly') repeat.days = [...days].sort();
+        close({ id: q?.id || `qp-${Date.now().toString(36)}`, title: title.value.trim(), emoji: emoji.value, stars: Math.max(0, Number(stars.value) || 0), kind: type.value, part: type.value === 'routine' ? part.value : 'anytime', repeat });
+      } }],
+    });
+    if (!out) return;
+    if (out === 'delete') await save(picks.filter((x) => x.id !== q.id), 'Quick pick removed');
+    else await save(q ? picks.map((x) => (x.id === q.id ? out : x)) : [...picks, out], 'Saved');
   }
 
   // --- Parent PIN ------------------------------------------------------------------------

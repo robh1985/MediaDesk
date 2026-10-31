@@ -3,6 +3,26 @@
 
 const BASE = '/portal/family';
 
+// The quick picks a family starts with (until a parent changes them).
+export const DEFAULT_QUICK_PICKS = [
+  ['qp-bed', 'Make your bed', '🛏️', 1, 'routine', 'morning', { kind: 'daily' }],
+  ['qp-teeth', 'Brush teeth', '🪥', 1, 'routine', 'morning', { kind: 'daily' }],
+  ['qp-dressed', 'Get dressed', '👕', 1, 'routine', 'morning', { kind: 'daily' }],
+  ['qp-backpack', 'Pack backpack', '🎒', 1, 'routine', 'morning', { kind: 'weekly', days: [1, 2, 3, 4, 5] }],
+  ['qp-homework', 'Homework', '📚', 2, 'routine', 'afternoon', { kind: 'weekly', days: [1, 2, 3, 4] }],
+  ['qp-read', 'Read for 20 minutes', '📖', 1, 'routine', 'evening', { kind: 'daily' }],
+  ['qp-pjs', 'Pajamas on', '🌙', 1, 'routine', 'evening', { kind: 'daily' }],
+  ['qp-dishwasher', 'Empty the dishwasher', '🍽️', 2, 'chore', 'anytime', { kind: 'daily' }],
+  ['qp-table', 'Set the table', '🥣', 1, 'chore', 'anytime', { kind: 'daily' }],
+  ['qp-pet', 'Feed the pet', '🐶', 2, 'chore', 'anytime', { kind: 'daily' }],
+  ['qp-trash', 'Take out the trash', '🗑️', 2, 'chore', 'anytime', { kind: 'weekly', days: [2] }],
+  ['qp-laundry', 'Put away laundry', '🧺', 2, 'chore', 'anytime', { kind: 'weekly', days: [0, 4] }],
+  ['qp-room', 'Tidy your room', '🧸', 3, 'chore', 'anytime', { kind: 'weekly', days: [6] }],
+  ['qp-plants', 'Water the plants', '🪴', 1, 'chore', 'anytime', { kind: 'weekly', days: [0, 3] }],
+  ['qp-vacuum', 'Vacuum', '🧹', 3, 'chore', 'anytime', { kind: 'weekly', days: [6] }],
+  ['qp-car', 'Wash the car', '🚗', 5, 'chore', 'anytime', { kind: 'once' }],
+].map(([id, title, emoji, stars, kind, part, repeat]) => ({ id, title, emoji, stars, kind, part, repeat }));
+
 async function call(path, { method = 'GET', body, raw } = {}) {
   const headers = { 'X-MediaDesk': '1', Accept: 'application/json' };
   if (body !== undefined && !raw) headers['Content-Type'] = 'application/json';
@@ -154,6 +174,9 @@ export class Store {
   feedUrl() { return `${location.origin}/family-feed/${this.feedToken}/family.ics`; }
 
   // --- What the views need -------------------------------------------------
+
+  // Ready-made chores to start from, kept by parents in Settings → Quick picks.
+  quickPicks() { return Array.isArray(this.settings.quickPicks) ? this.settings.quickPicks : DEFAULT_QUICK_PICKS; }
 
   members() { return this.all('members').sort((a, b) => (a.order ?? 0) - (b.order ?? 0) || a.name.localeCompare(b.name)); }
   member(id) { return this.get('members', id); }
