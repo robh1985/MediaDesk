@@ -62,7 +62,9 @@ export class ChoresView {
       h('button', { class: 'fam-btn', onclick: () => this.manage() }, 'Manage'),
       h('button', { class: 'fam-btn primary', onclick: () => this.edit(null) }, h('span', { html: ICONS.plus }), this.mode === 'routines' ? 'Routine' : 'Chore'));
     const board = h('div', { class: 'fam-board' });
-    clear(el, bar, board);
+    // Chores, by the day: the extra chores menu on the right.
+    const extras = this.mode === 'chores' && this.layout === 'day' ? this.extrasPanel() : null;
+    clear(el, bar, extras ? h('div', { class: 'fam-chores-wrap' }, board, extras) : board);
     if (this.mode === 'chores' && this.layout === 'week') return this.drawWeek(board);
     const members = this.members();
     const cols = members.map((m) => this.column(m, isToday));
@@ -289,6 +291,59 @@ export class ChoresView {
     } catch (err) { toastError(err, 'Couldn’t save the chore'); }
   }
 }
+
+// The extra chores menu: one-off jobs. Tapping one adds it for whoever's signed in as a "just once"
+// chore, already done; its stars count once a parent approves it. Without an account (inside
+// MediaDesk) it asks who did it.
+const EXTRAS_KEY = 'mediadesk.family.extras';
+ChoresView.prototype.extrasPanel = function extrasPanel() {
+  const items = this.store.extraChores().filter((x) => x.title);
+  let open = true;
+  try { open = localStorage.getItem(EXTRAS_KEY) !== 'closed' && !(localStorage.getItem(EXTRAS_KEY) === null && matchMedia('(max-width: 760px)').matches); } catch { /* storage blocked */ }
+  const future = this.date > startOfDay(new Date());
+  const panel = h('aside', { class: `fam-extras ${open ? '' : 'closed'}`, 'aria-label': 'Extra chores' });
+  const toggle = () => {
+    open = !open;
+    panel.classList.toggle('closed', !open);
+    toggleBtn.setAttribute('aria-expanded', String(open));
+    try { localStorage.setItem(EXTRAS_KEY, open ? 'open' : 'closed'); } catch { /* storage blocked */ }
+  };
+  const toggleBtn = h('button', { class: 'fam-extras-toggle', 'aria-expanded': String(open), title: 'Extra chores', onclick: toggle },
+    h('span', { class: 'fam-extras-chevron', html: ICONS.right }), h('span', { class: 'fam-extras-title' }, 'Extra chores'));
+  panel.append(toggleBtn,
+    h('div', { class: 'fam-extras-list' },
+      h('div', { class: 'fam-extras-hint' }, future ? 'Pick today or an earlier day' : 'Did one? Tap it'),
+      items.length ? items.map((x) => h('button', { class: 'fam-extras-btn', disabled: future, title: `${x.title}${x.stars ? ` — ${x.stars} ★ once a parent approves` : ''}`, onclick: (e) => this.addExtra(x, e) },
+        h('span', { class: 'fam-extras-emoji' }, x.emoji || '✔️'), h('span', { class: 'fam-extras-name' }, x.title), x.stars ? h('span', { class: 'fam-extras-stars' }, `${x.stars} ★`) : null))
+        : h('div', { class: 'fam-extras-hint' }, 'A parent can add some in Settings → Extra chores.')));
+  return panel;
+};
+
+ChoresView.prototype.addExtra = async function addExtra(x, e) {
+  let who = this.me?.id || null;
+  if (this.user && !who) { toast('Ask a parent to link your account to your family profile first', { timeout: 3500 }); return; }
+  if (!who) {
+    const s = sheet(this.app.root, {
+      title: `Who did “${x.title}”?`, body: h('div', { class: 'fam-who-grid' }, this.store.members().map((m) => h('button', { type: 'button', class: 'fam-who', style: { '--c': m.color }, onclick: () => s.close(m.id) }, avatar(m, 'lg'), m.name))), actions: [{ label: 'Cancel' }],
+    });
+    who = await s;
+    if (!who) return;
+  }
+  const date = ymd(this.date);
+  const id = `x${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+  // A parent's own extra chore needs no one else's approval.
+  const approved = this.user?.role === 'parent';
+  const chore = { id, title: x.title, emoji: x.emoji, stars: Number(x.stars) || 0, members: [who], repeat: { kind: 'once', date }, kind: 'chore', part: 'anytime', start: date, extra: true, approved };
+  try {
+    await this.store.batch([
+      { op: 'put', col: 'chores', item: chore },
+      { op: 'put', col: 'chorelog', item: { id: logId(id, who, date), chore: id, member: who, for: who, by: who, date, stars: chore.stars, at: Date.now() } },
+    ]);
+    if (this.store.settings.celebrate !== false) confetti(this.app.root, e.clientX || 0, e.clientY || 0);
+    const name = this.store.member(who)?.name || 'Someone';
+    toast(approved ? `${x.emoji || ''} ${x.title} — done!`.trim() : `${x.emoji || ''} ${x.title} — done by ${name}`.trim(), { body: approved || !chore.stars ? '' : `The ${chore.stars} ★ count once a parent approves it.`, type: 'success', timeout: 3500 });
+  } catch (err) { toastError(err, 'Couldn’t add that'); }
+};
 
 // Parents: chores family members made for themselves, to approve (with the stars they'll earn)
 // or decline. Approving also counts the stars from times they were already ticked off.

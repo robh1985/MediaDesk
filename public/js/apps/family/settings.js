@@ -5,7 +5,7 @@ import { h, clear, toast, toastError } from '../../ui.js';
 import { sheet, field, input, select, toggle, avatar, memberPicker, emojiButton, colorPicker, COLORS, ICONS, parentGate, lockParent } from './shared.js';
 import { SLOTS } from './meals.js';
 import { portal, state, appPref } from '../../api.js';
-import { familyAuth, DEFAULT_QUICK_PICKS } from './store.js';
+import { familyAuth, DEFAULT_QUICK_PICKS, DEFAULT_EXTRA_CHORES } from './store.js';
 import { describeChoreRepeat, PARTS, DAY_SHORT } from './dates.js';
 
 const PROVIDERS = [
@@ -27,7 +27,7 @@ export class SettingsView {
     this.el = el;
     if (section) this.section = section;
     const session = this.app.session || {};
-    const sections = [['profiles', 'Profiles'], ['calendars', 'Calendars'], ['general', 'General'], ['display', 'Photo frame & sleep'], ['quickpicks', 'Quick picks'], ['parents', 'Parent PIN'],
+    const sections = [['profiles', 'Profiles'], ['calendars', 'Calendars'], ['general', 'General'], ['display', 'Photo frame & sleep'], ['quickpicks', 'Quick picks'], ['extras', 'Extra chores'], ['parents', 'Parent PIN'],
       session.parent ? ['users', 'Users'] : null, session.user ? ['account', 'My account'] : null].filter(Boolean);
     if (!sections.some(([id]) => id === this.section)) this.section = sections[0][0];
     const nav = h('div', { class: 'fam-seg fam-settings-nav' }, sections.map(([id, label]) => h('button', { class: this.section === id ? 'on' : '', onclick: () => { this.section = id; this.render(el); } }, label)));
@@ -420,6 +420,51 @@ export class SettingsView {
     if (!out) return;
     if (out === 'delete') await save(picks.filter((x) => x.id !== q.id), 'Quick pick removed');
     else await save(q ? picks.map((x) => (x.id === q.id ? out : x)) : [...picks, out], 'Saved');
+  }
+
+  // --- Extra chores ----------------------------------------------------------------------
+
+  draw_extras(body) {
+    const items = this.store.extraChores();
+    const canEdit = !this.app.session?.user || this.app.session.parent;
+    const save = async (next, msg) => {
+      if (!(await parentGate(this.app.root, this.store, 'Changing extra chores needs a parent.'))) return;
+      await this.save({ extraChores: next }, msg);
+      this.render(this.el, 'extras');
+    };
+    const editItem = async (x) => {
+      const emoji = emojiButton(x?.emoji || '⭐');
+      const title = input({ value: x?.title || '', placeholder: 'e.g. Wash the car', required: true, autofocus: true, maxlength: 80 });
+      const stars = input({ type: 'number', min: 0, max: 100, value: x?.stars ?? 2, class: 'fam-input tiny' });
+      const out = await sheet(this.app.root, {
+        title: x ? 'Edit extra chore' : 'New extra chore',
+        body: h('div', { class: 'fam-form' }, h('div', { class: 'fam-title-row' }, emoji, title), field('Stars (once a parent approves)', stars)),
+        actions: [x ? { label: 'Delete', danger: true, left: true, value: 'delete' } : null, { label: 'Cancel' }, { label: 'Save', primary: true, submit: true, onClick: (close) => {
+          if (!title.value.trim()) { title.focus(); return; }
+          close({ id: x?.id || `xc-${Date.now().toString(36)}`, title: title.value.trim(), emoji: emoji.value, stars: Math.max(0, Number(stars.value) || 0) });
+        } }],
+      });
+      if (!out) return;
+      if (out === 'delete') await save(items.filter((i) => i.id !== x.id), 'Removed');
+      else await save(x ? items.map((i) => (i.id === x.id ? out : i)) : [...items, out], 'Saved');
+    };
+    body.append(this.card('Extra chores',
+      h('p', { class: 'fam-muted' }, 'The menu on the right of the Chores tab, for one-off jobs. Tapping one adds it for whoever is signed in (or asks who did it), already ticked off; its stars count once a parent approves it in Chores → Approve.'),
+      h('div', { class: 'fam-cal-list' }, items.length ? items.map((x, i) => h('div', { class: 'fam-cal-row' },
+        h('span', { class: 'fam-chore-emoji' }, x.emoji || '✔️'),
+        h('div', { class: 'fam-profile-main' }, h('b', {}, x.title), h('small', {}, x.stars ? `${x.stars} ★` : 'No stars')),
+        canEdit ? h('div', { class: 'fam-profile-move' },
+          h('button', { class: 'fam-icon-btn', title: 'Move up', disabled: i === 0, html: ICONS.left, onclick: () => { const n = [...items]; [n[i - 1], n[i]] = [n[i], n[i - 1]]; save(n, null); } }),
+          h('button', { class: 'fam-icon-btn', title: 'Move down', disabled: i === items.length - 1, html: ICONS.right, onclick: () => { const n = [...items]; [n[i + 1], n[i]] = [n[i], n[i + 1]]; save(n, null); } })) : null,
+        canEdit ? h('button', { class: 'fam-icon-btn', title: 'Edit', html: ICONS.edit, onclick: () => editItem(x) }) : null))
+        : h('div', { class: 'fam-muted small' }, 'None — the menu is empty.')),
+      canEdit ? h('div', { class: 'fam-row-wrap' },
+        h('button', { class: 'fam-btn primary', onclick: () => editItem(null) }, h('span', { html: ICONS.plus }), 'Add an extra chore'),
+        h('button', { class: 'fam-btn', onclick: async () => {
+          const ok = await sheet(this.app.root, { title: 'Use the suggested extra chores?', body: h('p', {}, 'The menu is replaced with MediaDesk’s suggestions.'), actions: [{ label: 'Cancel' }, { label: 'Use suggestions', primary: true, value: true }] });
+          if (ok) save(DEFAULT_EXTRA_CHORES.map((x) => ({ ...x })), 'Suggestions restored');
+        } }, 'Restore suggestions'))
+        : h('p', { class: 'fam-muted small' }, 'A parent can change these.')));
   }
 
   // --- Parent PIN ------------------------------------------------------------------------

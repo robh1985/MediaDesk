@@ -308,7 +308,8 @@ function createFamily({ dataDir, mock = false }) {
       const prev = id ? d.collections[op.col]?.[id] : null;
       // Stars for a ticked chore are always the chore's own (whoever sends them).
       if (op.col === 'chorelog' && op.op === 'put' && op.item) {
-        const chore = d.collections.chores[op.item.chore];
+        // The chore may be made in the same change (an extra chore added already done).
+        const chore = d.collections.chores[op.item.chore] || ops.find((o) => o.col === 'chores' && o.op === 'put' && o.item?.id === op.item.chore)?.item;
         if (!chore) throw new FamilyError(400, 'That chore is gone');
         op.item.stars = Number(chore.stars) || 0;
       }

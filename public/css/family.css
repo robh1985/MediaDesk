@@ -545,3 +545,31 @@ body.fam-page { background: #f6f3ee; overflow: hidden; height: 100dvh; }
 .fam-approval { gap: 8px; flex-wrap: wrap; }
 .fam-approval-stars { display: inline-flex; align-items: center; gap: 4px; }
 .fam-approval-stars .fam-input { width: 64px; }
+
+/* The extra chores menu, beside the chore chart */
+.fam-chores-wrap { flex: 1; min-height: 0; display: flex; gap: 12px; }
+.fam-chores-wrap > .fam-board { flex: 1; min-width: 0; }
+.fam-extras { width: 144px; flex: none; display: flex; flex-direction: column; background: var(--f-panel); border-radius: var(--f-radius); box-shadow: var(--f-shadow); min-height: 0; overflow: hidden; transition: width .2s; }
+.fam-extras.closed { width: 46px; }
+.fam-extras-toggle { display: flex; align-items: center; gap: 6px; border: 0; background: none; padding: 10px 10px 8px; cursor: pointer; font-weight: 700; font-size: 12.5px !important; color: var(--f-muted) !important; text-transform: uppercase; letter-spacing: .03em; white-space: nowrap; text-align: left; }
+.fam-extras-chevron { width: 18px; height: 18px; flex: none; transition: transform .2s; }
+.fam-extras-chevron svg { width: 100%; height: 100%; }
+.fam-extras.closed .fam-extras-chevron { transform: rotate(180deg); }
+.fam-extras.closed .fam-extras-toggle { flex-direction: column; height: 100%; padding: 12px 0; }
+.fam-extras.closed .fam-extras-title { writing-mode: vertical-rl; transform: rotate(180deg); }
+.fam-extras.closed .fam-extras-list { display: none; }
+.fam-extras-list { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; display: flex; flex-direction: column; gap: 4px; padding: 0 8px 10px; }
+.fam-extras-hint { font-size: 11.5px; color: var(--f-muted); text-align: center; padding: 0 2px 4px; }
+.fam-extras-btn { display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 9px 4px; border: 0; background: none; border-radius: 12px; cursor: pointer; color: var(--f-fg) !important; text-align: center; flex: none; }
+.fam-extras-btn:hover { background: var(--f-panel2); }
+.fam-extras-btn:active { transform: scale(.96); }
+.fam-extras-btn:disabled { opacity: .45; cursor: default; }
+.fam-extras-emoji { font-size: 26px; line-height: 1; }
+.fam-extras-name { font-size: 12px !important; font-weight: 600; line-height: 1.2; }
+.fam-extras-stars { font-size: 11px; font-weight: 700; color: #c48a00; }
+[data-theme="dark"] .fam .fam-extras-stars { color: #ffd43b; }
+@media (max-width: 760px) {
+  .fam-chores-wrap { gap: 8px; }
+  .fam-extras { width: 104px; }
+  .fam-extras.closed { width: 38px; }
+}

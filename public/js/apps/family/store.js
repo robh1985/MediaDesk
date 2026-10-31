@@ -3,6 +3,15 @@
 
 const BASE = '/portal/family';
 
+// Extra chores: the menu beside the chore chart for one-off jobs someone did (they earn stars once
+// a parent approves them). Kept by parents in Settings → Extra chores.
+export const DEFAULT_EXTRA_CHORES = [
+  ['xc-car', 'Wash the car', '🚗', 5], ['xc-leaves', 'Rake leaves', '🍂', 3], ['xc-dinner', 'Help make dinner', '🍳', 2],
+  ['xc-laundry', 'Fold laundry', '🧺', 2], ['xc-sweep', 'Sweep the floor', '🧹', 2], ['xc-bathroom', 'Clean the bathroom', '🛁', 4],
+  ['xc-garden', 'Weed the garden', '🌱', 3], ['xc-dog', 'Walk the dog', '🐕', 2], ['xc-groceries', 'Unload groceries', '🛒', 1],
+  ['xc-table', 'Wipe the table', '🧽', 1], ['xc-help', 'Help a brother or sister', '🤝', 2], ['xc-windows', 'Clean the windows', '🪟', 3],
+].map(([id, title, emoji, stars]) => ({ id, title, emoji, stars }));
+
 // The quick picks a family starts with (until a parent changes them).
 export const DEFAULT_QUICK_PICKS = [
   ['qp-bed', 'Make your bed', '🛏️', 1, 'routine', 'morning', { kind: 'daily' }],
@@ -176,6 +185,7 @@ export class Store {
   // --- What the views need -------------------------------------------------
 
   // Ready-made chores to start from, kept by parents in Settings → Quick picks.
+  extraChores() { return Array.isArray(this.settings.extraChores) ? this.settings.extraChores : DEFAULT_EXTRA_CHORES; }
   quickPicks() { return Array.isArray(this.settings.quickPicks) ? this.settings.quickPicks : DEFAULT_QUICK_PICKS; }
 
   members() { return this.all('members').sort((a, b) => (a.order ?? 0) - (b.order ?? 0) || a.name.localeCompare(b.name)); }
