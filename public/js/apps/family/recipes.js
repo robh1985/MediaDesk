@@ -7,7 +7,7 @@
 
 import { h, clear, toast, toastError } from '../../ui.js';
 import { ymd, fmtDate } from './dates.js';
-import { sheet, field, input, select, emojiButton, parentGate, ICONS } from './shared.js';
+import { sheet, field, input, select, emojiButton, colorPicker, parentGate, ICONS } from './shared.js';
 
 // --- Amounts ------------------------------------------------------------------------------
 
@@ -53,6 +53,16 @@ const stepList = (r) => String(r.steps || '').split('\n').map((s) => s.trim()).f
 const fmtMins = (m) => (!m ? '' : m < 60 ? `${m} min` : `${Math.floor(m / 60)} h${m % 60 ? ` ${m % 60} min` : ''}`);
 const splitList = (v) => String(v || '').split(',').map((t) => t.trim()).filter(Boolean);
 
+const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+// Cookbooks: picked recipes, plus every recipe matching its categories, tags or tools (less any
+// left out of it).
+export function matchesRules(book, r) {
+  const rules = book.rules || {};
+  return ['categories', 'tags', 'tools'].some((k) => (rules[k] || []).some((v) => (r[k] || []).includes(v)));
+}
+export const inBook = (book, r) => (book.recipes || []).includes(r.id) || (matchesRules(book, r) && !(book.left || []).includes(r.id));
+
 // --- The recipe box -------------------------------------------------------------------------
 
 export class RecipeBox {
@@ -64,6 +74,7 @@ export class RecipeBox {
     this.filters = { category: '', tag: '', tool: '', fav: false, source: '' };
     this.sort = 'name';
     this.mealie = null;
+    this.book = null; // the cookbook being looked at
   }
 
   img(r) { return this.store.recipeImageUrl(r); }
@@ -71,7 +82,9 @@ export class RecipeBox {
   canManage() { return Boolean(this.app.session?.parent); }
 
   render(body) {
-    const all = this.store.all('recipes');
+    const book = this.book ? this.store.get('cookbooks', this.book) : null;
+    if (!book) this.book = null;
+    const all = book ? this.bookRecipes(book) : this.store.all('recipes');
     const values = (key) => [...new Set(all.flatMap((r) => r[key] || []))].sort((a, b) => a.localeCompare(b));
     const q = input({ type: 'search', placeholder: 'Search recipes, ingredients, tags…', value: this.q, class: 'fam-input fam-recipe-search' });
     const pick = (key, label, opts) => (opts.length ? select([['', label], ...opts.map((o) => [o, o])], this.filters[key], { class: 'fam-input fam-recipe-filter', onchange: (e) => { this.filters[key] = e.target.value; draw(); } }) : null);
@@ -82,6 +95,10 @@ export class RecipeBox {
       fromMealie ? select([['', 'All recipes'], ['mealie', 'From Mealie'], ['ours', 'Made here']], this.filters.source, { class: 'fam-input fam-recipe-filter', onchange: (e) => { this.filters.source = e.target.value; draw(); } }) : null,
       select([['name', 'A–Z'], ['new', 'Newest'], ['rating', 'Top rated'], ['quick', 'Quickest'], ['made', 'Recently made']], this.sort, { class: 'fam-input fam-recipe-filter', onchange: (e) => { this.sort = e.target.value; draw(); } }));
     const status = h('div', { class: 'fam-mealie-status' });
+    const shelf = h('div', { class: 'fam-shelf' });
+    this.drawShelf(shelf);
+    const head = h('div', {});
+    if (book) this.drawBookHead(head, book, all.length);
     const grid = h('div', { class: 'fam-recipes' });
     const draw = () => {
       const term = this.q.toLowerCase();
@@ -98,11 +115,12 @@ export class RecipeBox {
       };
       list = list.sort(by[this.sort] || by.name);
       clear(grid, list.length ? list.map((r) => this.card(r))
+        : book && !all.length ? h('div', { class: 'fam-empty' }, h('div', { class: 'fam-empty-emoji' }, book.emoji || '📕'), 'This cookbook is empty.', h('button', { class: 'fam-btn primary', onclick: () => this.pickRecipes(book) }, 'Add recipes'))
         : h('div', { class: 'fam-empty' }, h('div', { class: 'fam-empty-emoji' }, '📖'), all.length ? 'No recipes match.' : 'Keep the family’s recipes here: type them in, import them from a recipe website, or connect Mealie in Settings → General.'));
     };
     q.addEventListener('input', () => { this.q = q.value; draw(); });
     draw();
-    clear(body, filters, status, grid);
+    clear(body, shelf, head, filters, status, grid);
     this.drawStatus(status);
   }
 
@@ -165,6 +183,13 @@ export class RecipeBox {
     const fav = h('button', { type: 'button', class: `fam-fav-btn ${r.favorite ? 'on' : ''}`, title: 'Favourite', onclick: (e) => { const on = !e.currentTarget.classList.contains('on'); e.currentTarget.classList.toggle('on', on); save({ favorite: on }); } }, '♥');
     const meta = [['Prep', fmtMins(r.prepMin)], ['Cook', fmtMins(r.cookMin)], ['Total', fmtMins(r.minutes)], ['Makes', r.yield && r.yield !== String(r.servings) ? r.yield : '']].filter(([, v]) => v);
     const chips = (label, vals) => ((vals || []).length ? h('div', { class: 'fam-recipe-chips' }, h('span', { class: 'fam-label' }, label), vals.map((v) => h('span', { class: 'fam-tag' }, v))) : null);
+    const booksEl = h('div', {});
+    const drawBooks = () => {
+      const these = this.cookbooks().filter((b) => inBook(b, r));
+      clear(booksEl, these.length ? h('div', { class: 'fam-recipe-chips' }, h('span', { class: 'fam-label' }, 'Cookbooks'),
+        these.map((b) => h('button', { type: 'button', class: 'fam-tag fam-tag-btn', onclick: () => { s.close(); this.book = b.id; this.meals.render(this.meals.el); } }, `${b.emoji || '📕'} ${b.name}`))) : null);
+    };
+    drawBooks();
     const src = this.img(r);
     const made = r.madeCount ? `Made ${r.madeCount} time${r.madeCount === 1 ? '' : 's'}, last on ${fmtDate(new Date(`${r.lastMade}T12:00`), { month: 'short', day: 'numeric', year: 'numeric' })}` : 'Not made yet';
     const body = h('div', { class: 'fam-recipe-view' },
@@ -178,6 +203,7 @@ export class RecipeBox {
       h('div', { class: 'fam-recipe-tools' },
         h('button', { type: 'button', class: 'fam-btn primary', onclick: () => { s.close(); this.cook(r, factor); } }, '👩‍🍳 Cook mode'),
         h('button', { type: 'button', class: 'fam-btn', onclick: async () => { const today = ymd(new Date()); await save({ madeCount: (this.store.get('recipes', r.id)?.madeCount || 0) + 1, lastMade: today }); toast(`Marked “${r.title}” as made today`, { type: 'success', timeout: 2000 }); } }, '✓ Made it today'),
+        h('button', { type: 'button', class: 'fam-btn', onclick: async () => { await this.recipeBooks(r); drawBooks(); } }, '📚 Cookbooks'),
         h('button', { type: 'button', class: 'fam-btn', onclick: () => this.print(r, factor, false) }, '📄 Print view'),
         h('button', { type: 'button', class: 'fam-btn', onclick: () => this.print(r, factor) }, '🖨 Print'),
         r.mealieLink ? h('a', { class: 'fam-btn', href: r.mealieLink, target: '_blank', rel: 'noopener' }, 'Open in Mealie') : null,
@@ -188,7 +214,7 @@ export class RecipeBox {
         steps.length ? h('section', {}, h('h4', {}, 'Steps'), h('ol', { class: 'fam-steps' }, steps)) : null),
       r.notes ? h('div', { class: 'fam-recipe-notes' }, h('h4', {}, 'Notes'), r.notes.split('\n').map((l) => h('p', {}, l))) : null,
       r.nutrition ? h('div', {}, h('h4', {}, 'Nutrition'), h('div', { class: 'fam-nutrition' }, Object.entries(r.nutrition).map(([k, v]) => h('div', {}, h('span', {}, k), h('b', {}, v))))) : null,
-      chips('Categories', r.categories), chips('Tags', r.tags), chips('Tools', r.tools),
+      chips('Categories', r.categories), chips('Tags', r.tags), chips('Tools', r.tools), booksEl,
       r.source === 'mealie' ? h('p', { class: 'fam-muted small' }, 'Imported from Mealie and kept up to date with it.') : null);
     const s = sheet(this.app.root, {
       title: 'Recipe', body, wide: true, cls: 'fam-recipe-sheet',
@@ -265,28 +291,172 @@ export class RecipeBox {
   // A clean page for the recipe: printed straight away, or (autoPrint false) just shown, with its
   // own Print button.
   print(r, factor = 1, autoPrint = true) {
-    const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-    const lines = (arr, tag) => arr.map((l) => (isSection(l) ? `<li class="s">${esc(sectionTitle(l))}</li>` : `<li>${esc(l)}</li>`)).join('');
+    this.printPage(r.title, this.recipeHtml(r, factor), autoPrint);
+  }
+
+  recipeHtml(r, factor = 1, id = '') {
+    const lines = (arr) => arr.map((l) => (isSection(l) ? `<li class="s">${esc(sectionTitle(l))}</li>` : `<li>${esc(l)}</li>`)).join('');
     const src = this.img(r);
-    const html = `<!doctype html><html><head><meta charset="utf-8"><title>${esc(r.title)}</title><style>
-      body{font:14px/1.5 system-ui,sans-serif;max-width:760px;margin:24px auto;padding:0 16px;color:#222}h1{margin:0 0 4px}img{max-width:100%;max-height:300px;border-radius:10px;object-fit:cover}
+    return `<article class="recipe"${id ? ` id="${id}"` : ''}>
+      ${src ? `<img src="${esc(new URL(src, location.href))}">` : ''}<h1>${esc(r.title)}</h1>
+      <div class="m">${esc([fmtMins(r.prepMin) && `Prep ${fmtMins(r.prepMin)}`, fmtMins(r.cookMin) && `Cook ${fmtMins(r.cookMin)}`, fmtMins(r.minutes) && `Total ${fmtMins(r.minutes)}`, r.servings && `Serves ${fmtAmount(r.servings * factor)}`, r.yield && r.yield !== String(r.servings) ? `Makes ${r.yield}` : ''].filter(Boolean).join(' · '))}</div>
+      ${r.description ? `<p>${esc(r.description)}</p>` : ''}
+      <div class="c"><div><h3>Ingredients</h3><ul>${lines((r.ingredients || []).map((l) => scaleLine(l, factor)))}</ul></div>
+      <div><h3>Steps</h3><ol>${lines(stepList(r))}</ol></div></div>
+      ${r.notes ? `<h3>Notes</h3><p>${esc(r.notes).replace(/\n/g, '<br>')}</p>` : ''}</article>`;
+  }
+
+  printPage(title, inner, autoPrint) {
+    const html = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${esc(title)}</title><style>
+      body{font:14px/1.5 system-ui,sans-serif;max-width:760px;margin:24px auto;padding:0 16px;color:#222;background:#fff}h1{margin:0 0 4px}img{max-width:100%;max-height:300px;border-radius:10px;object-fit:cover}
       .m{color:#666;margin:6px 0 14px}.c{display:grid;grid-template-columns:1fr 1.6fr;gap:28px}ul,ol{padding-left:20px}li{margin:4px 0}li.s{list-style:none;margin-left:-20px;font-weight:700;margin-top:10px}
       .bar{position:sticky;top:0;display:flex;gap:8px;justify-content:flex-end;padding:10px 0;margin-bottom:8px;background:#fff;border-bottom:1px solid #eee}
       .bar button{font:inherit;padding:8px 16px;border-radius:8px;border:1px solid #ccc;background:#fff;cursor:pointer}.bar button.p{background:#4c6ef5;border-color:#4c6ef5;color:#fff}
+      .cover{text-align:center;padding:18vh 0 10vh}.cover .e{font-size:72px}.cover h1{font-size:40px;margin:10px 0}.cover p{color:#666;font-size:16px}
+      .toc h2{margin-top:0}.toc ol{padding-left:22px}.toc li{margin:6px 0;font-size:15px}.toc a{color:inherit;text-decoration:none}
+      .recipe{padding-top:28px;border-top:1px solid #eee;margin-top:28px}.cover+.toc+.recipe,.bar+.recipe{border:0;margin:0;padding:0}
       @media (max-width:600px){.c{grid-template-columns:1fr;gap:0}}
-      @media print{body{margin:0}.bar{display:none}}</style></head><body>
+      @media print{body{margin:0}.bar{display:none}.cover,.toc{break-after:page}.recipe{break-before:page;border:0;margin:0;padding:0}.cover+.toc+.recipe{break-before:page}}</style></head><body>
       ${autoPrint ? '' : '<div class="bar"><button onclick="window.close()">Close</button><button class="p" onclick="print()">🖨 Print</button></div>'}
-      ${src ? `<img src="${esc(new URL(src, location.href))}">` : ''}<h1>${esc(r.title)}</h1>
-      <div class="m">${esc([fmtMins(r.prepMin) && `Prep ${fmtMins(r.prepMin)}`, fmtMins(r.cookMin) && `Cook ${fmtMins(r.cookMin)}`, fmtMins(r.minutes) && `Total ${fmtMins(r.minutes)}`, r.servings && `Serves ${fmtAmount(r.servings * factor)}`].filter(Boolean).join(' · '))}</div>
-      ${r.description ? `<p>${esc(r.description)}</p>` : ''}
-      <div class="c"><div><h3>Ingredients</h3><ul>${lines((r.ingredients || []).map((l) => scaleLine(l, factor)))}</ul></div>
-      <div><h3>Steps</h3><ol>${stepList(r).map((l) => (isSection(l) ? `<li class="s">${esc(sectionTitle(l))}</li>` : `<li>${esc(l)}</li>`)).join('')}</ol></div></div>
-      ${r.notes ? `<h3>Notes</h3><p>${esc(r.notes).replace(/\n/g, '<br>')}</p>` : ''}
+      ${inner}
       ${autoPrint ? '<script>window.onload=()=>setTimeout(()=>print(),300)<\/script>' : ''}</body></html>`;
     const w = window.open('', '_blank');
     if (!w) { toast('Allow pop-ups to print', { timeout: 3000 }); return; }
     w.document.write(html);
     w.document.close();
+  }
+
+  // --- Cookbooks ----------------------------------------------------------------------------
+  // A cookbook holds recipes picked for it, plus (if it has rules) every recipe with one of its
+  // categories, tags or tools; recipes can be left out of it one by one.
+
+  cookbooks() { return this.store.all('cookbooks').sort((a, b) => (a.order ?? 0) - (b.order ?? 0) || a.name.localeCompare(b.name)); }
+
+  bookRecipes(book) {
+    return this.store.all('recipes').filter((r) => inBook(book, r));
+  }
+
+  drawShelf(el) {
+    const books = this.cookbooks();
+    clear(el,
+      h('button', { class: `fam-book ${this.book ? '' : 'on'}`, onclick: () => { this.book = null; this.meals.render(this.meals.el); } }, h('span', { class: 'fam-book-emoji' }, '📚'), h('span', {}, 'All recipes')),
+      books.map((b) => h('button', { class: `fam-book ${this.book === b.id ? 'on' : ''}`, style: { '--c': b.color || '#e8590c' }, onclick: () => { this.book = b.id; this.meals.render(this.meals.el); } },
+        h('span', { class: 'fam-book-emoji' }, b.emoji || '📕'), h('span', {}, b.name), h('small', {}, this.bookRecipes(b).length))),
+      h('button', { class: 'fam-book add', onclick: () => this.editBook(null) }, h('span', { class: 'fam-book-emoji', html: ICONS.plus }), h('span', {}, 'Cookbook')));
+  }
+
+  drawBookHead(el, book, count) {
+    const rules = [...(book.rules?.categories || []), ...(book.rules?.tags || []), ...(book.rules?.tools || [])];
+    clear(el, h('div', { class: 'fam-book-head', style: { '--c': book.color || '#e8590c' } },
+      h('span', { class: 'fam-book-big' }, book.emoji || '📕'),
+      h('div', { class: 'fam-book-info' }, h('h3', {}, book.name),
+        book.description ? h('p', {}, book.description) : null,
+        h('small', { class: 'fam-muted' }, `${count} recipe${count === 1 ? '' : 's'}${rules.length ? ` · adds every recipe with ${rules.slice(0, 4).join(', ')}${rules.length > 4 ? '…' : ''}` : ''}`)),
+      h('div', { class: 'fam-row-wrap' },
+        h('button', { class: 'fam-btn', onclick: () => this.pickRecipes(book) }, h('span', { html: ICONS.plus }), 'Add recipes'),
+        h('button', { class: 'fam-btn', onclick: () => this.printBook(book) }, '📄 Print view'),
+        h('button', { class: 'fam-btn', onclick: () => this.editBook(book) }, h('span', { html: ICONS.edit }), 'Edit'))));
+  }
+
+  async editBook(book) {
+    const all = this.store.all('recipes');
+    const values = (key) => [...new Set(all.flatMap((r) => r[key] || []))].sort((a, b) => a.localeCompare(b));
+    const emoji = emojiButton(book?.emoji || '📕');
+    const name = input({ value: book?.name || '', placeholder: 'e.g. Weeknight dinners', required: true, autofocus: true, maxlength: 60 });
+    const description = h('textarea', { class: 'fam-input', rows: 2, placeholder: 'What’s in it (optional)', maxlength: 500 }, book?.description || '');
+    let color = book?.color || '#e8590c';
+    const colors = colorPicker(color, (c) => { color = c; });
+    const ruleChips = (key, label) => {
+      const opts = values(key);
+      if (!opts.length) return null;
+      const sel = new Set(book?.rules?.[key] || []);
+      const row = h('div', { class: 'fam-row-wrap fam-book-rules' }, opts.map((o) => h('button', { type: 'button', class: `fam-chip ${sel.has(o) ? 'on' : ''}`, onclick: (e) => { if (sel.has(o)) sel.delete(o); else sel.add(o); e.currentTarget.classList.toggle('on', sel.has(o)); } }, o)));
+      row.value = () => [...sel];
+      row.key = key;
+      return field(label, row);
+    };
+    const rules = [ruleChips('categories', 'Categories'), ruleChips('tags', 'Tags'), ruleChips('tools', 'Tools')].filter(Boolean);
+    const out = await sheet(this.app.root, {
+      title: book ? 'Cookbook' : 'New cookbook', wide: true,
+      body: h('div', { class: 'fam-form' }, h('div', { class: 'fam-title-row' }, emoji, name), description, field('Colour', colors),
+        rules.length ? h('div', { class: 'fam-form' }, h('p', { class: 'fam-muted small' }, 'Fill it automatically (optional): every recipe with any of these goes in it, including ones added later. You can also add recipes one by one.'), rules) : h('p', { class: 'fam-muted small' }, 'Add recipes to it from the cookbook, or from a recipe’s “Cookbooks” button.')),
+      actions: [book ? { label: 'Delete', danger: true, left: true, value: 'delete' } : null, { label: 'Cancel' }, { label: book ? 'Save' : 'Create', primary: true, submit: true, onClick: (close) => {
+        if (!name.value.trim()) return name.focus();
+        const r = {};
+        for (const f of rules) { const row = f.querySelector('.fam-book-rules'); const v = row.value(); if (v.length) r[row.key] = v; }
+        close({ ...(book || { order: Date.now(), recipes: [] }), name: name.value.trim(), emoji: emoji.value, description: description.value.trim(), color, rules: r });
+      } }],
+    });
+    if (!out) return null;
+    try {
+      if (out === 'delete') {
+        const sure = await sheet(this.app.root, { title: `Delete ${book.name}?`, body: h('p', {}, 'The cookbook goes; its recipes stay in the recipe box.'), actions: [{ label: 'Cancel' }, { label: 'Delete', danger: true, value: true }] });
+        if (!sure) return null;
+        await this.store.del('cookbooks', book.id);
+        if (this.book === book.id) this.book = null;
+        this.meals.render(this.meals.el);
+        return null;
+      }
+      const [saved] = await this.store.batch([{ op: 'put', col: 'cookbooks', item: out }]);
+      if (!book) { this.book = saved.id; this.meals.render(this.meals.el); }
+      return saved;
+    } catch (err) { toastError(err); return null; }
+  }
+
+  // Put a recipe in a cookbook, or take it out.
+  setInBook(book, r, on) {
+    const recipes = (book.recipes || []).filter((id) => id !== r.id);
+    const left = (book.left || []).filter((id) => id !== r.id);
+    if (on) recipes.push(r.id);
+    else if (matchesRules(book, r)) left.push(r.id); // an automatic match: left out from now on
+    return this.store.put('cookbooks', { ...book, recipes, left });
+  }
+
+  // Tick recipes to put them in the cookbook.
+  async pickRecipes(book) {
+    const q = input({ type: 'search', placeholder: 'Search recipes', autofocus: true });
+    const grid = h('div', { class: 'fam-book-pick' });
+    const draw = () => {
+      const b = this.store.get('cookbooks', book.id) || book;
+      const term = q.value.trim().toLowerCase();
+      const list = this.store.all('recipes').filter((r) => !term || r.title.toLowerCase().includes(term)).sort((a, x) => a.title.localeCompare(x.title));
+      clear(grid, list.map((r) => {
+        const on = inBook(b, r);
+        const src = this.img(r);
+        return h('button', { type: 'button', class: `fam-book-pickone ${on ? 'on' : ''}`, 'aria-pressed': String(on), onclick: async () => { try { await this.setInBook(this.store.get('cookbooks', book.id) || b, r, !on); } catch (err) { toastError(err); } draw(); } },
+          src ? h('img', { src, alt: '' }) : h('span', { class: 'fam-book-pickemoji' }, r.emoji || '🍲'), h('span', {}, r.title), h('span', { class: 'fam-food-tick' }, on ? '✓' : '+'));
+      }), list.length ? null : h('div', { class: 'fam-muted' }, 'No recipes match.'));
+    };
+    q.addEventListener('input', draw);
+    draw();
+    await sheet(this.app.root, { title: `Recipes in ${book.name}`, wide: true, body: h('div', { class: 'fam-form' }, q, grid), actions: [{ label: 'Done', primary: true, value: true }] });
+    this.meals.render(this.meals.el);
+  }
+
+  // From a recipe: which cookbooks it's in.
+  async recipeBooks(r) {
+    const body = h('div', { class: 'fam-form' });
+    const draw = () => {
+      const books = this.cookbooks();
+      clear(body, books.length ? books.map((b) => {
+        const on = inBook(b, r);
+        return h('button', { type: 'button', class: `fam-book-toggle ${on ? 'on' : ''}`, style: { '--c': b.color || '#e8590c' }, onclick: async () => { try { await this.setInBook(b, r, !on); } catch (err) { toastError(err); } draw(); } },
+          h('span', { class: 'fam-book-emoji' }, b.emoji || '📕'), h('span', { class: 'fam-book-name' }, b.name), h('span', { class: 'fam-food-tick' }, on ? '✓' : '+'));
+      }) : h('p', { class: 'fam-muted' }, 'No cookbooks yet.'),
+      h('button', { type: 'button', class: 'fam-btn', onclick: async () => { const b = await this.editBook(null); if (b) await this.setInBook(b, r, true).catch((err) => toastError(err)); draw(); } }, h('span', { html: ICONS.plus }), 'New cookbook'));
+    };
+    draw();
+    await sheet(this.app.root, { title: `Cookbooks for ${r.title}`, body, actions: [{ label: 'Done', primary: true, value: true }] });
+  }
+
+  // A whole cookbook to print: a cover, the contents, then each recipe on its own page.
+  printBook(book) {
+    const list = this.bookRecipes(book).sort((a, b) => a.title.localeCompare(b.title));
+    if (!list.length) { toast('This cookbook has no recipes yet', { timeout: 2500 }); return; }
+    const inner = `<section class="cover"><div class="e">${esc(book.emoji || '📕')}</div><h1>${esc(book.name)}</h1>${book.description ? `<p>${esc(book.description)}</p>` : ''}<p>${list.length} recipe${list.length === 1 ? '' : 's'}</p></section>
+      <section class="toc"><h2>Contents</h2><ol>${list.map((r, n) => `<li><a href="#r${n}">${esc(r.title)}</a></li>`).join('')}</ol></section>
+      ${list.map((r, n) => this.recipeHtml(r, 1, `r${n}`)).join('')}`;
+    this.printPage(book.name, inner, false);
   }
 
   // --- Adding and changing ------------------------------------------------------------------

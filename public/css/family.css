@@ -702,3 +702,28 @@ body.fam-page { background: #f6f3ee; overflow: hidden; height: 100dvh; }
 .fam-item-remove { flex: none; width: 30px; height: 30px; border-radius: 8px; border: 0; background: none; color: var(--f-muted); cursor: pointer; padding: 7px; opacity: .55; }
 .fam-item-remove:hover, .fam-item-remove:focus-visible { opacity: 1; color: var(--f-danger); background: color-mix(in srgb, var(--f-danger) 10%, transparent); }
 .fam-item-remove svg { width: 100%; height: 100%; }
+/* Cookbooks */
+.fam-shelf { display: flex; gap: 8px; overflow-x: auto; padding: 2px 2px 10px; margin-bottom: 4px; scrollbar-width: thin; }
+.fam-book { --c: var(--f-accent); flex: none; display: inline-flex; align-items: center; gap: 8px; height: 44px; padding: 0 14px 0 6px; border-radius: 12px; border: 1px solid var(--f-line); border-left: 5px solid var(--c); background: var(--f-panel); cursor: pointer; font-weight: 600; color: inherit; box-shadow: var(--f-shadow); }
+.fam-book small { color: var(--f-muted); font-weight: 700; font-size: 12px; }
+.fam-book.on { background: color-mix(in srgb, var(--c) 15%, var(--f-panel)); border-color: var(--c); }
+.fam-book.add { border-style: dashed; border-left-width: 1px; box-shadow: none; color: var(--f-muted); padding-left: 10px; }
+.fam-book-emoji { font-size: 22px; width: 28px; text-align: center; display: inline-grid; place-items: center; }
+.fam-book-emoji svg { width: 18px; height: 18px; }
+.fam-book-head { --c: var(--f-accent); display: flex; gap: 14px; align-items: center; flex-wrap: wrap; background: color-mix(in srgb, var(--c) 10%, var(--f-panel)); border: 1px solid color-mix(in srgb, var(--c) 35%, transparent); border-radius: var(--f-radius); padding: 14px 16px; margin-bottom: 12px; }
+.fam-book-big { font-size: 44px; }
+.fam-book-info { flex: 1; min-width: 200px; }
+.fam-book-info h3 { margin: 0; }
+.fam-book-info p { margin: 2px 0; color: var(--f-muted); }
+.fam-book-rules .fam-chip { padding: 0 12px; height: 32px; }
+.fam-book-pick { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 6px; max-height: 55vh; overflow-y: auto; }
+.fam-book-pickone, .fam-book-toggle { --c: #2f9e44; display: flex; align-items: center; gap: 10px; border: 1px solid var(--f-line); border-radius: 10px; background: var(--f-panel); padding: 6px 10px 6px 6px; cursor: pointer; text-align: left; color: inherit; font-size: 14.5px !important; }
+.fam-book-pickone > span:nth-child(2), .fam-book-name { flex: 1; min-width: 0; }
+.fam-book-pickone img { width: 44px; height: 44px; border-radius: 8px; object-fit: cover; flex: none; }
+.fam-book-pickemoji { width: 44px; height: 44px; display: grid; place-items: center; font-size: 26px; background: var(--f-panel2); border-radius: 8px; flex: none; }
+.fam-book-pickone.on { border-color: #2f9e44; background: color-mix(in srgb, #2f9e44 10%, var(--f-panel)); }
+.fam-book-pickone.on .fam-food-tick, .fam-book-toggle.on .fam-food-tick { background: #2f9e44; color: #fff; }
+.fam-book-toggle { --c: var(--f-accent); padding: 10px 12px; border-left: 5px solid var(--c); }
+.fam-book-toggle.on { background: color-mix(in srgb, var(--c) 12%, var(--f-panel)); }
+.fam-tag-btn { cursor: pointer; font: inherit; font-size: 12.5px !important; }
+.fam-tag-btn:hover { border-color: var(--f-accent); color: var(--f-fg); }
