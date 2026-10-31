@@ -36,6 +36,8 @@ const TABS = [
   ['lists', 'Lists', ICONS.lists],
   ['photos', 'Photos', ICONS.photos],
 ];
+// Each button on the left has its own colour.
+const RAIL_COLORS = { calendar: '#1c7ed6', chores: '#2f9e44', rewards: '#f08c00', meals: '#e8590c', lists: '#7048e8', photos: '#d6336c', approvals: '#1098ad', sleep: '#4263eb', settings: '#5c677d' };
 
 export const familyApp = {
   id: 'family', name: 'Family Organizer', icon: appIcon.family, size: [1240, 820], description: 'Family calendar, chores, meals, lists and photo frame',
@@ -120,20 +122,20 @@ class FamilyOrganizer {
     this.wx = h('button', { class: 'fam-weather', title: 'Weather', onclick: () => this.showWeather() });
     this.filterEl = h('div', { class: 'fam-filter' });
     this.rail = h('nav', { class: 'fam-rail' },
-      TABS.map(([id, label, ic]) => h('button', { class: 'fam-rail-btn', dataset: { tab: id }, onclick: () => this.go(id) }, h('span', { html: ic }), h('span', {}, label))),
+      TABS.map(([id, label, ic]) => h('button', { class: 'fam-rail-btn', style: { '--rc': RAIL_COLORS[id] }, dataset: { tab: id }, onclick: () => this.go(id) }, h('span', { html: ic }), h('span', {}, label))),
       // Signed in as a parent: everything waiting for a parent's approval, in one place.
-      this.isParentUser() ? h('button', { class: 'fam-rail-btn', dataset: { tab: 'approvals' }, onclick: () => this.go('approvals') },
+      this.isParentUser() ? h('button', { class: 'fam-rail-btn', style: { '--rc': RAIL_COLORS.approvals }, dataset: { tab: 'approvals' }, onclick: () => this.go('approvals') },
         h('span', { class: 'fam-rail-icon', html: ICONS.approve }), h('span', {}, 'Approvals'), this.approvalBadge = h('span', { class: 'fam-rail-badge', hidden: true })) : null,
       h('div', { class: 'fam-rail-gap' }),
-      h('button', { class: 'fam-rail-btn small', title: 'Sleep', onclick: () => this.sleep(true) }, h('span', { html: ICONS.sleep }), h('span', {}, 'Sleep')),
-      h('button', { class: 'fam-rail-btn small', dataset: { tab: 'settings' }, onclick: () => this.go('settings') }, h('span', { html: ICONS.settings }), h('span', {}, 'Settings')));
+      h('button', { class: 'fam-rail-btn small', style: { '--rc': RAIL_COLORS.sleep }, title: 'Sleep', onclick: () => this.sleep(true) }, h('span', { html: ICONS.sleep }), h('span', {}, 'Sleep')),
+      h('button', { class: 'fam-rail-btn small', style: { '--rc': RAIL_COLORS.settings }, dataset: { tab: 'settings' }, onclick: () => this.go('settings') }, h('span', { html: ICONS.settings }), h('span', {}, 'Settings')));
     this.header = h('header', { class: 'fam-header' },
       this.clock, this.wx,
       h('div', { class: 'fam-spacer' }),
       this.filterEl,
       h('button', { class: 'fam-btn fam-quick-btn', title: 'Type events the way you’d say them', onclick: () => this.calendar.quickAdd() }, h('span', { html: ICONS.sparkle }), h('span', { class: 'fam-hide-sm' }, 'Quick add')),
       h('button', { class: 'fam-btn primary', onclick: () => this.add() }, h('span', { html: ICONS.plus }), h('span', { class: 'fam-hide-sm' }, 'Add')),
-      h('button', { class: 'fam-icon-btn fam-theme-btn', title: 'Light or dark', 'aria-label': 'Switch between light and dark', onclick: () => this.toggleTheme() }, ...themeIcon(this.root.classList.contains('fam-dark'))),
+      h('button', { class: `fam-icon-btn fam-theme-btn ${this.session?.user ? 'fam-hide-sm' : ''}`, title: 'Light or dark', 'aria-label': 'Switch between light and dark', onclick: () => this.toggleTheme() }, ...themeIcon(this.root.classList.contains('fam-dark'))),
       h('button', { class: 'fam-icon-btn fam-hide-sm', title: 'Full screen', html: ICONS.expand, onclick: () => this.fullscreen() }),
       this.session?.user ? h('button', { class: 'fam-account-btn', title: `Signed in as ${this.session.user.first} ${this.session.user.last}`, onclick: () => this.accountMenu() },
         `${this.session.user.first[0] || ''}${this.session.user.last[0] || ''}`.toUpperCase()) : null);
@@ -146,11 +148,13 @@ class FamilyOrganizer {
   // The signed-in account: your details, and signing out.
   accountMenu() {
     const u = this.session.user;
-    sheet(this.root, {
+    const menu = sheet(this.root, {
       title: `${u.first} ${u.last}`,
       body: h('div', { class: 'fam-form' },
         h('div', { class: 'fam-muted' }, `${u.username} · ${u.email}`),
-        h('div', { class: 'fam-muted small' }, u.role === 'parent' ? 'Parent' : 'Family member')),
+        h('div', { class: 'fam-muted small' }, u.role === 'parent' ? 'Parent' : 'Family member'),
+        // On a phone the light/dark button lives here (the top bar has no room for it).
+        h('button', { type: 'button', class: 'fam-btn fam-theme-menu', onclick: () => { menu.close(); this.toggleTheme(); } }, ...themeIcon(this.root.classList.contains('fam-dark')), this.root.classList.contains('fam-dark') ? 'Light mode' : 'Dark mode')),
       actions: [
         { label: 'Sign out', danger: true, left: true, onClick: async (close) => { close(); try { await familyAuth.logout(); } catch { /* signed out anyway */ } location.reload(); } },
         { label: 'My account', onClick: (close) => { close(); this.go('settings', 'account'); } },

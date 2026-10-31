@@ -816,3 +816,16 @@ h3.fam-bk-h { font-size: .9em; letter-spacing: .14em; text-transform: uppercase;
 .fam-theme-swatch.dark .fam-theme-prev { background: #17191d; }
 .fam-theme-swatch.dark .fam-theme-prev i { background: #22252b; }
 .fam-theme-swatch.dark .fam-theme-prev i:nth-child(2) { background: #748ffc; }
+/* The left menu: each button in its own colour (an icon tile; the open one filled in) */
+.fam-rail-btn { --rc: var(--f-accent); --rc-ink: var(--rc); }
+.fam-dark .fam-rail-btn { --rc-ink: color-mix(in srgb, var(--rc) 70%, #fff); }
+.fam-rail-btn > span:first-child { box-sizing: content-box; padding: 6px; border-radius: 11px; color: var(--rc-ink); background: color-mix(in srgb, var(--rc) 13%, transparent); transition: background-color .15s, color .15s, transform .15s; }
+.fam-dark .fam-rail-btn > span:first-child { background: color-mix(in srgb, var(--rc) 24%, transparent); }
+.fam-rail-btn:hover > span:first-child { background: color-mix(in srgb, var(--rc) 24%, transparent); transform: translateY(-1px); }
+.fam-rail-btn:hover { background: color-mix(in srgb, var(--rc) 7%, transparent); }
+.fam-rail-btn.on { background: color-mix(in srgb, var(--rc) 12%, transparent); color: var(--rc-ink) !important; }
+.fam-rail-btn.on > span:first-child { background: var(--rc); color: #fff; box-shadow: 0 3px 8px color-mix(in srgb, var(--rc) 40%, transparent); }
+.fam-rail-btn.small > span:first-child { padding: 5px; }
+@media (max-width: 760px) { .fam-rail-btn > span:first-child, .fam-rail-btn.small > span:first-child { width: 20px; height: 20px; padding: 5px; } }
+.fam-theme-menu { align-self: flex-start; }
+.fam-theme-menu svg { width: 18px; height: 18px; }
