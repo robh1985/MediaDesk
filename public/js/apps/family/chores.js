@@ -33,7 +33,7 @@ export class ChoresView {
   // A family member's account (not a parent's): makes chores only for themselves, for approval.
   get member() { return Boolean(this.user && this.user.role !== 'parent'); }
   get canApprove() { return !this.member; }
-  pending() { return this.store.all('chores').filter((c) => c.approved === false); }
+  pending() { return pendingChores(this.store); }
 
   doneBy(chore, memberId, date) {
     const key = ymd(date);
@@ -347,43 +347,89 @@ ChoresView.prototype.addExtra = async function addExtra(x, e) {
 
 // Parents: chores family members made for themselves, to approve (with the stars they'll earn)
 // or decline. Approving also counts the stars from times they were already ticked off.
+// Things waiting for a parent: chores family members made for themselves (and extra chores they
+// did). Approving one — with the stars it earns, which can be changed — also counts the times it
+// was already ticked off; declining removes it and the stars waiting for it.
+const pendingChores = (store) => store.all('chores').filter((c) => c.approved === false);
+
+async function approveChore(store, c, n) {
+  await store.put('chores', { ...c, approved: true, stars: n });
+  const logs = store.all('chorelog').filter((l) => l.chore === c.id && Number(l.stars) !== n);
+  if (logs.length) await store.batch(logs.map((l) => ({ op: 'put', col: 'chorelog', item: { ...l, stars: n } })));
+}
+
+// The list of approvals, drawn into `list`; onChange runs after each approval or decline.
+function drawApprovals(app, list, onChange) {
+  const store = app.store;
+  const pending = pendingChores(store).sort((a, b) => (a.created || 0) - (b.created || 0));
+  clear(list, pending.map((c) => {
+    const who = (c.members || []).map((id) => store.member(id)).filter(Boolean);
+    const ticks = store.all('chorelog').filter((l) => l.chore === c.id).length;
+    const stars = input({ type: 'number', min: 0, max: 100, value: c.stars ?? 1, class: 'fam-input tiny', 'aria-label': 'Stars' });
+    return h('div', { class: 'fam-manage-row fam-approval', style: { '--c': who[0]?.color || '#868e96' } },
+      who[0] ? avatar(who[0], 'sm') : null,
+      h('span', { class: 'fam-chore-emoji' }, c.emoji || '✔️'),
+      h('div', { class: 'fam-manage-main' }, h('b', {}, c.title),
+        h('small', {}, [who.map((m) => m.name).join(', '), c.extra ? `extra chore, ${c.repeat?.date ? fmtDate(parseYmd(c.repeat.date), { weekday: 'short', month: 'short', day: 'numeric' }) : ''}` : describeChoreRepeat(c.repeat),
+          c.createdByName ? `made by ${c.createdByName}` : null, ticks ? `done ${ticks} time${ticks === 1 ? '' : 's'}` : 'not done yet'].filter(Boolean).join(' · '))),
+      h('label', { class: 'fam-approval-stars' }, stars, STAR),
+      h('button', { class: 'fam-btn small', onclick: async () => {
+        const ok = await sheet(app.root, { title: 'Decline this chore?', body: h('p', {}, `“${c.title}” is removed, and any stars waiting for it with it.`), actions: [{ label: 'Cancel' }, { label: 'Decline', danger: true, value: true }] });
+        if (!ok) return;
+        try { await store.batch([...store.all('chorelog').filter((l) => l.chore === c.id).map((l) => ({ op: 'delete', col: 'chorelog', id: l.id })), { op: 'delete', col: 'chores', id: c.id }]); onChange(); } catch (err) { toastError(err); }
+      } }, 'Decline'),
+      h('button', { class: 'fam-btn small primary', onclick: async () => {
+        try { await approveChore(store, c, Math.max(0, Number(stars.value) || 0)); toast(`Approved “${c.title}”`, { type: 'success', timeout: 2000 }); onChange(); } catch (err) { toastError(err); }
+      } }, 'Approve'));
+  }));
+  return pending;
+}
+
 ChoresView.prototype.approvals = async function approvals() {
   if (!(await parentGate(this.app.root, this.store, 'Approving chores needs a parent.'))) return;
   const list = h('div', { class: 'fam-manage' });
-  const draw = () => {
-    const pending = this.pending();
-    if (!pending.length) { s.close(); return; }
-    clear(list, pending.map((c) => {
-      const who = (c.members || []).map((id) => this.store.member(id)).filter(Boolean);
-      const ticks = this.store.all('chorelog').filter((l) => l.chore === c.id).length;
-      const stars = input({ type: 'number', min: 0, max: 100, value: c.stars ?? 1, class: 'fam-input tiny', 'aria-label': 'Stars' });
-      return h('div', { class: 'fam-manage-row fam-approval' },
-        h('span', { class: 'fam-chore-emoji' }, c.emoji || '✔️'),
-        h('div', { class: 'fam-manage-main' }, h('b', {}, c.title),
-          h('small', {}, [who.map((m) => m.name).join(', '), describeChoreRepeat(c.repeat), c.createdByName ? `made by ${c.createdByName}` : null, ticks ? `done ${ticks} time${ticks === 1 ? '' : 's'} so far` : null].filter(Boolean).join(' · '))),
-        h('label', { class: 'fam-approval-stars' }, stars, STAR),
-        h('button', { class: 'fam-btn small', onclick: async () => {
-          const ok = await sheet(this.app.root, { title: 'Decline this chore?', body: h('p', {}, `“${c.title}” is removed, and any stars waiting for it with it.`), actions: [{ label: 'Cancel' }, { label: 'Decline', danger: true, value: true }] });
-          if (!ok) return;
-          try { await this.store.batch([...this.store.all('chorelog').filter((l) => l.chore === c.id).map((l) => ({ op: 'delete', col: 'chorelog', id: l.id })), { op: 'delete', col: 'chores', id: c.id }]); draw(); this.render(this.el); } catch (err) { toastError(err); }
-        } }, 'Decline'),
-        h('button', { class: 'fam-btn small primary', onclick: async () => {
-          const n = Math.max(0, Number(stars.value) || 0);
-          try {
-            await this.store.put('chores', { ...c, approved: true, stars: n });
-            // Times it was already ticked off earn the approved number of stars.
-            const logs = this.store.all('chorelog').filter((l) => l.chore === c.id && Number(l.stars) !== n);
-            if (logs.length) await this.store.batch(logs.map((l) => ({ op: 'put', col: 'chorelog', item: { ...l, stars: n } })));
-            toast(`Approved “${c.title}”`, { type: 'success', timeout: 2000 });
-            draw(); this.render(this.el);
-          } catch (err) { toastError(err); }
-        } }, 'Approve'));
-    }));
-  };
+  const draw = () => { if (!drawApprovals(this.app, list, () => { draw(); this.render(this.el); }).length) s.close(); };
   const s = sheet(this.app.root, { title: 'Chores to approve', body: list, wide: true, actions: [{ label: 'Done', primary: true }] });
   draw();
   await s;
 };
+
+// --- Approvals (a parent's own tab) -------------------------------------------------------
+
+export class ApprovalsView {
+  constructor(app) {
+    this.app = app;
+    this.store = app.store;
+  }
+
+  count() { return pendingChores(this.store).length; }
+
+  render(el) {
+    this.el = el;
+    const list = h('div', { class: 'fam-manage' });
+    const body = h('div', { class: 'fam-approvals' });
+    const pending = drawApprovals(this.app, list, () => this.render(el));
+    const all = pending.length > 1 ? h('button', { class: 'fam-btn primary', onclick: async () => {
+      const ok = await sheet(this.app.root, { title: `Approve all ${pending.length}?`, body: h('p', {}, 'Each is approved with the stars shown for it.'), actions: [{ label: 'Cancel' }, { label: 'Approve all', primary: true, value: true }] });
+      if (!ok) return;
+      try {
+        for (const row of list.querySelectorAll('.fam-approval')) {
+          const c = pending[[...list.children].indexOf(row)];
+          if (c) await approveChore(this.store, c, Math.max(0, Number(row.querySelector('input').value) || 0));
+        }
+        toast(`Approved ${pending.length} chores`, { type: 'success', timeout: 2500 });
+        this.render(el);
+      } catch (err) { toastError(err); }
+    } }, h('span', { html: ICONS.check }), `Approve all (${pending.length})`) : null;
+    clear(el,
+      h('div', { class: 'fam-toolbar' }, h('div', { class: 'fam-toolbar-title' }, 'Approvals'), h('div', { class: 'fam-spacer' }), all),
+      body);
+    body.append(pending.length
+      ? h('section', { class: 'fam-card' }, h('h3', {}, 'Chores waiting for a parent'),
+        h('p', { class: 'fam-muted' }, 'Chores family members made for themselves and extra chores they did. Their stars count once approved; you can change the stars first.'), list)
+      : h('div', { class: 'fam-empty' }, h('div', { class: 'fam-empty-emoji' }, '✅'), 'Nothing waiting for approval.'));
+  }
+}
 
 const fmtClock = (t) => { const [hh, mm] = t.split(':').map(Number); return new Date(2000, 0, 1, hh, mm).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }); };
 

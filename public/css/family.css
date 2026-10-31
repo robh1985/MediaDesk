@@ -573,3 +573,11 @@ body.fam-page { background: #f6f3ee; overflow: hidden; height: 100dvh; }
   .fam-extras { width: 104px; }
   .fam-extras.closed { width: 38px; }
 }
+
+/* Approvals, in the left menu for parents */
+.fam-rail-btn { position: relative; }
+.fam-rail-badge { position: absolute; top: 4px; right: 12px; min-width: 18px; height: 18px; padding: 0 5px; box-sizing: border-box; border-radius: 9px; background: #e03131; color: #fff; font-size: 11px; font-weight: 700; line-height: 18px; text-align: center; }
+.fam-rail-badge[hidden] { display: none; }
+.fam-approvals { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; }
+.fam-approvals .fam-card { max-width: 860px; }
+@media (max-width: 760px) { .fam-rail-badge { top: 2px; right: 6px; } }

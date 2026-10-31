@@ -8,7 +8,7 @@ import { h, clear, toast } from '../../ui.js';
 import { appIcon } from '../../icons.js';
 import { Store, familyAuth } from './store.js';
 import { CalendarView } from './calendar.js';
-import { ChoresView, RewardsView } from './chores.js';
+import { ChoresView, RewardsView, ApprovalsView } from './chores.js';
 import { MealsView } from './meals.js';
 import { ListsView } from './lists.js';
 import { PhotosView, photoFrame, sleepScreen } from './photos.js';
@@ -83,6 +83,7 @@ class FamilyOrganizer {
       lists: new ListsView(this),
       photos: new PhotosView(this),
       settings: new SettingsView(this),
+      approvals: new ApprovalsView(this),
     };
     this.build();
     // First time: there's nobody in the family yet.
@@ -117,6 +118,9 @@ class FamilyOrganizer {
     this.filterEl = h('div', { class: 'fam-filter' });
     this.rail = h('nav', { class: 'fam-rail' },
       TABS.map(([id, label, ic]) => h('button', { class: 'fam-rail-btn', dataset: { tab: id }, onclick: () => this.go(id) }, h('span', { html: ic }), h('span', {}, label))),
+      // Signed in as a parent: everything waiting for a parent's approval, in one place.
+      this.isParentUser() ? h('button', { class: 'fam-rail-btn', dataset: { tab: 'approvals' }, onclick: () => this.go('approvals') },
+        h('span', { class: 'fam-rail-icon', html: ICONS.approve }), h('span', {}, 'Approvals'), this.approvalBadge = h('span', { class: 'fam-rail-badge', hidden: true })) : null,
       h('div', { class: 'fam-rail-gap' }),
       h('button', { class: 'fam-rail-btn small', title: 'Sleep', onclick: () => this.sleep(true) }, h('span', { html: ICONS.sleep }), h('span', {}, 'Sleep')),
       h('button', { class: 'fam-rail-btn small', dataset: { tab: 'settings' }, onclick: () => this.go('settings') }, h('span', { html: ICONS.settings }), h('span', {}, 'Settings')));
@@ -132,6 +136,7 @@ class FamilyOrganizer {
     this.main = h('main', { class: 'fam-main' });
     clear(this.root, this.rail, h('div', { class: 'fam-content' }, this.header, this.main));
     this.drawFilter();
+    this.updateApprovalBadge();
   }
 
   // The signed-in account: your details, and signing out.
@@ -145,13 +150,13 @@ class FamilyOrganizer {
       actions: [
         { label: 'Sign out', danger: true, left: true, onClick: async (close) => { close(); try { await familyAuth.logout(); } catch { /* signed out anyway */ } location.reload(); } },
         { label: 'My account', onClick: (close) => { close(); this.go('settings', 'account'); } },
-        u.role === 'parent' ? { label: 'Users', primary: true, onClick: (close) => { close(); this.go('settings', 'users'); } } : { label: 'Close', primary: true },
+        u.role === 'parent' ? { label: 'Accounts', primary: true, onClick: (close) => { close(); this.go('settings', 'accounts'); } } : { label: 'Close', primary: true },
       ],
     });
   }
 
   go(tab, section) {
-    if (!this.views[tab]) tab = 'calendar';
+    if (!this.views[tab] || (tab === 'approvals' && !this.isParentUser())) tab = 'calendar';
     this.tab = tab;
     this.prefs.tab = tab;
     savePrefs(this.prefs);
@@ -162,7 +167,7 @@ class FamilyOrganizer {
     const el = h('div', { class: `fam-view fam-view-${tab}` });
     clear(this.main, el);
     if (tab === 'settings') view.render(el, section); else view.render(el);
-    this.win.setTitle(tab === 'calendar' ? 'Family Organizer' : `Family Organizer — ${tab === 'settings' ? 'Settings' : TABS.find((t) => t[0] === tab)[1]}`);
+    this.win.setTitle(tab === 'calendar' ? 'Family Organizer' : `Family Organizer — ${tab === 'settings' ? 'Settings' : tab === 'approvals' ? 'Approvals' : TABS.find((t) => t[0] === tab)[1]}`);
   }
 
   // Redraw after a change, keeping the place you were typing.
@@ -180,7 +185,17 @@ class FamilyOrganizer {
     }
   }
 
+  isParentUser() { return this.session?.user?.role === 'parent'; }
+
+  updateApprovalBadge() {
+    if (!this.approvalBadge) return;
+    const n = this.views.approvals.count();
+    this.approvalBadge.hidden = !n;
+    this.approvalBadge.textContent = n > 99 ? '99+' : String(n);
+  }
+
   changed(what) {
+    this.updateApprovalBadge();
     if (what === 'settings' && this.tab === 'settings') return;
     this.drawFilter();
     this.refresh();

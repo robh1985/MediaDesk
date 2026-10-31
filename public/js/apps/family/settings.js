@@ -20,20 +20,40 @@ export class SettingsView {
   constructor(app) {
     this.app = app;
     this.store = app.store;
-    this.section = 'profiles';
+    this.section = 'accounts';
   }
 
   render(el, section) {
+    // Older names for parts of a tab: Profiles, Users and Parent PIN are in Accounts; Quick picks
+    // and Extra chores in Chores/Routines.
+    const ALIASES = { profiles: 'accounts', users: 'accounts', parents: 'accounts', quickpicks: 'chores', extras: 'chores' };
+    const same = !section || (ALIASES[section] || section) === this.section;
+    const keep = same ? this.el?.querySelector('.fam-settings')?.scrollTop || 0 : 0;
     this.el = el;
-    if (section) this.section = section;
+    if (section) this.section = ALIASES[section] || section;
     const session = this.app.session || {};
-    const sections = [['profiles', 'Profiles'], ['calendars', 'Calendars'], ['general', 'General'], ['display', 'Photo frame & sleep'], ['quickpicks', 'Quick picks'], ['extras', 'Extra chores'], ['parents', 'Parent PIN'],
-      session.parent ? ['users', 'Users'] : null, session.user ? ['account', 'My account'] : null].filter(Boolean);
+    const sections = [['accounts', 'Accounts'], ['calendars', 'Calendars'], ['general', 'General'], ['display', 'Photo frame & sleep'], ['chores', 'Chores/Routines'],
+      session.user ? ['account', 'My account'] : null].filter(Boolean);
     if (!sections.some(([id]) => id === this.section)) this.section = sections[0][0];
     const nav = h('div', { class: 'fam-seg fam-settings-nav' }, sections.map(([id, label]) => h('button', { class: this.section === id ? 'on' : '', onclick: () => { this.section = id; this.render(el); } }, label)));
     const body = h('div', { class: 'fam-settings' });
     clear(el, h('div', { class: 'fam-toolbar' }, h('div', { class: 'fam-toolbar-title' }, 'Settings'), h('div', { class: 'fam-spacer' }), nav), body);
     this[`draw_${this.section}`](body);
+    // Redrawn after a change: stay where you were (the account list arrives a moment later).
+    if (keep) { body.scrollTop = keep; setTimeout(() => { body.scrollTop = keep; }, 250); }
+  }
+
+  // Accounts: the family's profiles, sign-in accounts and invites (for parents), and the parent PIN.
+  draw_accounts(body) {
+    this.draw_profiles(body);
+    if (this.app.session?.parent) this.draw_users(body);
+    this.draw_parents(body);
+  }
+
+  // Chores/Routines: the quick picks for new chores, and the extra chores menu.
+  draw_chores(body) {
+    this.draw_quickpicks(body);
+    this.draw_extras(body);
   }
 
   card(title, ...content) { return h('section', { class: 'fam-card' }, title ? h('h3', {}, title) : null, ...content); }
