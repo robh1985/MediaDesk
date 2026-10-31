@@ -133,10 +133,11 @@ export class SettingsView {
     for (const e of this.store.all('events')) if (e.calendar) counts.set(e.calendar, (counts.get(e.calendar) || 0) + 1);
     body.append(
       this.card('Family calendars',
-        h('p', { class: 'fam-muted' }, 'Calendars of your own, alongside the main family one — for sports, school, work, birthdays or anything else. Choose one when adding an event; its events show in its colour, and each can be turned off.'),
+        h('p', { class: 'fam-muted' }, 'Calendars of your own, alongside the main family one — for sports, school, work, birthdays or anything else. Start one from an .ics file, or add events to it as you go. Like a connected calendar, it can be someone’s (its events show in their colour and column) or everyone’s (in its own colour), and each can be turned off.'),
         h('div', { class: 'fam-cal-list' }, own.length ? own.map((c) => h('div', { class: `fam-cal-row ${c.enabled === false ? 'fam-off' : ''}`, style: { '--c': c.color } },
           h('i', { class: 'fam-cal-dot' }),
           h('div', { class: 'fam-profile-main' }, h('b', {}, c.name), h('small', {}, [`${counts.get(c.id) || 0} event${counts.get(c.id) === 1 ? '' : 's'}`, c.enabled === false ? 'Turned off' : null].filter(Boolean).join(' · '))),
+          h('span', { class: 'fam-agenda-who' }, (c.members || []).map((id) => avatar(this.store.member(id), 'xs'))),
           h('button', { class: 'fam-icon-btn', title: 'Edit', html: ICONS.edit, onclick: () => this.editOwnCalendar(c) })))
           : h('div', { class: 'fam-muted small' }, 'Only the main family calendar so far.')),
         h('button', { class: 'fam-btn primary', onclick: () => this.editOwnCalendar(null) }, h('span', { html: ICONS.plus }), 'Create a calendar')),
@@ -179,17 +180,49 @@ export class SettingsView {
     const name = input({ value: c?.name || '', placeholder: 'e.g. Soccer, School, Work', required: true, autofocus: true, maxlength: 60 });
     const colors = colorPicker(color, (x) => { color = x; });
     const on = toggle('Show on the calendar', c ? c.enabled !== false : true);
+    const who = memberPicker(this.store.members(), c?.members || []);
     const count = c ? this.store.all('events').filter((e) => e.calendar === c.id).length : 0;
+    // Events from an .ics file, to start the calendar with (or add to it).
+    let file = null; // { name, evs }
+    const fileNote = h('span', { class: 'fam-hint' }, c ? 'Adds the file’s events to this calendar.' : 'Optional: start the calendar with the events from a file exported from another calendar.');
+    const fileIn = h('input', { type: 'file', accept: '.ics,text/calendar', hidden: true, onchange: async () => {
+      const f = fileIn.files[0];
+      fileIn.value = '';
+      if (!f) return;
+      try {
+        const evs = await this.store.parseIcs(await f.text());
+        if (!evs.length) { file = null; fileNote.textContent = `There are no events in “${f.name}”.`; return; }
+        file = { name: f.name, evs };
+        clear(fileBtn, h('span', { html: ICONS.upload }), f.name);
+        fileNote.textContent = `${evs.length} event${evs.length === 1 ? '' : 's'} will be added to this calendar.`;
+        if (!name.value.trim()) name.value = f.name.replace(/\.ics$/i, '').replace(/[_-]+/g, ' ').trim().slice(0, 60);
+      } catch (err) { file = null; fileNote.textContent = err.message; }
+    } });
+    const fileBtn = h('button', { type: 'button', class: 'fam-btn', onclick: () => fileIn.click() }, h('span', { html: ICONS.upload }), 'Choose .ics file');
     const out = await sheet(this.app.root, {
-      title: c ? 'Calendar' : 'Create a calendar',
-      body: h('div', { class: 'fam-form' }, field('Name', name), field('Colour', colors), on),
+      title: c ? 'Calendar' : 'Create a calendar', wide: true,
+      body: h('div', { class: 'fam-form' },
+        field('Name', name),
+        field('Whose calendar', who, 'Its events take this person’s colour and show in their column.'),
+        field('Colour (when it’s nobody’s in particular)', colors),
+        on,
+        h('div', { class: 'fam-field' }, h('span', { class: 'fam-label' }, 'Import events from an .ics file'), h('div', { class: 'fam-row-wrap' }, fileBtn, fileIn), fileNote)),
       actions: [c ? { label: 'Delete', danger: true, left: true, value: 'delete' } : null, { label: 'Cancel' }, { label: c ? 'Save' : 'Create', primary: true, submit: true, onClick: (close) => {
         if (!name.value.trim()) { name.focus(); return; }
-        close({ ...(c || { order: this.store.customCalendars().length }), custom: true, name: name.value.trim(), color, enabled: on.querySelector('input').checked });
+        close({ ...(c || { order: this.store.customCalendars().length }), custom: true, name: name.value.trim(), color, members: who.value(), enabled: on.querySelector('input').checked });
       } }],
     });
     if (!out) return;
     try {
+      if (out !== 'delete') {
+        const saved = await this.store.put('calendars', out);
+        if (file) {
+          await this.store.importEvents(file.evs, file.name, saved.id);
+          toast(`${file.evs.length} event${file.evs.length === 1 ? '' : 's'} imported to “${saved.name}”`, { type: 'success', timeout: 3000 });
+        }
+        this.render(this.el);
+        return;
+      }
       if (out === 'delete') {
         const what = count ? await sheet(this.app.root, {
           title: `Delete “${c.name}”?`, body: h('p', {}, `It has ${count} event${count === 1 ? '' : 's'}. Move them to the main family calendar, or delete them too?`),
@@ -201,7 +234,7 @@ export class SettingsView {
           ...events.map((e) => (what === 'events' ? { op: 'delete', col: 'events', id: e.id } : { op: 'put', col: 'events', item: { ...e, calendar: null } })),
           { op: 'delete', col: 'calendars', id: c.id },
         ]);
-      } else await this.store.put('calendars', out);
+      }
       this.render(this.el);
     } catch (err) { toastError(err, 'Couldn’t save the calendar'); }
   }

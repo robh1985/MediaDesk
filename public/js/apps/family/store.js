@@ -211,7 +211,9 @@ export class Store {
     const own = this.all('events').flatMap((e) => {
       const cal = e.calendar ? cals.get(e.calendar) : null;
       if (cal?.custom && cal.enabled === false) return [];
-      return [{ ...e, source: 'family', ...(cal?.custom ? { color: cal.color, calendarName: cal.name } : {}) }];
+      // Someone's calendar: its events are theirs unless the event says whose it is.
+      const members = (e.members || []).length || !cal?.custom ? e.members : cal.members || [];
+      return [{ ...e, members, source: 'family', ...(cal?.custom ? { color: cal.color, calendarName: cal.name } : {}) }];
     });
     const subscribed = [];
     for (const cal of this.all('calendars')) {

@@ -25,9 +25,10 @@ export class CalendarView {
   // --- Events to show --------------------------------------------------------
 
   colorOf(ev) {
-    // On one of the family's own calendars: that calendar's colour.
+    // On one of the family's own calendars that's everyone's: that calendar's colour (someone's
+    // calendar is in their colour, as a connected one is).
     const cal = ev.calendar ? this.store.get('calendars', ev.calendar) : null;
-    if (cal?.custom && cal.color) return cal.color;
+    if (cal?.custom && cal.color && !(cal.members || []).length) return cal.color;
     if (ev.color && !(ev.members || []).length) return ev.color;
     const m = (ev.members || []).map((id) => this.store.member(id)).find(Boolean);
     return m?.color || ev.color || this.store.settings.familyColor || FAMILY_COLOR;
