@@ -60,7 +60,7 @@ export class ChoresView {
         h('button', { class: this.layout === 'week' ? 'on' : '', onclick: () => { this.layout = 'week'; this.render(el); } }, 'Week')) : null,
       this.canApprove && this.pending().length ? h('button', { class: 'fam-btn fam-approve-btn', onclick: () => this.approvals() }, `Approve (${this.pending().length})`) : null,
       h('button', { class: 'fam-btn', onclick: () => this.manage() }, 'Manage'),
-      h('button', { class: 'fam-btn primary', onclick: () => this.edit(null) }, h('span', { html: ICONS.plus }), this.mode === 'routines' ? 'Routine step' : 'Chore'));
+      h('button', { class: 'fam-btn primary', onclick: () => this.edit(null) }, h('span', { html: ICONS.plus }), this.mode === 'routines' ? 'Routine' : 'Chore'));
     const board = h('div', { class: 'fam-board' });
     clear(el, bar, board);
     if (this.mode === 'chores' && this.layout === 'week') return this.drawWeek(board);
