@@ -26,18 +26,56 @@ export class ListsView {
     this.showDone = true;
   }
 
+  // Signed in on the organizer's own page as a family member (not a parent): they assign to-dos
+  // to themselves only. Parents (and MediaDesk itself) assign them to anyone.
+  get user() { return this.app.session?.user || null; }
+  get me() { return this.user?.profile ? this.store.member(this.user.profile) : null; }
+  get selfOnly() { return Boolean(this.user && this.user.role !== 'parent'); }
+  canAssign(id) { return !this.selfOnly || id === this.me?.id; }
+
+  // Who a list or item is for: everyone can be picked by a parent; a family member can only tick
+  // themselves on or off (the others stay as they are, shown but not changeable).
+  assignPicker(selected, { single = false } = {}) {
+    const sel = new Set(selected.filter(Boolean));
+    const row = h('div', { class: 'fam-member-pick' });
+    const draw = () => clear(row, this.store.members().map((m) => {
+      const allowed = this.canAssign(m.id);
+      return h('button', {
+        type: 'button', class: `fam-chip ${sel.has(m.id) ? 'on' : ''} ${allowed ? '' : 'locked'}`, style: { '--c': m.color }, disabled: !allowed,
+        title: allowed ? '' : 'Only a parent can assign this to someone else',
+        onclick: () => {
+          if (sel.has(m.id)) sel.delete(m.id);
+          else { if (single) for (const id of [...sel]) if (this.canAssign(id)) sel.delete(id); sel.add(m.id); }
+          draw();
+        },
+      }, avatar(m, 'sm'), m.name);
+    }));
+    draw();
+    row.value = () => [...sel];
+    return row;
+  }
+
+  // Lists for the people picked at the top (and lists that are everyone's).
+  shown(lists) {
+    const f = this.app.filter;
+    if (!f.size) return lists;
+    return lists.filter((l) => !(l.members || []).length || l.members.some((id) => f.has(id)));
+  }
+
   lists() { return this.store.all('lists').sort((a, b) => (a.order ?? 0) - (b.order ?? 0) || a.title.localeCompare(b.title)); }
   items(listId) { return this.store.all('listitems').filter((i) => i.list === listId).sort((a, b) => (a.done - b.done) || (a.order ?? 0) - (b.order ?? 0)); }
 
   render(el) {
     this.el = el;
-    const lists = this.lists();
+    const lists = this.shown(this.lists());
     if (!lists.find((l) => l.id === this.listId)) this.listId = lists[0]?.id || null;
     const side = h('div', { class: 'fam-lists-side' },
       lists.map((l) => {
         const left = this.items(l.id).filter((i) => !i.done).length;
         return h('button', { class: `fam-list-tab ${l.id === this.listId ? 'on' : ''}`, style: { '--c': l.color || '#1c7ed6' }, onclick: () => { this.listId = l.id; this.render(el); } },
-          h('span', { class: 'fam-list-emoji' }, l.emoji || '📝'), h('span', { class: 'fam-list-name' }, l.title), h('span', { class: 'fam-list-count' }, left || ''));
+          h('span', { class: 'fam-list-emoji' }, l.emoji || '📝'), h('span', { class: 'fam-list-name' }, l.title),
+          (l.members || []).length ? h('span', { class: 'fam-agenda-who' }, l.members.map((id) => this.store.member(id)).filter(Boolean).slice(0, 3).map((m) => avatar(m, 'xs'))) : null,
+          h('span', { class: 'fam-list-count' }, left || ''));
       }),
       h('button', { class: 'fam-list-tab add', onclick: () => this.editList(null) }, h('span', { class: 'fam-list-emoji', html: ICONS.plus }), h('span', { class: 'fam-list-name' }, 'New list')));
     const main = h('div', { class: 'fam-list-main' });
@@ -65,6 +103,7 @@ export class ListsView {
     });
     const head = h('div', { class: 'fam-toolbar', style: { '--c': list.color || '#1c7ed6' } },
       h('div', { class: 'fam-toolbar-title' }, h('span', {}, list.emoji || '📝'), ' ', list.title),
+      (list.members || []).length ? h('span', { class: 'fam-list-for' }, 'For ', list.members.map((id) => this.store.member(id)).filter(Boolean).map((m) => h('span', {}, avatar(m, 'xs'), m.name))) : null,
       h('div', { class: 'fam-spacer' }),
       done.length ? h('button', { class: 'fam-btn', onclick: () => { this.showDone = !this.showDone; this.render(this.el); } }, this.showDone ? 'Hide ticked' : `Show ticked (${done.length})`) : null,
       done.length ? h('button', { class: 'fam-btn', onclick: () => this.clearDone(list, done) }, 'Clear ticked') : null,
@@ -117,7 +156,7 @@ export class ListsView {
     const text = input({ value: i.text, required: true, autofocus: true, maxlength: 300 });
     const qty = input({ value: i.qty || '', placeholder: 'e.g. 2 lb', maxlength: 40 });
     const notes = input({ value: i.notes || '', placeholder: 'Notes', maxlength: 300 });
-    const who = memberPicker(this.store.members(), i.member ? [i.member] : [], { single: true });
+    const who = this.assignPicker(i.member ? [i.member] : [], { single: true });
     const due = input({ type: 'date', value: i.due || '' });
     const aisle = select([['', 'Automatic'], ...AISLES.map(([a, e]) => [a, `${e} ${a}`]), ['Other', '🛍️ Other']], i.section || '');
     const moveTo = select(this.lists().map((l) => [l.id, `${l.emoji || '📝'} ${l.title}`]), list.id);
@@ -127,7 +166,7 @@ export class ListsView {
         list.kind === 'grocery' ? h('div', { class: 'fam-row-wrap' }, field('Amount', qty), field('Aisle', aisle)) : h('div', { class: 'fam-row-wrap' }, field('Due', due)),
         notes, field('For', who), field('List', moveTo)),
       actions: [{ label: 'Delete', danger: true, left: true, value: 'delete' }, { label: 'Cancel' }, { label: 'Save', primary: true, submit: true, onClick: (close) => close({
-        ...i, text: text.value.trim() || i.text, qty: qty.value.trim(), notes: notes.value.trim(), member: who.value()[0] || null, due: due.value || null, section: aisle.value || null, list: moveTo.value,
+        ...i, text: text.value.trim() || i.text, qty: qty.value.trim(), notes: notes.value.trim(), member: who.value().find((id) => id !== i.member) || who.value()[0] || null, due: due.value || null, section: aisle.value || null, list: moveTo.value,
       }) }],
     });
     if (!out) return;
@@ -140,10 +179,16 @@ export class ListsView {
     const kind = select([['grocery', 'Grocery list (sorted into aisles)'], ['todo', 'To-do list'], ['other', 'Other']], l?.kind || 'todo');
     let color = l?.color || '#1c7ed6';
     const colors = colorPicker(color, (c) => { color = c; });
+    // Who a to-do list is for. A family member's new list starts as theirs.
+    const who = this.assignPicker(l ? l.members || [] : this.selfOnly && this.me ? [this.me.id] : []);
+    const whoField = field('For', who, this.selfOnly ? 'You can add or take off only yourself; a parent can assign it to anyone.' : 'Pick nobody to make it everyone’s.');
+    const syncKind = () => { whoField.hidden = kind.value !== 'todo'; };
+    kind.addEventListener('change', syncKind);
+    syncKind();
     const out = await sheet(this.app.root, {
       title: l ? 'List settings' : 'New list',
-      body: h('div', { class: 'fam-form' }, h('div', { class: 'fam-title-row' }, emoji, title), field('Kind', kind), field('Colour', colors)),
-      actions: [l ? { label: 'Delete list', danger: true, left: true, value: 'delete' } : null, { label: 'Cancel' }, { label: 'Save', primary: true, submit: true, onClick: (close) => { if (!title.value.trim()) return title.focus(); close({ ...(l || { order: Date.now() }), title: title.value.trim(), emoji: emoji.value, kind: kind.value, color }); } }],
+      body: h('div', { class: 'fam-form' }, h('div', { class: 'fam-title-row' }, emoji, title), field('Kind', kind), whoField, field('Colour', colors)),
+      actions: [l ? { label: 'Delete list', danger: true, left: true, value: 'delete' } : null, { label: 'Cancel' }, { label: 'Save', primary: true, submit: true, onClick: (close) => { if (!title.value.trim()) return title.focus(); close({ ...(l || { order: Date.now() }), title: title.value.trim(), emoji: emoji.value, kind: kind.value, color, members: kind.value === 'todo' ? who.value() : l?.members || [] }); } }],
     });
     if (!out) return;
     try {
@@ -155,6 +200,7 @@ export class ListsView {
       } else {
         const [saved] = await this.store.batch([{ op: 'put', col: 'lists', item: out }]);
         this.listId = saved.id;
+        this.render(this.el);
       }
     } catch (err) { toastError(err); }
   }

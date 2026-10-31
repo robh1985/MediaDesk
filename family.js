@@ -329,6 +329,11 @@ function createFamily({ dataDir, mock = false }) {
         } else if (prev && me.profile && ![prev.member, prev.by, prev.for].includes(me.profile)) {
           throw new FamilyError(403, 'Only whoever ticked it off (or a parent) can untick it');
         }
+      } else if ((op.col === 'lists' || op.col === 'listitems') && op.op === 'put') {
+        // Assigning to-dos: a family member may add or take off only themselves.
+        const people = (x) => (op.col === 'lists' ? x?.members || [] : x?.member ? [x.member] : []);
+        const others = (list) => list.filter((id) => id !== me.profile).sort().join();
+        if (others(people(prev)) !== others(people(op.item))) throw new FamilyError(403, 'You can only assign to-dos to yourself');
       } else if (op.col === 'redemptions') {
         if (op.op === 'delete' || op.item?.adjust) throw new FamilyError(403, 'Only a parent can give or take stars');
         if (!me.profile || op.item.member !== me.profile) throw new FamilyError(403, 'You can only spend your own stars');

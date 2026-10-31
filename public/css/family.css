@@ -591,3 +591,9 @@ body.fam-page { background: #f6f3ee; overflow: hidden; height: 100dvh; }
 .fam-cal-choice small { color: var(--f-muted); }
 .fam-cal-name { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; }
 .fam-cal-name i { width: 10px; height: 10px; border-radius: 50%; }
+
+/* Who a to-do list is for */
+.fam-chip.locked { opacity: .5; cursor: not-allowed; }
+.fam-list-for { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 13px; color: var(--f-muted); }
+.fam-list-for > span { display: inline-flex; align-items: center; gap: 4px; color: var(--f-fg); font-weight: 600; }
+.fam-list-tab .fam-agenda-who { margin-left: auto; }
