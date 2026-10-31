@@ -25,12 +25,18 @@ export class CalendarView {
   // --- Events to show --------------------------------------------------------
 
   colorOf(ev) {
+    // On one of the family's own calendars: that calendar's colour.
+    const cal = ev.calendar ? this.store.get('calendars', ev.calendar) : null;
+    if (cal?.custom && cal.color) return cal.color;
     if (ev.color && !(ev.members || []).length) return ev.color;
     const m = (ev.members || []).map((id) => this.store.member(id)).find(Boolean);
     return m?.color || ev.color || this.store.settings.familyColor || FAMILY_COLOR;
   }
 
   visible(ev) {
+    // Calendars hidden on this device (the Calendars button).
+    const hidden = this.app.prefs.hiddenCalendars;
+    if (hidden?.length && hidden.includes(ev.calendar && this.store.get('calendars', ev.calendar) ? ev.calendar : 'family')) return false;
     const f = this.app.filter;
     if (!f.size) return true;
     const ms = ev.members || [];
@@ -61,6 +67,7 @@ export class CalendarView {
         h('button', { class: 'fam-icon-btn', 'aria-label': 'Next', html: ICONS.right, onclick: () => this.step(1) })),
       title,
       h('div', { class: 'fam-spacer' }),
+      this.store.all('calendars').length ? h('button', { class: `fam-btn fam-cals-btn ${this.app.prefs.hiddenCalendars?.length ? 'filtered' : ''}`, title: 'Show or hide calendars', onclick: () => this.chooseCalendars() }, h('span', { html: ICONS.calendar }), h('span', { class: 'fam-hide-sm' }, 'Calendars')) : null,
       h('div', { class: 'fam-seg' }, views.map(([id, label]) => h('button', {
         class: this.view === id ? 'on' : '', dataset: { view: id },
         onclick: () => { this.view = id; this.scrolled = false; this.store.setSettings({ calendarView: id }).catch(() => {}); this.render(el); },
@@ -379,6 +386,23 @@ export class CalendarView {
     clear(this.body, list);
   }
 
+  // Show or hide calendars on this device: the main family calendar, the family's own, and connected ones.
+  async chooseCalendars() {
+    const hidden = new Set(this.app.prefs.hiddenCalendars || []);
+    const all = [{ id: 'family', name: 'Family', color: this.store.settings.familyColor || FAMILY_COLOR, note: 'Events not on another calendar' },
+      ...this.store.customCalendars().map((c) => ({ id: c.id, name: c.name, color: c.color, note: c.enabled === false ? 'Turned off in Settings' : '' })),
+      ...this.store.all('calendars').filter((c) => !c.custom).map((c) => ({ id: c.id, name: c.name, color: c.color, note: 'Connected' }))];
+    const body = h('div', { class: 'fam-cal-choose' }, all.map((c) => {
+      const box = h('input', { type: 'checkbox', checked: !hidden.has(c.id), onchange: () => { if (box.checked) hidden.delete(c.id); else hidden.add(c.id); } });
+      return h('label', { class: 'fam-cal-choice', style: { '--c': c.color } }, box, h('i', { class: 'fam-cal-dot' }), h('span', {}, h('b', {}, c.name), c.note ? h('small', {}, c.note) : null));
+    }));
+    const ok = await sheet(this.app.root, { title: 'Calendars to show', body: h('div', {}, h('p', { class: 'fam-muted small' }, 'On this device only.'), body), actions: [{ label: 'Cancel' }, { label: 'Show', primary: true, value: true }] });
+    if (!ok) return;
+    this.app.prefs.hiddenCalendars = [...hidden];
+    this.app.savePrefs();
+    this.render(this.el);
+  }
+
   // --- Event details and editing -------------------------------------------------------
 
   showEvent(o) {
@@ -398,7 +422,8 @@ export class CalendarView {
       who.length ? row(ICONS.family, h('div', { class: 'fam-detail-who' }, who.map((m) => h('span', {}, avatar(m, 'xs'), m.name)))) : null,
       ev.reminder != null && ev.reminder !== '' ? row(ICONS.bell, reminderText(ev.reminder)) : null,
       ev.notes ? row(ICONS.notes, h('div', { class: 'fam-detail-notes' }, linkify(ev.notes))) : null,
-      cal ? row(ICONS.calendar, `From ${cal.name}`, h('div', { class: 'fam-hint' }, 'Change it in that calendar; it updates here within a few minutes.')) : null);
+      cal?.custom ? row(ICONS.calendar, h('span', { class: 'fam-cal-name' }, h('i', { style: { background: cal.color } }), cal.name)) : null,
+      cal && !cal.custom ? row(ICONS.calendar, `From ${cal.name}`, h('div', { class: 'fam-hint' }, 'Change it in that calendar; it updates here within a few minutes.')) : null);
     sheet(this.app.root, {
       title: 'Event', body,
       actions: ev.readonly ? [{ label: 'Close', primary: true }] : [
@@ -478,6 +503,9 @@ export class CalendarView {
     const who = memberPicker(members, d.members || []);
     const location = input({ value: d.location || '', placeholder: 'Add a place', maxlength: 300 });
     const notes = h('textarea', { class: 'fam-input', rows: 3, placeholder: 'Notes', maxlength: 4000 }, d.notes || '');
+    // Which calendar: the main family calendar, or one of the family's own.
+    const ownCals = this.store.customCalendars();
+    const calSel = ownCals.length ? select([['', 'Family'], ...ownCals.map((c) => [c.id, c.name])], (opts.calendar || d.calendar || '') && ownCals.some((c) => c.id === (opts.calendar || d.calendar)) ? (opts.calendar || d.calendar) : '') : null;
     const reminder = select([['', 'No reminder'], ['0', 'At the start'], ['5', '5 minutes before'], ['10', '10 minutes before'], ['15', '15 minutes before'], ['30', '30 minutes before'], ['60', '1 hour before'], ['120', '2 hours before'], ['1440', '1 day before']], d.reminder == null ? '' : String(d.reminder));
     const countdown = toggle('Show a countdown', d.countdown);
     const isPrivate = toggle('Keep off the phone calendar address', d.private);
@@ -490,6 +518,7 @@ export class CalendarView {
         h('div', { class: 'fam-when-row' }, h('span', { class: 'fam-label' }, 'Ends'), eDate, eTime)),
       field('Repeat', rep.el),
       members.length ? field('Who', who) : null,
+      calSel ? field('Calendar', calSel) : null,
       field('Where', location),
       field('Reminder', reminder),
       notes,
@@ -506,7 +535,7 @@ export class CalendarView {
         const next = {
           title: title.value.trim(), allDay: allDay.checked,
           start: allDay.checked ? ymd(st) : st.toISOString(), end: allDay.checked ? ymd(addDays(en, -1)) : en.toISOString(),
-          rrule: rep.value(), members: who.value(), location: location.value.trim(), notes: notes.value.trim(),
+          rrule: rep.value(), members: who.value(), location: location.value.trim(), notes: notes.value.trim(), calendar: calSel ? calSel.value || null : d.calendar || null,
           reminder: reminder.value === '' ? null : Number(reminder.value),
           countdown: countdown.querySelector('input').checked, private: isPrivate.querySelector('input').checked,
         };

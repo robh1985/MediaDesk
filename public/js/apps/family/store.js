@@ -192,11 +192,20 @@ export class Store {
   member(id) { return this.get('members', id); }
 
   // Every event to show: the family's own plus those from subscribed calendars.
+  // The family's own calendars (made in Settings → Calendars), as opposed to connected ones.
+  customCalendars() { return this.all('calendars').filter((c) => c.custom).sort((a, b) => (a.order ?? 0) - (b.order ?? 0) || a.name.localeCompare(b.name)); }
+
   events() {
-    const own = this.all('events').map((e) => ({ ...e, source: 'family' }));
+    const cals = new Map(this.all('calendars').map((c) => [c.id, c]));
+    // Events on one of the family's own calendars take its colour, and go when it's turned off.
+    const own = this.all('events').flatMap((e) => {
+      const cal = e.calendar ? cals.get(e.calendar) : null;
+      if (cal?.custom && cal.enabled === false) return [];
+      return [{ ...e, source: 'family', ...(cal?.custom ? { color: cal.color, calendarName: cal.name } : {}) }];
+    });
     const subscribed = [];
     for (const cal of this.all('calendars')) {
-      if (cal.enabled === false) continue;
+      if (cal.enabled === false || cal.custom) continue;
       const f = this.feeds.get(cal.id);
       for (const e of f?.events || []) subscribed.push({ ...e, id: `${cal.id}:${e.id}`, members: cal.members || [], calendar: cal.id, color: cal.color, readonly: true, source: 'feed' });
     }

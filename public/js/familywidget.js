@@ -25,6 +25,8 @@ export function familyWidget(widget, relayout) {
   const maxRows = () => (compact ? 2 : MAX_ROWS);
 
   const color = (ev, members) => {
+    const cal = ev.calendar ? data.collections.calendars?.[ev.calendar] : null;
+    if (cal?.custom && cal.color) return cal.color;
     const m = (ev.members || []).map((id) => members[id]).find(Boolean);
     return m?.color || (!(ev.members || []).length && ev.color) || data.settings?.familyColor || '#5c7cfa';
   };
@@ -32,9 +34,11 @@ export function familyWidget(widget, relayout) {
   function draw(quiet = false) {
     const members = data.collections.members || {};
     const people = Object.values(members).sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
-    const own = Object.values(data.collections.events || {});
+    const cals0 = data.collections.calendars || {};
+    // The family's events, less those on one of its own calendars that's turned off.
+    const own = Object.values(data.collections.events || {}).filter((e) => !(e.calendar && cals0[e.calendar]?.custom && cals0[e.calendar].enabled === false));
     const cals = data.collections.calendars || {};
-    const subscribed = feeds.flatMap((f) => (cals[f.id] && cals[f.id].enabled !== false ? f.events.map((e) => ({ ...e, members: cals[f.id].members || [], color: cals[f.id].color })) : []));
+    const subscribed = feeds.flatMap((f) => (cals[f.id] && cals[f.id].enabled !== false && !cals[f.id].custom ? f.events.map((e) => ({ ...e, members: cals[f.id].members || [], color: cals[f.id].color })) : []));
     const off = appPref('family', 'widget') === false;
     el.hidden = off || (!people.length && !own.length);
     if (el.hidden) { if (!quiet) relayout(); return; }

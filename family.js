@@ -355,7 +355,10 @@ function createFamily({ dataDir, mock = false }) {
         const id = String(item.id || newId()).replace(/[^\w|:-]/g, '').slice(0, 80) || newId();
         const prev = col[id];
         const next = { ...item, id, updated: Date.now(), created: prev?.created || item.created || Date.now() };
-        if (op.col === 'calendars') { next.url = feedUrl(next.url); if (prev?.url !== next.url) feeds.delete(id); }
+        // A calendar is connected (an iCal address to read) or the family's own (custom: a name and colour).
+        if (op.col === 'calendars') {
+          if (next.custom) { delete next.url; next.name = String(next.name || 'Calendar').slice(0, 60); } else { next.url = feedUrl(next.url); if (prev?.url !== next.url) feeds.delete(id); }
+        }
         if (op.col === 'photos' && prev) next.file = prev.file;
         if (op.col === 'photos' && !prev) throw new FamilyError(400, 'Upload the photo first');
         col[id] = next;
@@ -507,7 +510,7 @@ function createFamily({ dataDir, mock = false }) {
       }
       if (p === '/feeds' && req.method === 'GET') {
         const force = url.searchParams.get('refresh') === '1';
-        const cals = Object.values(load().collections.calendars).filter((c) => c.enabled !== false);
+        const cals = Object.values(load().collections.calendars).filter((c) => c.enabled !== false && !c.custom);
         const list = await Promise.all(cals.map(async (c) => {
           const f = await feedEvents(c, force);
           return { id: c.id, at: f.at, error: f.error || null, events: f.events };

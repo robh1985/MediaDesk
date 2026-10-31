@@ -185,6 +185,8 @@ class FamilyOrganizer {
     }
   }
 
+  savePrefs() { savePrefs(this.prefs); }
+
   isParentUser() { return this.session?.user?.role === 'parent'; }
 
   updateApprovalBadge() {

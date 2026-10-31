@@ -581,3 +581,13 @@ body.fam-page { background: #f6f3ee; overflow: hidden; height: 100dvh; }
 .fam-approvals { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; }
 .fam-approvals .fam-card { max-width: 860px; }
 @media (max-width: 760px) { .fam-rail-badge { top: 2px; right: 6px; } }
+
+/* Choosing calendars to show */
+.fam-cals-btn.filtered { border-color: var(--f-accent); color: var(--f-accent) !important; }
+.fam-cal-choose { display: flex; flex-direction: column; gap: 4px; }
+.fam-cal-choice { --c: #868e96; display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 10px; background: var(--f-panel2); cursor: pointer; }
+.fam-cal-choice input { width: 18px; height: 18px; accent-color: var(--c); }
+.fam-cal-choice span { display: flex; flex-direction: column; }
+.fam-cal-choice small { color: var(--f-muted); }
+.fam-cal-name { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; }
+.fam-cal-name i { width: 10px; height: 10px; border-radius: 50%; }

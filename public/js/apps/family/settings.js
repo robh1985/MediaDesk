@@ -125,9 +125,20 @@ export class SettingsView {
   // --- Calendars ------------------------------------------------------------------
 
   draw_calendars(body) {
-    const cals = this.store.all('calendars');
+    const cals = this.store.all('calendars').filter((c) => !c.custom);
     const fileIn = h('input', { type: 'file', accept: '.ics,text/calendar', hidden: true, onchange: () => { const f = fileIn.files[0]; fileIn.value = ''; if (f) f.text().then((t) => this.importIcs(t)); } });
+    const own = this.store.customCalendars();
+    const counts = new Map();
+    for (const e of this.store.all('events')) if (e.calendar) counts.set(e.calendar, (counts.get(e.calendar) || 0) + 1);
     body.append(
+      this.card('Family calendars',
+        h('p', { class: 'fam-muted' }, 'Calendars of your own, alongside the main family one — for sports, school, work, birthdays or anything else. Choose one when adding an event; its events show in its colour, and each can be turned off.'),
+        h('div', { class: 'fam-cal-list' }, own.length ? own.map((c) => h('div', { class: `fam-cal-row ${c.enabled === false ? 'fam-off' : ''}`, style: { '--c': c.color } },
+          h('i', { class: 'fam-cal-dot' }),
+          h('div', { class: 'fam-profile-main' }, h('b', {}, c.name), h('small', {}, [`${counts.get(c.id) || 0} event${counts.get(c.id) === 1 ? '' : 's'}`, c.enabled === false ? 'Turned off' : null].filter(Boolean).join(' · '))),
+          h('button', { class: 'fam-icon-btn', title: 'Edit', html: ICONS.edit, onclick: () => this.editOwnCalendar(c) })))
+          : h('div', { class: 'fam-muted small' }, 'Only the main family calendar so far.')),
+        h('button', { class: 'fam-btn primary', onclick: () => this.editOwnCalendar(null) }, h('span', { html: ICONS.plus }), 'Create a calendar')),
       this.card('Connected calendars',
         h('p', { class: 'fam-muted' }, 'Show events from Google, Outlook, iCloud, Yahoo and other calendars. They are read every few minutes; change them in the calendar they come from.'),
         h('div', { class: 'fam-cal-list' }, cals.length ? cals.map((c) => {
@@ -154,6 +165,41 @@ export class SettingsView {
       this.card('Import',
         h('p', { class: 'fam-muted' }, 'Copy events from an .ics file (exported from another calendar) into the family calendar.'),
         h('button', { class: 'fam-btn', onclick: () => fileIn.click() }, h('span', { html: ICONS.upload }), 'Import .ics file'), fileIn));
+  }
+
+  // The family's own calendars: a name and colour; events are put on them in the event editor.
+  async editOwnCalendar(c) {
+    if (!(await parentGate(this.app.root, this.store, 'Changing calendars needs a parent.'))) return;
+    const used = new Set(this.store.all('calendars').map((x) => x.color));
+    let color = c?.color || COLORS.find((x) => !used.has(x)) || COLORS[3];
+    const name = input({ value: c?.name || '', placeholder: 'e.g. Soccer, School, Work', required: true, autofocus: true, maxlength: 60 });
+    const colors = colorPicker(color, (x) => { color = x; });
+    const on = toggle('Show on the calendar', c ? c.enabled !== false : true);
+    const count = c ? this.store.all('events').filter((e) => e.calendar === c.id).length : 0;
+    const out = await sheet(this.app.root, {
+      title: c ? 'Calendar' : 'Create a calendar',
+      body: h('div', { class: 'fam-form' }, field('Name', name), field('Colour', colors), on),
+      actions: [c ? { label: 'Delete', danger: true, left: true, value: 'delete' } : null, { label: 'Cancel' }, { label: c ? 'Save' : 'Create', primary: true, submit: true, onClick: (close) => {
+        if (!name.value.trim()) { name.focus(); return; }
+        close({ ...(c || { order: this.store.customCalendars().length }), custom: true, name: name.value.trim(), color, enabled: on.querySelector('input').checked });
+      } }],
+    });
+    if (!out) return;
+    try {
+      if (out === 'delete') {
+        const what = count ? await sheet(this.app.root, {
+          title: `Delete “${c.name}”?`, body: h('p', {}, `It has ${count} event${count === 1 ? '' : 's'}. Move them to the main family calendar, or delete them too?`),
+          actions: [{ label: 'Cancel' }, { label: 'Delete events too', danger: true, value: 'events' }, { label: 'Move them', primary: true, value: 'move' }],
+        }) : await sheet(this.app.root, { title: `Delete “${c.name}”?`, body: h('p', {}, 'It has no events.'), actions: [{ label: 'Cancel' }, { label: 'Delete', danger: true, value: 'move' }] });
+        if (!what) return;
+        const events = this.store.all('events').filter((e) => e.calendar === c.id);
+        await this.store.batch([
+          ...events.map((e) => (what === 'events' ? { op: 'delete', col: 'events', id: e.id } : { op: 'put', col: 'events', item: { ...e, calendar: null } })),
+          { op: 'delete', col: 'calendars', id: c.id },
+        ]);
+      } else await this.store.put('calendars', out);
+      this.render(this.el);
+    } catch (err) { toastError(err, 'Couldn’t save the calendar'); }
   }
 
   async importIcs(text) {
