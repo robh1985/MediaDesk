@@ -179,6 +179,17 @@ export class Store {
     return r.item;
   }
 
+  // Recipes: photos, importing from a website, and the Mealie connection.
+  recipeImageUrl(r) { return r?.image ? `${BASE}/recipes/image/${encodeURIComponent(r.image)}` : null; }
+  async uploadRecipeImage(file) { return (await call('recipes/image', { method: 'POST', body: file, raw: true })).image; }
+  async importRecipeUrl(url) { return (await call('recipes/import-url', { method: 'POST', body: { url } })).recipe; }
+  mealieStatus() { return call('mealie'); }
+  mealieSave(body) { return call('mealie', { method: 'POST', body }); }
+  async mealieSync() { const r = await call('mealie/sync', { method: 'POST', body: {} }); await this.refresh(); return r; }
+  mealieDisconnect(removeRecipes) { return call(`mealie${removeRecipes ? '?recipes=remove' : ''}`, { method: 'DELETE' }); }
+  // Fetch everything now (after the server changed things itself, like a Mealie import).
+  async refresh() { const d = await call('data'); this.apply(d); this.emit('remote'); }
+
   photoUrl(p) { return `${BASE}/photos/${encodeURIComponent(p.file)}`; }
   feedUrl() { return `${location.origin}/family-feed/${this.feedToken}/family.ics`; }
 

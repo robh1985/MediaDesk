@@ -12,6 +12,7 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const { sniff } = require('./wallpapers');
 const { createFamilyAuth } = require('./family-auth');
+const { createRecipes } = require('./family-recipes');
 
 const COLLECTIONS = ['members', 'events', 'calendars', 'chores', 'chorelog', 'rewards', 'redemptions', 'lists', 'listitems', 'meals', 'recipes', 'photos'];
 const MAX_PHOTO = 25 * 1024 * 1024;
@@ -352,6 +353,7 @@ function createFamily({ dataDir, mock = false }) {
         const old = col[op.id];
         delete col[op.id];
         if (op.col === 'photos' && old?.file) fsp.rm(path.join(photoDir, path.basename(old.file)), { force: true }).catch(() => {});
+        if (op.col === 'recipes' && old?.image) recipes.dropImage(old.image);
         if (op.col === 'calendars') feeds.delete(op.id);
         results.push({ id: op.id, deleted: true });
       } else if (op.op === 'put') {
@@ -485,6 +487,11 @@ function createFamily({ dataDir, mock = false }) {
       if (!portal && !me) return sendJson(res, 401, { error: 'Sign in to the Family Organizer', signin: true });
       const parent = portal || me.role === 'parent';
       const needParent = () => { if (!parent) throw new FamilyError(403, 'Only a parent can change that'); };
+      // Recipe photos, importing from websites, and Mealie.
+      if (p === '/mealie' || p.startsWith('/mealie/') || p.startsWith('/recipes/')) {
+        const done = await recipes.handle(req, res, p, { sendJson, readJson, readBody, parent });
+        if (done !== null) return done;
+      }
       if (p === '/data' && req.method === 'GET') {
         const since = Number(url.searchParams.get('since'));
         if (since && since === load().rev) return sendJson(res, 200, { rev: since, same: true });
@@ -564,6 +571,7 @@ function createFamily({ dataDir, mock = false }) {
   }
 
   const auth = createFamilyAuth({ load, persist });
+  const recipes = createRecipes({ dataDir, load, persist, mock });
   if (mock) auth.seedDemo().catch(() => {});
 
   return { handle, feed };

@@ -229,7 +229,7 @@ export async function addToGroceries(store, lines) {
 
 // "1.5 lb chicken thighs" -> { qty: '1.5 lb', name: 'Chicken thighs' }
 export function splitIngredient(line) {
-  const m = /^\s*((?:\d+[\d./\s-]*|[½⅓⅔¼¾⅛]|a|an|one|two|three|four|a few|some)\s*(?:(?:cups?|c|tbsp|tablespoons?|tsp|teaspoons?|lbs?|pounds?|oz|ounces?|g|grams?|kg|ml|l|liters?|litres?|cans?|jars?|packages?|pkgs?|bags?|boxes?|bunch(?:es)?|heads?|cloves?|slices?|sticks?|pinch(?:es)?|dash(?:es)?|stalks?|large|medium|small)\b\.?)?\s*(?:of\s+)?)?(.*)$/i.exec(String(line));
+  const m = /^\s*((?:\d+[\d./\s–-]*[½⅓⅔¼¾⅛⅜⅝⅞]?|[½⅓⅔¼¾⅛⅜⅝⅞]|a|an|one|two|three|four|a few|some)\s*(?:(?:cups?|c|tbsp|tablespoons?|tsp|teaspoons?|lbs?|pounds?|oz|ounces?|g|grams?|kg|ml|l|liters?|litres?|cans?|jars?|packages?|pkgs?|bags?|boxes?|bunch(?:es)?|heads?|cloves?|slices?|sticks?|pinch(?:es)?|dash(?:es)?|stalks?|large|medium|small)\b\.?)?\s*(?:of\s+)?)?(.*)$/i.exec(String(line));
   let name = (m?.[2] || line).replace(/\s*\(.*?\)\s*/g, ' ').replace(/,.*$/, '').trim();
   name = name.charAt(0).toUpperCase() + name.slice(1);
   return { qty: (m?.[1] || '').trim(), name };

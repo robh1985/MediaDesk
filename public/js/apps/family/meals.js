@@ -3,8 +3,9 @@
 
 import { h, clear, toast, toastError } from '../../ui.js';
 import { ymd, parseYmd, addDays, startOfDay, sameDay, startOfWeek, fmtDate, DAY_SHORT, DAY_NAMES } from './dates.js';
-import { sheet, field, input, select, emojiButton, ICONS } from './shared.js';
+import { sheet, field, input, select, ICONS } from './shared.js';
 import { addToGroceries } from './lists.js';
+import { RecipeBox } from './recipes.js';
 
 export const SLOTS = [
   { id: 'breakfast', label: 'Breakfast', emoji: '🥣' },
@@ -19,7 +20,7 @@ export class MealsView {
     this.store = app.store;
     this.date = startOfDay(new Date());
     this.tab = 'plan'; // plan | recipes
-    this.search = '';
+    this.box = new RecipeBox(this);
   }
 
   slots() {
@@ -41,6 +42,7 @@ export class MealsView {
       h('div', { class: 'fam-spacer' }),
       this.tab === 'plan' ? h('button', { class: 'fam-btn', onclick: () => this.weekGroceries(weekStart) }, h('span', { html: ICONS.cart }), 'Groceries for the week') : null,
       this.tab === 'plan' ? h('button', { class: 'fam-btn', onclick: () => this.fillWeek(weekStart) }, h('span', { html: ICONS.dice }), 'Plan dinners for me') : null,
+      this.tab === 'recipes' ? h('button', { class: 'fam-btn', onclick: () => this.box.fromWebsite() }, '🌐 From a website') : null,
       this.tab === 'recipes' ? h('button', { class: 'fam-btn primary', onclick: () => this.editRecipe(null) }, h('span', { html: ICONS.plus }), 'Recipe') : null);
     const body = h('div', { class: 'fam-meals-body' });
     clear(el, bar, body);
@@ -69,23 +71,7 @@ export class MealsView {
     clear(body, grid);
   }
 
-  drawRecipes(body) {
-    const q = input({ type: 'search', placeholder: 'Search recipes and ingredients', value: this.search, class: 'fam-input fam-recipe-search' });
-    const grid = h('div', { class: 'fam-recipes' });
-    const draw = () => {
-      const term = this.search.toLowerCase();
-      const recipes = this.store.all('recipes').filter((r) => !term || [r.title, ...(r.ingredients || []), ...(r.tags || [])].join(' ').toLowerCase().includes(term)).sort((a, b) => a.title.localeCompare(b.title));
-      clear(grid, recipes.length ? recipes.map((r) => h('button', { class: 'fam-recipe', onclick: () => this.showRecipe(r) },
-        h('div', { class: 'fam-recipe-emoji' }, r.emoji || '🍲'),
-        h('b', {}, r.title),
-        h('small', {}, [r.minutes ? `${r.minutes} min` : null, r.servings ? `Serves ${r.servings}` : null].filter(Boolean).join(' · ')),
-        (r.tags || []).length ? h('div', { class: 'fam-tags' }, r.tags.map((t) => h('span', {}, t))) : null))
-        : h('div', { class: 'fam-empty' }, h('div', { class: 'fam-empty-emoji' }, '📖'), term ? 'No recipes match.' : 'Keep the family’s favourite recipes here, then add them to the meal plan.'));
-    };
-    q.addEventListener('input', () => { this.search = q.value; draw(); });
-    draw();
-    clear(body, q, grid);
-  }
+  drawRecipes(body) { this.box.render(body); }
 
   // Recipes that suit a meal, least recently eaten first.
   suggestions(slot, date) {
@@ -93,7 +79,8 @@ export class MealsView {
     const lastEaten = new Map();
     for (const m of this.store.all('meals')) if (m.recipe && (!lastEaten.has(m.recipe) || m.date > lastEaten.get(m.recipe))) lastEaten.set(m.recipe, m.date);
     const all = this.store.all('recipes');
-    const fit = all.filter((r) => !(r.tags || []).some((t) => SLOTS.some((s) => s.label.toLowerCase() === t.toLowerCase())) || (r.tags || []).some((t) => t.toLowerCase() === label));
+    const kinds = (r) => [...(r.tags || []), ...(r.categories || [])].map((t) => t.toLowerCase());
+    const fit = all.filter((r) => !kinds(r).some((t) => SLOTS.some((s) => s.label.toLowerCase() === t)) || kinds(r).includes(label));
     const pool = (fit.length ? fit : all).map((r) => ({ r, last: lastEaten.get(r.id) || '0000', rnd: Math.random() }));
     return pool.filter((x) => x.last < ymd(addDays(parseYmd(date), -10)) || x.last > date).sort((a, b) => a.last.localeCompare(b.last) || a.rnd - b.rnd).map((x) => x.r)
       .concat(pool.map((x) => x.r)).filter((r, i, arr) => arr.indexOf(r) === i);
@@ -133,6 +120,7 @@ export class MealsView {
   }
 
   async groceries(lines) {
+    lines = lines.filter((l) => !/^#\s/.test(l));
     try {
       const { list, added } = await addToGroceries(this.store, lines);
       toast(added ? `Added ${added} item${added === 1 ? '' : 's'} to ${list.title}` : `Everything’s already on ${list.title}`, { type: 'success', timeout: 3000, action: { label: 'Open', onClick: () => this.app.go('lists', list.id) } });
@@ -162,42 +150,7 @@ export class MealsView {
     try { await this.store.batch(ops); toast(`Planned ${ops.length} dinner${ops.length === 1 ? '' : 's'} from the recipe box`, { type: 'success', timeout: 3000 }); } catch (err) { toastError(err); }
   }
 
-  async showRecipe(r) {
-    const body = h('div', { class: 'fam-recipe-view' },
-      h('div', { class: 'fam-recipe-hero' }, h('span', {}, r.emoji || '🍲'), h('div', {}, h('h2', {}, r.title), h('div', { class: 'fam-muted' }, [r.minutes ? `${r.minutes} minutes` : null, r.servings ? `Serves ${r.servings}` : null].filter(Boolean).join(' · ')),
-        r.url ? h('a', { href: r.url, target: '_blank', rel: 'noopener' }, 'Original recipe') : null)),
-      (r.ingredients || []).length ? h('div', {}, h('h4', {}, 'Ingredients'), h('ul', { class: 'fam-ingredients' }, r.ingredients.map((i) => h('li', {}, h('label', {}, h('input', { type: 'checkbox' }), ' ', i))))) : null,
-      r.steps ? h('div', {}, h('h4', {}, 'Steps'), h('ol', { class: 'fam-steps' }, r.steps.split('\n').map((s) => s.trim()).filter(Boolean).map((s) => h('li', {}, s)))) : null);
-    const out = await sheet(this.app.root, {
-      title: 'Recipe', body, wide: true,
-      actions: [{ label: 'Edit', left: true, value: 'edit' }, { label: 'Ingredients to groceries', value: 'groceries' }, { label: 'Add to meal plan', primary: true, value: 'plan' }],
-    });
-    if (out === 'edit') this.editRecipe(r);
-    if (out === 'groceries') this.groceries(r.ingredients || []);
-    if (out === 'plan') this.editMeal({ title: r.title, recipe: r.id, date: ymd(new Date()), slot: 'dinner', id: undefined }, ymd(new Date()), 'dinner');
-  }
+  showRecipe(r) { return this.box.show(r); }
 
-  async editRecipe(r) {
-    const emoji = emojiButton(r?.emoji || '🍲');
-    const title = input({ value: r?.title || '', placeholder: 'Recipe name', required: true, autofocus: true, maxlength: 120 });
-    const minutes = input({ type: 'number', min: 0, max: 1440, value: r?.minutes || '', class: 'fam-input tiny' });
-    const servings = input({ type: 'number', min: 0, max: 100, value: r?.servings || '', class: 'fam-input tiny' });
-    const url = input({ type: 'url', value: r?.url || '', placeholder: 'https://… (optional)' });
-    const tags = input({ value: (r?.tags || []).join(', '), placeholder: 'Dinner, Quick, Vegetarian' });
-    const ingredients = h('textarea', { class: 'fam-input', rows: 6, placeholder: 'One per line:\n1 lb pasta\n2 cups spinach' }, (r?.ingredients || []).join('\n'));
-    const steps = h('textarea', { class: 'fam-input', rows: 6, placeholder: 'One step per line' }, r?.steps || '');
-    const out = await sheet(this.app.root, {
-      title: r ? 'Edit recipe' : 'New recipe', wide: true,
-      body: h('div', { class: 'fam-form' }, h('div', { class: 'fam-title-row' }, emoji, title),
-        h('div', { class: 'fam-row-wrap' }, field('Minutes', minutes), field('Serves', servings), field('Tags', tags)),
-        field('Ingredients', ingredients), field('Steps', steps), field('Link', url)),
-      actions: [r ? { label: 'Delete', danger: true, left: true, value: 'delete' } : null, { label: 'Cancel' }, { label: 'Save', primary: true, submit: true, onClick: (close) => {
-        if (!title.value.trim()) return title.focus();
-        close({ ...(r || {}), title: title.value.trim(), emoji: emoji.value, minutes: Number(minutes.value) || null, servings: Number(servings.value) || null, url: url.value.trim(),
-          tags: tags.value.split(',').map((t) => t.trim()).filter(Boolean), ingredients: ingredients.value.split('\n').map((l) => l.trim()).filter(Boolean), steps: steps.value.trim() });
-      } }],
-    });
-    if (!out) return;
-    try { if (out === 'delete') await this.store.del('recipes', r.id); else await this.store.put('recipes', out); } catch (err) { toastError(err); }
-  }
+  editRecipe(r) { return this.box.edit(r); }
 }

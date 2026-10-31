@@ -366,11 +366,70 @@ export class SettingsView {
       this.card('Weather', field('Place', h('div', {}, place, results), s.location ? `Showing ${s.location.name}${s.location.region ? `, ${s.location.region}` : ''}. Forecasts from Open-Meteo.` : 'Shown at the top and on the calendar.'), field('Units', units),
         s.location ? h('button', { class: 'fam-btn', onclick: () => { this.save({ location: null }, 'Weather off'); this.app.loadWeather(true); place.value = ''; } }, 'Turn weather off') : null),
       this.card('Meals', h('div', { class: 'fam-row-wrap' }, SLOTS.map((sl) => toggle(`${sl.emoji} ${sl.label}`, slots.has(sl.id), (v) => { if (v) slots.add(sl.id); else slots.delete(sl.id); this.save({ mealSlots: SLOTS.map((x) => x.id).filter((id) => slots.has(id)) }, null); })))),
+      this.mealieCard(),
       this.card('Chores', toggle('Celebrate when a chore is done', s.celebrate !== false, (v) => this.save({ celebrate: v }, null)),
         !this.app.session?.portal ? null : toggle('Show the Family widget on the desktop', appPref('family', 'widget') !== false, async (v) => {
           try { state.config = await portal.saveConfig({ appSettings: { family: { widget: v } } }); window.dispatchEvent(new Event('mediadesk:family-changed')); } catch (err) { toastError(err); }
         }),
         toggle('Remind me about events while the organizer is open', s.reminders !== false, (v) => { this.save({ reminders: v }, null); if (v && 'Notification' in window && Notification.permission === 'default') Notification.requestPermission(); })));
+  }
+
+  // Mealie: recipes imported from the family's own Mealie server, kept in step on a schedule.
+  mealieCard() {
+    const card = this.card('Mealie recipes', h('div', { class: 'fam-muted' }, 'Loading…'));
+    const parent = Boolean(this.app.session?.parent);
+    const gate = () => parentGate(this.app.root, this.store, 'Changing the Mealie connection needs a parent');
+    const draw = (m) => {
+      const url = input({ type: 'url', value: m.url || '', placeholder: 'http://192.168.1.20:9000', disabled: !parent });
+      const token = input({ type: 'password', value: '', placeholder: m.configured ? 'Saved — leave blank to keep it' : 'Paste an API token', autocomplete: 'off', disabled: !parent });
+      const every = select([['0', 'Only when I ask'], ['15', 'Every 15 minutes'], ['60', 'Every hour'], ['360', 'Every 6 hours'], ['1440', 'Once a day']], String(m.configured ? m.interval : 60), { disabled: !parent });
+      const err = h('div', { class: 'fam-error' });
+      const when = m.lastSync ? new Date(m.lastSync).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : null;
+      const busy = (btn, text, fn) => async () => {
+        if (!(await gate())) return;
+        const old = btn.textContent;
+        btn.disabled = true; btn.textContent = text; err.textContent = '';
+        try { await fn(); } catch (e) { err.textContent = e.message; btn.disabled = false; btn.textContent = old; }
+      };
+      const save = h('button', { class: 'fam-btn primary' }, m.configured ? 'Save' : 'Connect & import');
+      save.onclick = busy(save, 'Checking…', async () => {
+        const out = await this.store.mealieSave({ url: url.value.trim(), token: token.value.trim(), interval: Number(every.value) });
+        toast(m.configured ? 'Mealie settings saved' : 'Connected to Mealie — importing its recipes', { type: 'success', timeout: 3000 });
+        draw(out);
+        setTimeout(() => this.store.mealieStatus().then((st) => { if (card.isConnected) draw(st); this.store.refresh().catch(() => {}); }).catch(() => {}), 4000);
+      });
+      const now = h('button', { class: 'fam-btn' }, 'Import now');
+      now.onclick = busy(now, 'Importing…', async () => {
+        const out = await this.store.mealieSync();
+        toast('Mealie recipes imported', { type: 'success', body: `${out.counts.added} new, ${out.counts.updated} changed, ${out.counts.removed} removed` });
+        draw(out);
+      });
+      const off = h('button', { class: 'fam-btn danger' }, 'Disconnect');
+      off.onclick = async () => {
+        if (!(await gate())) return;
+        const keep = h('input', { type: 'checkbox', checked: true });
+        const go = await sheet(this.app.root, {
+          title: 'Disconnect Mealie?',
+          body: h('div', { class: 'fam-form' }, h('p', {}, 'Recipes stop coming in from Mealie.'), h('label', { class: 'fam-inline-check' }, keep, ' Keep the recipes already imported (they become the family’s own)')),
+          actions: [{ label: 'Cancel' }, { label: 'Disconnect', danger: true, value: true }],
+        });
+        if (!go) return;
+        try {
+          const out = await this.store.mealieDisconnect(!keep.checked);
+          await this.store.refresh();
+          toast(keep.checked ? 'Mealie disconnected — its recipes stay in the recipe box' : `Mealie disconnected — removed ${out.removed} recipe${out.removed === 1 ? '' : 's'}`, { timeout: 3000 });
+          draw({ configured: false });
+        } catch (e) { toastError(e); }
+      };
+      clear(card, h('h3', {}, 'Mealie recipes'),
+        h('p', { class: 'fam-muted' }, 'Bring in every recipe from your Mealie server, photos and all. New and changed recipes come across automatically, and recipes deleted in Mealie leave the recipe box. Make an API token in Mealie under your profile → API Tokens.'),
+        m.configured ? h('p', { class: m.error ? 'fam-error' : 'fam-muted' }, m.running ? 'Importing now…' : m.error ? `Last import failed: ${m.error}` : `${m.count} recipe${m.count === 1 ? '' : 's'} from Mealie${when ? ` · last imported ${when}` : ''}${m.last ? ` (${m.last.added} new, ${m.last.updated} changed, ${m.last.removed} removed)` : ''}`) : null,
+        field('Mealie address', url), field('API token', token), field('Import automatically', every),
+        parent ? h('div', { class: 'fam-row-wrap' }, save, m.configured ? now : null, m.configured ? off : null) : h('p', { class: 'fam-muted small' }, 'Only a parent can change this.'),
+        err);
+    };
+    this.store.mealieStatus().then(draw).catch((e) => clear(card, h('h3', {}, 'Mealie recipes'), h('div', { class: 'fam-error' }, e.message)));
+    return card;
   }
 
   // --- Photo frame & sleep ------------------------------------------------------------
