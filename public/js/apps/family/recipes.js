@@ -8,6 +8,7 @@
 import { h, clear, toast, toastError } from '../../ui.js';
 import { ymd, fmtDate } from './dates.js';
 import { sheet, field, input, select, emojiButton, colorPicker, parentGate, ICONS } from './shared.js';
+import { openBook } from './cookbook-reader.js';
 
 // --- Amounts ------------------------------------------------------------------------------
 
@@ -353,6 +354,7 @@ export class RecipeBox {
         book.description ? h('p', {}, book.description) : null,
         h('small', { class: 'fam-muted' }, `${count} recipe${count === 1 ? '' : 's'}${rules.length ? ` · adds every recipe with ${rules.slice(0, 4).join(', ')}${rules.length > 4 ? '…' : ''}` : ''}`)),
       h('div', { class: 'fam-row-wrap' },
+        h('button', { class: 'fam-btn primary', onclick: () => openBook(this, book) }, '📖 Open book'),
         h('button', { class: 'fam-btn', onclick: () => this.pickRecipes(book) }, h('span', { html: ICONS.plus }), 'Add recipes'),
         h('button', { class: 'fam-btn', onclick: () => this.printBook(book) }, '📄 Print view'),
         h('button', { class: 'fam-btn', onclick: () => this.editBook(book) }, h('span', { html: ICONS.edit }), 'Edit'))));

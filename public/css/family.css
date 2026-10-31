@@ -727,3 +727,77 @@ body.fam-page { background: #f6f3ee; overflow: hidden; height: 100dvh; }
 .fam-book-toggle.on { background: color-mix(in srgb, var(--c) 12%, var(--f-panel)); }
 .fam-tag-btn { cursor: pointer; font: inherit; font-size: 12.5px !important; }
 .fam-tag-btn:hover { border-color: var(--f-accent); color: var(--f-fg); }
+/* Cookbook reader: an open book */
+.fam-bk { --pw: 480px; --ph: 660px; --paper: #fbf6ea; --ink: #3b3226; --bk: #e8590c; position: absolute; inset: 0; z-index: 70; display: flex; flex-direction: column; background: radial-gradient(ellipse at center, #4a3b2e 0%, #2b211a 70%, #1d1612 100%); color: #f3ead9; animation: fam-fade .2s; outline: none; }
+.fam-bk-top { display: flex; align-items: center; gap: 12px; padding: 10px 16px; }
+.fam-bk .fam-bk-top .fam-icon-btn, .fam-bk .fam-bk-top .fam-btn { color: #f3ead9 !important; background: rgba(255,255,255,.1) !important; border: 1px solid rgba(255,255,255,.18) !important; }
+.fam-bk .fam-bk-top .fam-icon-btn svg { stroke: currentColor; }
+.fam-bk-name { font-weight: 700; font-family: Georgia, 'Times New Roman', serif; font-size: 17px; }
+.fam-bk-where { color: rgba(243,234,217,.65); font-size: 13.5px; }
+.fam-bk-room { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; gap: 14px; padding: 0 8px 16px; }
+.fam-bk-arrow { flex: none; width: 48px; height: 48px; border-radius: 50%; border: 0; background: rgba(255,255,255,.1); color: #f3ead9; cursor: pointer; padding: 12px; }
+.fam-bk-arrow:hover:not(:disabled) { background: rgba(255,255,255,.2); }
+.fam-bk-arrow:disabled { opacity: .2; cursor: default; }
+.fam-bk-arrow svg { width: 100%; height: 100%; }
+.fam-bk-stage { perspective: 2600px; touch-action: pan-y; user-select: none; }
+.fam-bk-spread { position: relative; display: flex; width: calc(var(--pw) * 2); height: var(--ph); filter: drop-shadow(0 18px 30px rgba(0,0,0,.5)); }
+.fam-bk-spread.single { width: var(--pw); }
+.fam-bk-page { position: relative; width: var(--pw); height: var(--ph); flex: none; background: var(--paper); color: var(--ink); font-family: Georgia, 'Times New Roman', serif; font-size: clamp(12px, calc(var(--pw) / 34), 16px); line-height: 1.45; padding: calc(var(--pw) * .085) calc(var(--pw) * .09) calc(var(--pw) * .1); display: flex; flex-direction: column; overflow: hidden; }
+.fam-bk-page.left { border-radius: 6px 0 0 6px; background: linear-gradient(to left, rgba(80,60,30,.22), rgba(80,60,30,0) 9%), var(--paper); }
+.fam-bk-page.right { border-radius: 0 6px 6px 0; background: linear-gradient(to right, rgba(80,60,30,.22), rgba(80,60,30,0) 9%), var(--paper); }
+.fam-bk-spread.single .fam-bk-page.right { border-radius: 6px; background: linear-gradient(to right, rgba(80,60,30,.16), rgba(80,60,30,0) 5%), var(--paper); }
+.fam-bk-page.empty { visibility: hidden; }
+.fam-bk-spread.closed .fam-bk-page.left { visibility: hidden; }
+.fam-bk-run { font-size: .74em; letter-spacing: .12em; text-transform: uppercase; color: #9b8b72; text-align: center; margin-bottom: .9em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fam-bk-body { flex: 1; min-height: 0; overflow: hidden; }
+.fam-bk-num { position: absolute; bottom: calc(var(--pw) * .045); font-size: .8em; color: #9b8b72; }
+.fam-bk-page.left .fam-bk-num { left: calc(var(--pw) * .09); }
+.fam-bk-page.right .fam-bk-num { right: calc(var(--pw) * .09); }
+.fam-bk-measure { position: absolute; left: -10000px; top: 0; visibility: hidden; pointer-events: none; }
+/* Covers */
+.fam-bk-page.cover, .fam-bk-page.back { background: linear-gradient(135deg, color-mix(in srgb, var(--bk) 88%, #fff) 0%, var(--bk) 45%, color-mix(in srgb, var(--bk) 70%, #000) 100%); color: #fffaf0; border-radius: 4px 10px 10px 4px; box-shadow: inset 10px 0 18px rgba(0,0,0,.25), inset 0 0 0 calc(var(--pw) * .03) rgba(255,255,255,.08); }
+.fam-bk-page.back { border-radius: 10px 4px 4px 10px; box-shadow: inset -10px 0 18px rgba(0,0,0,.25); }
+.fam-bk-cover { height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; gap: .6em; border: 2px solid rgba(255, 236, 190, .55); border-radius: 6px; padding: 1.5em; }
+.fam-bk-cemoji { font-size: 4.6em; filter: drop-shadow(0 4px 6px rgba(0,0,0,.3)); }
+.fam-bk-cover h1 { font-size: 2.3em; margin: 0; line-height: 1.15; text-shadow: 0 2px 6px rgba(0,0,0,.3); }
+.fam-bk-cover p { margin: 0; opacity: .9; font-style: italic; }
+.fam-bk-cfoot { margin-top: 1.4em; font-size: .85em; letter-spacing: .1em; text-transform: uppercase; opacity: .85; }
+.fam-bk-orn { height: 100%; display: grid; place-items: center; color: #c9b796; font-size: 2.2em; text-align: center; }
+.fam-bk-orn.big { height: auto; font-size: 3em; color: rgba(255, 236, 190, .8); }
+/* Contents */
+.fam-bk-toctitle { text-align: center; font-size: 1.7em; margin: .2em 0 .8em; font-weight: normal; letter-spacing: .04em; }
+.fam-bk-tocline { display: flex; align-items: baseline; gap: .4em; width: 100%; border: 0; background: none; padding: .32em 0; font: inherit; color: inherit; cursor: pointer; text-align: left; }
+.fam-bk-tocline i { flex: 1; border-bottom: 1.5px dotted #b9a888; transform: translateY(-.3em); }
+.fam-bk-tocline:hover span:first-child { color: var(--bk); text-decoration: underline; }
+/* Recipe pages */
+.fam-bk-rhead { text-align: center; margin-bottom: .6em; }
+.fam-bk-photo { width: 100%; height: calc(var(--ph) * .34); object-fit: cover; border-radius: 4px; box-shadow: 0 2px 8px rgba(0,0,0,.18); display: block; margin-bottom: .8em; }
+.fam-bk-remoji { font-size: 3.4em; margin-bottom: .1em; }
+.fam-bk-rhead h2 { font-size: 1.65em; margin: 0 0 .2em; font-weight: normal; line-height: 1.2; }
+.fam-bk-meta { font-size: .82em; color: #8a7a61; font-style: italic; }
+.fam-bk-stars { color: #d4a017; letter-spacing: 2px; font-size: .9em; }
+.fam-bk-desc { font-style: italic; margin: 0 0 .6em; text-align: center; color: #5c4f3d; }
+.fam-bk-h { margin: .7em 0 .35em; }
+h3.fam-bk-h { font-size: .9em; letter-spacing: .14em; text-transform: uppercase; color: var(--bk); border-bottom: 1px solid #e3d7bf; padding-bottom: .2em; font-weight: 700; }
+.fam-bk-sec { font-weight: 700; font-style: italic; font-size: .95em; }
+.fam-bk-ing { padding: .12em 0 .12em 1.1em; position: relative; }
+.fam-bk-ing::before { content: '•'; position: absolute; left: .2em; color: var(--bk); }
+.fam-bk-step { display: flex; gap: .6em; margin: .3em 0 .5em; }
+.fam-bk-step b { flex: none; width: 1.6em; height: 1.6em; border-radius: 50%; display: grid; place-items: center; background: color-mix(in srgb, var(--bk) 16%, transparent); color: var(--bk); font-size: .8em; margin-top: .1em; }
+.fam-bk-note { margin: 0 0 .4em; font-style: italic; }
+.fam-bk-open { display: block; margin: 1em auto 0; border: 0; background: none; font: inherit; font-size: .82em; color: var(--bk); cursor: pointer; text-decoration: underline; }
+/* The turning leaf */
+.fam-bk-leaf { position: absolute; top: 0; width: var(--pw); height: var(--ph); transform-style: preserve-3d; transition: transform .65s cubic-bezier(.45, .05, .35, 1); z-index: 2; }
+.fam-bk-leaf.fwd { left: var(--pw); transform-origin: left center; }
+.fam-bk-leaf.back { left: 0; transform-origin: right center; }
+.fam-bk-leaf.fwd.go { transform: rotateY(-180deg); }
+.fam-bk-leaf.back.go { transform: rotateY(180deg); }
+.fam-bk-face { position: absolute; inset: 0; backface-visibility: hidden; -webkit-backface-visibility: hidden; }
+.fam-bk-face.rear { transform: rotateY(180deg); }
+.fam-bk-face::after { content: ''; position: absolute; inset: 0; pointer-events: none; background: linear-gradient(to right, rgba(0,0,0,0), rgba(0,0,0,.18)); opacity: 0; transition: opacity .65s; }
+.fam-bk-leaf.go .fam-bk-face::after { opacity: 1; }
+.fam-bk-leaf.single { left: 0; transform-origin: left center; transition: transform .65s cubic-bezier(.45, .05, .35, 1), opacity .65s; }
+.fam-bk-leaf.single.fwd.go { transform: rotateY(-110deg); opacity: 0; }
+.fam-bk-leaf.single.back { transform: rotateY(-110deg); opacity: 0; }
+.fam-bk-leaf.single.back.go { transform: rotateY(0); opacity: 1; }
+@media (max-width: 819px) { .fam-bk-arrow { position: absolute; bottom: 14px; z-index: 3; width: 44px; height: 44px; } .fam-bk-arrow.left { left: 14px; } .fam-bk-arrow.right { right: 14px; } .fam-bk-room { padding-bottom: 70px; } .fam-bk-where { display: none; } }
