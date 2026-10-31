@@ -598,6 +598,7 @@ export class CalendarView {
         h('button', { type: 'button', class: 'fam-icon-btn', title: 'Leave out', html: ICONS.close, onclick: () => { drafts.splice(i, 1); drawPreview(); } }));
     }) : h('div', { class: 'fam-muted small' }, 'Type above — what you write is turned into events you can check before adding.'));
     const parseText = () => {
+      fromFile = null;
       drafts = text.value.split('\n').map((l) => l.trim()).filter(Boolean).map((line) => {
         const d = parseQuickAdd(line);
         d.members = findMembers(line);
@@ -607,10 +608,12 @@ export class CalendarView {
       drawPreview();
     };
     text.addEventListener('input', parseText);
+    let fromFile = null; // { name, evs }: an .ics file, imported as one (removable) import
     const loadIcs = async (file) => {
       try {
         const evs = await this.store.parseIcs(await file.text());
-        drafts = evs.map((e) => ({ title: e.title, allDay: e.allDay, start: e.start, end: e.end, rrule: e.rrule || null, exdates: e.exdates || [], location: e.location, notes: e.notes, members: [] }));
+        fromFile = { name: file.name || 'Calendar file', ids: new Set() };
+        drafts = evs.map((e) => { const d = { title: e.title, allDay: e.allDay, start: e.start, end: e.end, rrule: e.rrule || null, exdates: e.exdates || [], location: e.location, notes: e.notes, members: [], _icsId: e.id }; return d; });
         text.value = '';
         drawPreview();
         if (!drafts.length) toast('No events in that file', { type: 'warning' });
@@ -628,7 +631,8 @@ export class CalendarView {
       actions: [{ label: 'Cancel' }, { label: 'Add events', primary: true, onClick: async (close) => {
         if (!drafts.length) { text.focus(); return; }
         try {
-          await this.store.batch(drafts.map((d) => ({ op: 'put', col: 'events', item: { exdates: [], ...d } })));
+          if (fromFile && drafts.every((d) => d._icsId)) await this.store.importEvents(drafts.map((d) => ({ ...d, id: d._icsId })), fromFile.name);
+          else await this.store.batch(drafts.map(({ _icsId, ...d }) => ({ op: 'put', col: 'events', item: { exdates: [], ...d } })));
           toast(drafts.length === 1 ? 'Event added' : `${drafts.length} events added`, { type: 'success', timeout: 2500 });
           close();
         } catch (err) { toastError(err, 'Couldn’t add the events'); }

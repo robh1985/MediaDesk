@@ -185,6 +185,16 @@ export class Store {
   // --- What the views need -------------------------------------------------
 
   // Ready-made chores to start from, kept by parents in Settings → Quick picks.
+  // Events from an .ics file, recorded as one import (so they can be removed together). The same
+  // file imported again updates its events rather than doubling them.
+  async importEvents(evs, fileName, calendar = null) {
+    const importId = `i${Date.now().toString(36)}`;
+    const importedAt = Date.now();
+    const items = evs.map((e) => ({ id: `imp-${e.id}`, title: e.title, allDay: e.allDay, start: e.start, end: e.end, rrule: e.rrule || null, exdates: e.exdates || [], location: e.location || '', notes: e.notes || '', members: e.members || [], calendar, importId, importName: fileName, importedAt }));
+    for (let i = 0; i < items.length; i += 200) await this.batch(items.slice(i, i + 200).map((item) => ({ op: 'put', col: 'events', item })));
+    return items.length;
+  }
+
   extraChores() { return Array.isArray(this.settings.extraChores) ? this.settings.extraChores : DEFAULT_EXTRA_CHORES; }
   quickPicks() { return Array.isArray(this.settings.quickPicks) ? this.settings.quickPicks : DEFAULT_QUICK_PICKS; }
 

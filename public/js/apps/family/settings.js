@@ -126,7 +126,8 @@ export class SettingsView {
 
   draw_calendars(body) {
     const cals = this.store.all('calendars').filter((c) => !c.custom);
-    const fileIn = h('input', { type: 'file', accept: '.ics,text/calendar', hidden: true, onchange: () => { const f = fileIn.files[0]; fileIn.value = ''; if (f) f.text().then((t) => this.importIcs(t)); } });
+    const fileIn = h('input', { type: 'file', accept: '.ics,text/calendar', hidden: true, onchange: () => { const f = fileIn.files[0]; fileIn.value = ''; if (f) f.text().then((t) => this.importIcs(t, f.name)); } });
+    const removeIn = h('input', { type: 'file', accept: '.ics,text/calendar', hidden: true, onchange: () => { const f = removeIn.files[0]; removeIn.value = ''; if (f) f.text().then((t) => this.removeByFile(t, f.name)); } });
     const own = this.store.customCalendars();
     const counts = new Map();
     for (const e of this.store.all('events')) if (e.calendar) counts.set(e.calendar, (counts.get(e.calendar) || 0) + 1);
@@ -163,8 +164,11 @@ export class SettingsView {
             if (ok && await parentGate(this.app.root, this.store)) { await this.store.newFeedToken(); this.render(this.el); }
           } }, 'Make a new address'))),
       this.card('Import',
-        h('p', { class: 'fam-muted' }, 'Copy events from an .ics file (exported from another calendar) into the family calendar.'),
-        h('button', { class: 'fam-btn', onclick: () => fileIn.click() }, h('span', { html: ICONS.upload }), 'Import .ics file'), fileIn));
+        h('p', { class: 'fam-muted' }, 'Copy events from an .ics file (exported from another calendar) into the family calendar. Each import is listed here, so its events can be taken out again.'),
+        this.importsList(),
+        h('div', { class: 'fam-row-wrap' },
+          h('button', { class: 'fam-btn', onclick: () => fileIn.click() }, h('span', { html: ICONS.upload }), 'Import .ics file'), fileIn,
+          h('button', { class: 'fam-btn', title: 'Choose an .ics file to take its events back out of the family calendar', onclick: () => removeIn.click() }, h('span', { html: ICONS.trash }), 'Remove events from a file…'), removeIn)));
   }
 
   // The family's own calendars: a name and colour; events are put on them in the event editor.
@@ -202,17 +206,66 @@ export class SettingsView {
     } catch (err) { toastError(err, 'Couldn’t save the calendar'); }
   }
 
-  async importIcs(text) {
+  async importIcs(text, fileName = 'Calendar file') {
     try {
       const evs = await this.store.parseIcs(text);
       if (!evs.length) { toast('No events in that file', { type: 'warning' }); return; }
-      const ok = await sheet(this.app.root, { title: 'Import events', body: h('p', {}, `Add ${evs.length} event${evs.length === 1 ? '' : 's'} to the family calendar?`), actions: [{ label: 'Cancel' }, { label: 'Import', primary: true, value: true }] });
+      const own = this.store.customCalendars();
+      const onto = own.length ? select([['', 'Family'], ...own.map((c) => [c.id, c.name])], '') : null;
+      const ok = await sheet(this.app.root, { title: 'Import events', body: h('div', { class: 'fam-form' }, h('p', {}, `Add ${evs.length} event${evs.length === 1 ? '' : 's'} from “${fileName}” to the family calendar?`), onto ? field('Put them on', onto) : null), actions: [{ label: 'Cancel' }, { label: 'Import', primary: true, value: true }] });
       if (!ok) return;
-      for (let i = 0; i < evs.length; i += 200) {
-        await this.store.batch(evs.slice(i, i + 200).map((e) => ({ op: 'put', col: 'events', item: { id: `imp-${e.id}`, title: e.title, allDay: e.allDay, start: e.start, end: e.end, rrule: e.rrule || null, exdates: e.exdates || [], location: e.location, notes: e.notes, members: [] } })));
-      }
-      toast(`Imported ${evs.length} events`, { type: 'success' });
+      await this.store.importEvents(evs, fileName, onto?.value || null);
+      toast(`Imported ${evs.length} events`, { type: 'success', body: 'You can take them out again in Settings → Calendars → Import.' });
+      this.render(this.el);
     } catch (err) { toastError(err, 'Couldn’t import that file'); }
+  }
+
+  // The imports so far, each with its events (newest first). Events imported before imports were
+  // recorded are one group of their own.
+  importsList() {
+    const groups = new Map();
+    for (const e of this.store.all('events')) {
+      const key = e.importId || (String(e.id).startsWith('imp-') ? 'earlier' : null);
+      if (!key) continue;
+      if (!groups.has(key)) groups.set(key, { key, name: key === 'earlier' ? 'Earlier import' : e.importName || 'Calendar file', at: e.importedAt || 0, events: [] });
+      groups.get(key).events.push(e);
+    }
+    const list = [...groups.values()].sort((a, b) => b.at - a.at);
+    if (!list.length) return h('div', { class: 'fam-muted small' }, 'Nothing imported yet.');
+    return h('div', { class: 'fam-cal-list' }, list.map((g) => h('div', { class: 'fam-cal-row' },
+      h('span', { class: 'fam-chore-emoji', html: ICONS.upload }),
+      h('div', { class: 'fam-profile-main' }, h('b', {}, g.name),
+        h('small', {}, [`${g.events.length} event${g.events.length === 1 ? '' : 's'}`, g.at ? `imported ${new Date(g.at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}` : 'file name not recorded'].join(' · '))),
+      h('button', { class: 'fam-btn small danger', onclick: () => this.removeEvents(g.events, `the ${g.events.length} event${g.events.length === 1 ? '' : 's'} imported from “${g.name}”`) }, 'Remove events'))));
+  }
+
+  // Take out the events from an .ics file, matched by title and start: works for any import,
+  // including ones from before imports were recorded, or from Quick add.
+  async removeByFile(text, fileName) {
+    try {
+      const evs = await this.store.parseIcs(text);
+      const key = (e) => `${String(e.title || '').trim().toLowerCase()}|${e.allDay ? String(e.start).slice(0, 10) : new Date(e.start).getTime()}`;
+      const want = new Set(evs.map(key));
+      const found = this.store.all('events').filter((e) => want.has(key(e)));
+      if (!found.length) { toast(`None of the events in “${fileName}” are on the family calendar`, { timeout: 4000 }); return; }
+      await this.removeEvents(found, `${found.length} event${found.length === 1 ? '' : 's'} on the family calendar that match${found.length === 1 ? 'es' : ''} “${fileName}”`);
+    } catch (err) { toastError(err, 'Couldn’t read that file'); }
+  }
+
+  async removeEvents(events, what) {
+    if (!(await parentGate(this.app.root, this.store, 'Removing events needs a parent.'))) return;
+    const sample = events.slice(0, 5).map((e) => e.title).join(', ');
+    const ok = await sheet(this.app.root, {
+      title: 'Remove these events?',
+      body: h('div', {}, h('p', {}, `Remove ${what}?`), h('p', { class: 'fam-muted small' }, `${sample}${events.length > 5 ? ', …' : ''}`), h('p', { class: 'fam-muted small' }, 'Any of them you changed since are removed too. This can’t be undone.')),
+      actions: [{ label: 'Cancel' }, { label: `Remove ${events.length}`, danger: true, value: true }],
+    });
+    if (!ok) return;
+    try {
+      for (let i = 0; i < events.length; i += 200) await this.store.batch(events.slice(i, i + 200).map((e) => ({ op: 'delete', col: 'events', id: e.id })));
+      toast(`Removed ${events.length} event${events.length === 1 ? '' : 's'}`, { type: 'success' });
+      this.render(this.el);
+    } catch (err) { toastError(err, 'Couldn’t remove them'); }
   }
 
   async editCalendar(c) {
