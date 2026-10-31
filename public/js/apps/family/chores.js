@@ -232,9 +232,10 @@ export class ChoresView {
     };
     const partRow = field('Part of the day', part);
     // Quick picks (Settings → Quick picks): choosing one fills in the whole chore.
-    const picks = this.store.quickPicks().filter((q) => q.title);
-    const quick = c || !picks.length ? null : field('Quick pick', select([['', 'Choose a ready-made chore… (or make your own below)'],
-      ...picks.map((q) => [q.id, `${q.emoji ? `${q.emoji} ` : ''}${q.title}${q.stars ? ` · ${q.stars} ★` : ''}${q.kind === 'routine' ? ' · routine' : ''}`])], '', {
+    // Only the kind of tab you're on: chores on Chores, routine steps on Routines.
+    const picks = this.store.quickPicks().filter((q) => q.title && (q.kind === 'routine') === isRoutine);
+    const quick = c || !picks.length ? null : field('Quick pick', select([['', isRoutine ? 'Choose a ready-made routine step… (or make your own below)' : 'Choose a ready-made chore… (or make your own below)'],
+      ...picks.map((q) => [q.id, `${q.emoji ? `${q.emoji} ` : ''}${q.title}${q.stars ? ` · ${q.stars} ★` : ''}`])], '', {
       class: 'fam-input fam-quick-pick',
       onchange: (e) => {
         const q = picks.find((x) => x.id === e.target.value);
