@@ -829,3 +829,11 @@ h3.fam-bk-h { font-size: .9em; letter-spacing: .14em; text-transform: uppercase;
 @media (max-width: 760px) { .fam-rail-btn > span:first-child, .fam-rail-btn.small > span:first-child { width: 20px; height: 20px; padding: 5px; } }
 .fam-theme-menu { align-self: flex-start; }
 .fam-theme-menu svg { width: 18px; height: 18px; }
+/* Settings: its sections in a menu beside the left one */
+.fam-subrail { display: flex; flex-direction: column; gap: 4px; padding: 12px 8px; width: 100px; flex: none; overflow-y: auto; background: var(--f-panel2); border-right: 1px solid var(--f-line); }
+.fam-subrail[hidden] { display: none; }
+.fam-subrail-title { font-size: 11px; font-weight: 750; letter-spacing: .06em; text-transform: uppercase; color: var(--f-muted); text-align: center; padding: 4px 0 8px; }
+.fam-subrail .fam-rail-btn, .fam-subrow .fam-rail-btn { text-align: center; line-height: 1.2; }
+.fam-subrow { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; padding: 2px 0 8px; margin-bottom: 4px; flex: none; }
+.fam-subrow .fam-rail-btn { min-width: 0; padding: 6px 4px; font-size: 11px !important; }
+.fam-subrail .fam-rail-btn > span:last-child, .fam-subrow .fam-rail-btn > span:last-child { overflow-wrap: normal; hyphens: manual; }

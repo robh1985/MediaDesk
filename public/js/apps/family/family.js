@@ -140,7 +140,9 @@ class FamilyOrganizer {
       this.session?.user ? h('button', { class: 'fam-account-btn', title: `Signed in as ${this.session.user.first} ${this.session.user.last}`, onclick: () => this.accountMenu() },
         `${this.session.user.first[0] || ''}${this.session.user.last[0] || ''}`.toUpperCase()) : null);
     this.main = h('main', { class: 'fam-main' });
-    clear(this.root, this.rail, h('div', { class: 'fam-content' }, this.header, this.main));
+    // A second menu beside the left one, for a section with parts of its own (Settings).
+    this.subnav = h('nav', { class: 'fam-subrail', hidden: true });
+    clear(this.root, this.rail, this.subnav, h('div', { class: 'fam-content' }, this.header, this.main));
     this.drawFilter();
     this.updateApprovalBadge();
   }
@@ -172,6 +174,7 @@ class FamilyOrganizer {
     this.root.dataset.tab = tab;
     if (tab === 'lists' && section) this.views.lists.listId = section;
     const view = this.views[tab];
+    if (tab !== 'settings') { this.subnav.hidden = true; clear(this.subnav); }
     const el = h('div', { class: `fam-view fam-view-${tab}` });
     clear(this.main, el);
     if (tab === 'settings') view.render(el, section); else view.render(el);
