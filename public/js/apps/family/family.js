@@ -174,11 +174,36 @@ class FamilyOrganizer {
     this.root.dataset.tab = tab;
     if (tab === 'lists' && section) this.views.lists.listId = section;
     const view = this.views[tab];
-    if (tab !== 'settings') { this.subnav.hidden = true; clear(this.subnav); }
+    // A section with parts of its own puts them back as it draws (subMenu).
+    this.subnav.hidden = true;
+    clear(this.subnav);
     const el = h('div', { class: `fam-view fam-view-${tab}` });
     clear(this.main, el);
     if (tab === 'settings') view.render(el, section); else view.render(el);
     this.win.setTitle(tab === 'calendar' ? 'Family Organizer' : `Family Organizer — ${tab === 'settings' ? 'Settings' : tab === 'approvals' ? 'Approvals' : TABS.find((t) => t[0] === tab)[1]}`);
+  }
+
+  // A section's parts (Calendar's views, Chores and Routines, Meal plan and Recipe box, Settings'
+  // pages) as a menu beside the left one, styled like it. On a phone, where there's no room
+  // beside it, the menu is returned to be put at the top of the section instead.
+  // items: [id, label, icon, colour]
+  subMenu(title, items, current, pick, cls = '') {
+    const buttons = items.map(([id, label, icon, color]) => h('button', {
+      class: `fam-rail-btn ${id === current ? 'on' : ''}`, style: { '--rc': color }, dataset: { section: id }, 'aria-current': id === current ? 'page' : null, onclick: () => pick(id),
+    }, h('span', { html: icon }), h('span', {}, ...label.split('/').flatMap((part, i) => (i ? ['/', h('wbr'), part] : [part])))));
+    const tab = this.tab;
+    // Phone ↔ wide (a window resized, a tablet turned): the menu moves.
+    this.subMq ||= matchMedia('(max-width: 760px)');
+    this.subMq.onchange = () => { if (this.tab && this.main.firstElementChild) this.go(this.tab); };
+    if (!this.subMq.matches) {
+      this.subnav.hidden = false;
+      this.subnav.className = `fam-subrail fam-subrail-${tab} ${cls}`;
+      clear(this.subnav, h('div', { class: 'fam-subrail-title' }, title), buttons);
+      return null;
+    }
+    this.subnav.hidden = true;
+    clear(this.subnav);
+    return h('nav', { class: `fam-subrow ${cls}` }, buttons);
   }
 
   // Redraw after a change, keeping the place you were typing.

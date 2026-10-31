@@ -59,7 +59,9 @@ export class CalendarView {
 
   render(el) {
     this.el = el;
-    const views = [['day', 'Day'], ['week', 'Week'], ['month', 'Month'], ['schedule', 'Schedule']];
+    const views = [['day', 'Day', ICONS.viewDay, '#1c7ed6'], ['week', 'Week', ICONS.viewWeek, '#4263eb'], ['month', 'Month', ICONS.viewMonth, '#7048e8'], ['schedule', 'Schedule', ICONS.viewList, '#0ca678']];
+    // Day, Week, Month and Schedule: a menu beside the left one.
+    const row = this.app.subMenu('View', views, this.view, (id) => { this.view = id; this.scrolled = false; this.store.setSettings({ calendarView: id }).catch(() => {}); this.render(el); }, 'fam-cal-views');
     const title = h('div', { class: 'fam-cal-title' });
     const bar = h('div', { class: 'fam-toolbar' },
       h('button', { class: 'fam-btn', onclick: () => { this.date = startOfDay(new Date()); this.scrolled = false; this.draw(); } }, 'Today'),
@@ -68,15 +70,11 @@ export class CalendarView {
         h('button', { class: 'fam-icon-btn', 'aria-label': 'Next', html: ICONS.right, onclick: () => this.step(1) })),
       title,
       h('div', { class: 'fam-spacer' }),
-      this.store.all('calendars').length ? h('button', { class: `fam-btn fam-cals-btn ${this.app.prefs.hiddenCalendars?.length ? 'filtered' : ''}`, title: 'Show or hide calendars', onclick: () => this.chooseCalendars() }, h('span', { html: ICONS.calendar }), h('span', { class: 'fam-hide-sm' }, 'Calendars')) : null,
-      h('div', { class: 'fam-seg' }, views.map(([id, label]) => h('button', {
-        class: this.view === id ? 'on' : '', dataset: { view: id },
-        onclick: () => { this.view = id; this.scrolled = false; this.store.setSettings({ calendarView: id }).catch(() => {}); this.render(el); },
-      }, label))));
+      this.store.all('calendars').length ? h('button', { class: `fam-btn fam-cals-btn ${this.app.prefs.hiddenCalendars?.length ? 'filtered' : ''}`, title: 'Show or hide calendars', onclick: () => this.chooseCalendars() }, h('span', { html: ICONS.calendar }), h('span', { class: 'fam-hide-sm' }, 'Calendars')) : null);
     this.titleEl = title;
     this.countdownEl = h('div', { class: 'fam-countdowns' });
     this.body = h('div', { class: `fam-cal fam-cal-${this.view}` });
-    clear(el, bar, this.countdownEl, this.body);
+    clear(el, row, bar, this.countdownEl, this.body);
     this.draw();
     // Swipe left and right to move through the calendar on touch screens.
     let sx = null;

@@ -37,25 +37,11 @@ export class SettingsView {
       ['display', 'Photo frame & sleep', ICONS.photos, '#d6336c'], ['chores', 'Chores/Routines', ICONS.chores, '#2f9e44'],
       session.user ? ['account', 'My account', ICONS.user, '#f08c00'] : null].filter(Boolean);
     if (!sections.some(([id]) => id === this.section)) this.section = sections[0][0];
-    // The sections: a menu beside the left one (a row across the top on a phone).
-    const buttons = sections.map(([id, label, icon, color]) => h('button', { class: `fam-rail-btn ${this.section === id ? 'on' : ''}`, style: { '--rc': color }, dataset: { section: id }, 'aria-current': this.section === id ? 'page' : null, onclick: () => { this.section = id; this.render(el); } },
-      h('span', { html: icon }), h('span', {}, ...label.split('/').flatMap((part, i) => (i ? ['/', h('wbr'), part] : [part])))));
-    const phone = matchMedia('(max-width: 760px)').matches;
-    const sub = this.app.subnav;
+    // The sections: a menu beside the left one (a grid across the top on a phone).
+    const row = this.app.subMenu('Settings', sections, this.section, (id) => { this.section = id; this.render(el); }, 'fam-settings-nav');
     const body = h('div', { class: 'fam-settings' });
     const title = h('div', { class: 'fam-toolbar' }, h('div', { class: 'fam-toolbar-title' }, sections.find(([id]) => id === this.section)[1]));
-    if (sub && !phone) {
-      sub.hidden = false;
-      sub.className = 'fam-subrail fam-settings-nav';
-      clear(sub, h('div', { class: 'fam-subrail-title' }, 'Settings'), buttons);
-      clear(el, title, body);
-    } else {
-      if (sub) { sub.hidden = true; clear(sub); }
-      clear(el, h('nav', { class: 'fam-subrow fam-settings-nav' }, buttons), title, body);
-    }
-    // Phone ↔ wide (a window resized or a phone turned): the menu moves.
-    this.mq ||= matchMedia('(max-width: 760px)');
-    this.mq.onchange = () => { if (this.app.tab === 'settings') this.render(this.el); };
+    clear(el, row, title, body);
     this[`draw_${this.section}`](body);
     // Redrawn after a change: stay where you were (the account list arrives a moment later).
     if (keep) { body.scrollTop = keep; setTimeout(() => { body.scrollTop = keep; }, 250); }

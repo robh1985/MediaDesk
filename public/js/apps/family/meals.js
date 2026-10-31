@@ -31,10 +31,10 @@ export class MealsView {
   render(el) {
     this.el = el;
     const weekStart = startOfWeek(this.date, Number(this.store.settings.weekStart) || 0);
+    // Meal plan and Recipe box: a menu beside the left one.
+    const row = this.app.subMenu('Meals', [['plan', 'Meal plan', ICONS.calendar, '#e8590c'], ['recipes', 'Recipe box', ICONS.book, '#c2255c']], this.tab, (id) => { this.tab = id; this.render(el); });
     const bar = h('div', { class: 'fam-toolbar' },
-      h('div', { class: 'fam-seg' },
-        h('button', { class: this.tab === 'plan' ? 'on' : '', onclick: () => { this.tab = 'plan'; this.render(el); } }, 'Meal plan'),
-        h('button', { class: this.tab === 'recipes' ? 'on' : '', onclick: () => { this.tab = 'recipes'; this.render(el); } }, 'Recipe box')),
+      h('div', { class: 'fam-toolbar-title' }, this.tab === 'plan' ? 'Meal plan' : 'Recipe box'),
       this.tab === 'plan' ? h('div', { class: 'fam-nav' },
         h('button', { class: 'fam-icon-btn', 'aria-label': 'Previous week', html: ICONS.left, onclick: () => { this.date = addDays(this.date, -7); this.render(el); } }),
         h('button', { class: 'fam-btn', onclick: () => { this.date = startOfDay(new Date()); this.render(el); } }, `Week of ${fmtDate(weekStart, { month: 'short', day: 'numeric' })}`),
@@ -45,7 +45,7 @@ export class MealsView {
       this.tab === 'recipes' ? h('button', { class: 'fam-btn', onclick: () => this.box.fromWebsite() }, '🌐 From a website') : null,
       this.tab === 'recipes' ? h('button', { class: 'fam-btn primary', onclick: () => this.editRecipe(null) }, h('span', { html: ICONS.plus }), 'Recipe') : null);
     const body = h('div', { class: 'fam-meals-body' });
-    clear(el, bar, body);
+    clear(el, row, bar, body);
     if (this.tab === 'plan') this.drawPlan(body, weekStart); else this.drawRecipes(body);
   }
 

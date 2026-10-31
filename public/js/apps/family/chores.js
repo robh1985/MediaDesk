@@ -46,10 +46,9 @@ export class ChoresView {
     const isToday = sameDay(this.date, new Date());
     const rel = Math.round((this.date - startOfDay(new Date())) / 864e5);
     const label = rel === 0 ? 'Today' : rel === -1 ? 'Yesterday' : rel === 1 ? 'Tomorrow' : fmtDate(this.date, { weekday: 'long', month: 'short', day: 'numeric' });
+    // Chores and Routines: a menu beside the left one.
+    const row = this.app.subMenu('Chores', [['chores', 'Chores', ICONS.chores, '#2f9e44'], ['routines', 'Routines', ICONS.repeat, '#1098ad']], this.mode, (id) => { this.mode = id; this.render(el); });
     const bar = h('div', { class: 'fam-toolbar' },
-      h('div', { class: 'fam-seg' },
-        h('button', { class: this.mode === 'chores' ? 'on' : '', onclick: () => { this.mode = 'chores'; this.render(el); } }, 'Chores'),
-        h('button', { class: this.mode === 'routines' ? 'on' : '', onclick: () => { this.mode = 'routines'; this.render(el); } }, 'Routines')),
       h('div', { class: 'fam-nav' },
         h('button', { class: 'fam-icon-btn', 'aria-label': 'Previous', html: ICONS.left, onclick: () => { this.date = addDays(this.date, this.layout === 'week' ? -7 : -1); this.render(el); } }),
         h('button', { class: 'fam-btn', onclick: () => { this.date = startOfDay(new Date()); this.render(el); } }, this.layout === 'week' ? `Week of ${fmtDate(startOfWeek(this.date, Number(this.store.settings.weekStart) || 0), { month: 'short', day: 'numeric' })}` : label),
@@ -64,7 +63,7 @@ export class ChoresView {
     const board = h('div', { class: 'fam-board' });
     // Chores, by the day: the extra chores menu on the right.
     const extras = this.mode === 'chores' && this.layout === 'day' ? this.extrasPanel() : null;
-    clear(el, bar, extras ? h('div', { class: 'fam-chores-wrap' }, board, extras) : board);
+    clear(el, row, bar, extras ? h('div', { class: 'fam-chores-wrap' }, board, extras) : board);
     if (this.mode === 'chores' && this.layout === 'week') return this.drawWeek(board);
     const members = this.members();
     const cols = members.map((m) => this.column(m, isToday));
