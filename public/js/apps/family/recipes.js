@@ -178,6 +178,7 @@ export class RecipeBox {
       h('div', { class: 'fam-recipe-tools' },
         h('button', { type: 'button', class: 'fam-btn primary', onclick: () => { s.close(); this.cook(r, factor); } }, '👩‍🍳 Cook mode'),
         h('button', { type: 'button', class: 'fam-btn', onclick: async () => { const today = ymd(new Date()); await save({ madeCount: (this.store.get('recipes', r.id)?.madeCount || 0) + 1, lastMade: today }); toast(`Marked “${r.title}” as made today`, { type: 'success', timeout: 2000 }); } }, '✓ Made it today'),
+        h('button', { type: 'button', class: 'fam-btn', onclick: () => this.print(r, factor, false) }, '📄 Print view'),
         h('button', { type: 'button', class: 'fam-btn', onclick: () => this.print(r, factor) }, '🖨 Print'),
         r.mealieLink ? h('a', { class: 'fam-btn', href: r.mealieLink, target: '_blank', rel: 'noopener' }, 'Open in Mealie') : null,
         r.url ? h('a', { class: 'fam-btn', href: r.url, target: '_blank', rel: 'noopener' }, 'Original recipe') : null),
@@ -261,21 +262,27 @@ export class RecipeBox {
     draw();
   }
 
-  print(r, factor = 1) {
+  // A clean page for the recipe: printed straight away, or (autoPrint false) just shown, with its
+  // own Print button.
+  print(r, factor = 1, autoPrint = true) {
     const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
     const lines = (arr, tag) => arr.map((l) => (isSection(l) ? `<li class="s">${esc(sectionTitle(l))}</li>` : `<li>${esc(l)}</li>`)).join('');
     const src = this.img(r);
     const html = `<!doctype html><html><head><meta charset="utf-8"><title>${esc(r.title)}</title><style>
       body{font:14px/1.5 system-ui,sans-serif;max-width:760px;margin:24px auto;padding:0 16px;color:#222}h1{margin:0 0 4px}img{max-width:100%;max-height:300px;border-radius:10px;object-fit:cover}
       .m{color:#666;margin:6px 0 14px}.c{display:grid;grid-template-columns:1fr 1.6fr;gap:28px}ul,ol{padding-left:20px}li{margin:4px 0}li.s{list-style:none;margin-left:-20px;font-weight:700;margin-top:10px}
-      @media print{body{margin:0}}</style></head><body>
+      .bar{position:sticky;top:0;display:flex;gap:8px;justify-content:flex-end;padding:10px 0;margin-bottom:8px;background:#fff;border-bottom:1px solid #eee}
+      .bar button{font:inherit;padding:8px 16px;border-radius:8px;border:1px solid #ccc;background:#fff;cursor:pointer}.bar button.p{background:#4c6ef5;border-color:#4c6ef5;color:#fff}
+      @media (max-width:600px){.c{grid-template-columns:1fr;gap:0}}
+      @media print{body{margin:0}.bar{display:none}}</style></head><body>
+      ${autoPrint ? '' : '<div class="bar"><button onclick="window.close()">Close</button><button class="p" onclick="print()">🖨 Print</button></div>'}
       ${src ? `<img src="${esc(new URL(src, location.href))}">` : ''}<h1>${esc(r.title)}</h1>
       <div class="m">${esc([fmtMins(r.prepMin) && `Prep ${fmtMins(r.prepMin)}`, fmtMins(r.cookMin) && `Cook ${fmtMins(r.cookMin)}`, fmtMins(r.minutes) && `Total ${fmtMins(r.minutes)}`, r.servings && `Serves ${fmtAmount(r.servings * factor)}`].filter(Boolean).join(' · '))}</div>
       ${r.description ? `<p>${esc(r.description)}</p>` : ''}
       <div class="c"><div><h3>Ingredients</h3><ul>${lines((r.ingredients || []).map((l) => scaleLine(l, factor)))}</ul></div>
       <div><h3>Steps</h3><ol>${stepList(r).map((l) => (isSection(l) ? `<li class="s">${esc(sectionTitle(l))}</li>` : `<li>${esc(l)}</li>`)).join('')}</ol></div></div>
       ${r.notes ? `<h3>Notes</h3><p>${esc(r.notes).replace(/\n/g, '<br>')}</p>` : ''}
-      <script>window.onload=()=>setTimeout(()=>print(),300)<\/script></body></html>`;
+      ${autoPrint ? '<script>window.onload=()=>setTimeout(()=>print(),300)<\/script>' : ''}</body></html>`;
     const w = window.open('', '_blank');
     if (!w) { toast('Allow pop-ups to print', { timeout: 3000 }); return; }
     w.document.write(html);

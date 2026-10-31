@@ -167,6 +167,7 @@ export class ListsView {
         i.notes ? h('small', {}, i.notes) : null,
         i.due ? h('small', { class: overdue ? 'overdue' : '' }, `Due ${fmtDate(parseYmd(i.due), { weekday: 'short', month: 'short', day: 'numeric' })}`) : null),
       m ? avatar(m, 'xs') : null,
+      h('button', { class: 'fam-item-remove', title: 'Remove from the list', 'aria-label': `Remove ${i.text}`, html: ICONS.close, onclick: () => this.removeItem(i) }),
       aisle ? h('button', { class: 'fam-item-aisle', title: `In ${aisle.name} — change the aisle`, 'aria-label': `Aisle: ${aisle.name}. Change`, onclick: () => this.pickAisle(i) }, aisle.emoji || '🛍️') : null);
   }
 
@@ -401,6 +402,14 @@ export class ListsView {
       body: h('div', { class: 'fam-form' }, h('div', { class: 'fam-row-wrap' }, q, h('button', { type: 'button', class: 'fam-btn', onclick: async () => { await this.newFood(q.value.trim()); draw(); } }, '➕ Add a food')), chips, body),
       actions: [{ label: 'Done', primary: true, value: true }],
     });
+  }
+
+  // Take an item off the list, with a moment to undo it.
+  async removeItem(i) {
+    try {
+      await this.store.del('listitems', i.id);
+      toast(`Removed ${i.text}`, { timeout: 4000, action: { label: 'Undo', onClick: () => this.store.put('listitems', i).catch((e) => toastError(e)) } });
+    } catch (err) { toastError(err, 'Couldn’t remove that'); }
   }
 
   async clearDone(list, done) {
