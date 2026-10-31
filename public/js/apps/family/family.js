@@ -15,6 +15,7 @@ import { PhotosView, photoFrame, sleepScreen } from './photos.js';
 import { SettingsView } from './settings.js';
 import { avatar, sheet, ICONS, weatherIcon, setParentSession } from './shared.js';
 import { expand, addDays, fmtTime } from './dates.js';
+import { themeWatcher, isDark, setDeviceTheme, themeIcon } from './theme.js';
 
 let cssLoaded = false;
 const loadCss = () => {
@@ -60,8 +61,9 @@ class FamilyOrganizer {
     this.root = h('div', { class: 'fam fam-root' });
     win.body.classList.add('fam-window');
     clear(win.body, this.root);
-    clear(this.root, h('div', { class: 'fam-loading' }, h('div', { class: 'spinner' }), 'Opening the family organizer…'));
     this.standalone = Boolean(opts.standalone);
+    this.theme = themeWatcher(this);
+    clear(this.root, h('div', { class: 'fam-loading' }, h('div', { class: 'spinner' }), 'Opening the family organizer…'));
     Promise.all([familyAuth.session(), this.store.load()]).then(([session]) => {
       // Who's using it: a family account (on its own at /family) or MediaDesk's own sign-in.
       this.session = session;
@@ -105,6 +107,7 @@ class FamilyOrganizer {
   }
 
   destroy() {
+    this.theme.stop();
     this.store.stop();
     this.unsub?.();
     this.timers.forEach(clearInterval);
@@ -130,6 +133,7 @@ class FamilyOrganizer {
       this.filterEl,
       h('button', { class: 'fam-btn fam-quick-btn', title: 'Type events the way you’d say them', onclick: () => this.calendar.quickAdd() }, h('span', { html: ICONS.sparkle }), h('span', { class: 'fam-hide-sm' }, 'Quick add')),
       h('button', { class: 'fam-btn primary', onclick: () => this.add() }, h('span', { html: ICONS.plus }), h('span', { class: 'fam-hide-sm' }, 'Add')),
+      h('button', { class: 'fam-icon-btn fam-theme-btn', title: 'Light or dark', 'aria-label': 'Switch between light and dark', onclick: () => this.toggleTheme() }, ...themeIcon(this.root.classList.contains('fam-dark'))),
       h('button', { class: 'fam-icon-btn fam-hide-sm', title: 'Full screen', html: ICONS.expand, onclick: () => this.fullscreen() }),
       this.session?.user ? h('button', { class: 'fam-account-btn', title: `Signed in as ${this.session.user.first} ${this.session.user.last}`, onclick: () => this.accountMenu() },
         `${this.session.user.first[0] || ''}${this.session.user.last[0] || ''}`.toUpperCase()) : null);
@@ -197,6 +201,7 @@ class FamilyOrganizer {
   }
 
   changed(what) {
+    this.theme.apply();
     this.updateApprovalBadge();
     if (what === 'settings' && this.tab === 'settings') return;
     this.drawFilter();
@@ -281,6 +286,15 @@ class FamilyOrganizer {
     if (this.sleepOpen) return;
     this.frameOpen?.();
     sleepScreen(this, { manual });
+  }
+
+  // The sun/moon button: this screen switches to light or dark (Settings → General has the rest).
+  toggleTheme() {
+    const dark = !isDark(this.store.settings, { standalone: this.standalone });
+    setDeviceTheme(dark ? 'dark' : 'light');
+    this.theme.apply();
+    toast(dark ? 'Dark mode on this screen' : 'Light mode on this screen', { timeout: 3000, action: { label: 'Settings', onClick: () => this.go('settings', 'general') } });
+    if (this.tab === 'settings') this.views.settings.render(this.main);
   }
 
   fullscreen() {

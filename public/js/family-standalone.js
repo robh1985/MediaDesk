@@ -4,13 +4,19 @@
 import { h, clear } from './ui.js';
 import { familyApp } from './apps/family/family.js';
 import { familyAuth } from './apps/family/store.js';
+import { deviceTheme } from './apps/family/theme.js';
 
 const root = document.getElementById('family');
 const params = new URLSearchParams(location.search);
 
-// Follow the device's light or dark setting.
+// Light or dark before signing in: this device's choice, else its own light/dark setting. Once
+// signed in the organizer keeps it right (Settings → General → Appearance).
 const dark = matchMedia('(prefers-color-scheme: dark)');
-const theme = () => { document.documentElement.dataset.theme = dark.matches ? 'dark' : 'light'; };
+const theme = () => {
+  if (root.querySelector('.fam-root')) return;
+  const own = deviceTheme();
+  document.documentElement.dataset.theme = own === 'dark' || ((own === 'family' || own === 'auto' || own === 'night') && dark.matches) ? 'dark' : 'light';
+};
 theme();
 dark.addEventListener?.('change', theme);
 

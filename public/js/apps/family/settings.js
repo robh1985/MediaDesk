@@ -7,6 +7,7 @@ import { SLOTS } from './meals.js';
 import { portal, state, appPref } from '../../api.js';
 import { familyAuth, DEFAULT_QUICK_PICKS, DEFAULT_EXTRA_CHORES } from './store.js';
 import { describeChoreRepeat, PARTS, DAY_SHORT } from './dates.js';
+import { MODES, deviceTheme, setDeviceTheme, mode as themeMode } from './theme.js';
 
 const PROVIDERS = [
   ['Google Calendar', 'On a computer, open Google Calendar → Settings → pick the calendar → “Integrate calendar” → copy the “Secret address in iCal format”.'],
@@ -360,6 +361,7 @@ export class SettingsView {
     const startPage = select([['calendar', 'Calendar'], ['chores', 'Chores'], ['meals', 'Meals'], ['lists', 'Lists']], s.startPage || 'calendar', { onchange: (e) => this.save({ startPage: e.target.value }) });
     const slots = new Set(s.mealSlots || ['breakfast', 'lunch', 'dinner']);
     body.append(
+      this.appearanceCard(),
       this.card('Family', field('Family name', famName), field('Colour for events that are for everyone', colorPicker(famColor, (c) => { famColor = c; this.save({ familyColor: c }, null); })),
         field('Open on', startPage), field('Weeks start on', week),
         toggle('Show events for everyone when viewing one person', s.showFamilyEvents !== false, (v) => this.save({ showFamilyEvents: v }))),
@@ -372,6 +374,32 @@ export class SettingsView {
           try { state.config = await portal.saveConfig({ appSettings: { family: { widget: v } } }); window.dispatchEvent(new Event('mediadesk:family-changed')); } catch (err) { toastError(err); }
         }),
         toggle('Remind me about events while the organizer is open', s.reminders !== false, (v) => { this.save({ reminders: v }, null); if (v && 'Notification' in window && Notification.permission === 'default') Notification.requestPermission(); })));
+  }
+
+  // Light and dark: this screen's own choice, and the family's default (parents).
+  appearanceCard() {
+    const s = this.store.settings;
+    const parent = Boolean(this.app.session?.parent);
+    const famLabel = MODES.find(([v]) => v === (s.theme || 'auto'))[1];
+    const auto = this.app.standalone ? 'follows this device’s light/dark setting' : 'follows MediaDesk’s theme';
+    const here = select([['family', `Use the family’s setting (${famLabel})`], ...MODES], deviceTheme(), { onchange: (e) => { setDeviceTheme(e.target.value); this.app.theme.apply(); this.render(this.el); } });
+    const fam = select(MODES, s.theme || 'auto', { disabled: !parent, onchange: async (e) => {
+      if (!(await parentGate(this.app.root, this.store, 'Changing the family’s look needs a parent'))) { e.target.value = s.theme || 'auto'; return; }
+      await this.save({ theme: e.target.value }, null); this.app.theme.apply(); this.render(this.el);
+    } });
+    const from = input({ type: 'time', value: s.nightFrom || '19:00', disabled: !parent });
+    const to = input({ type: 'time', value: s.nightTo || '07:00', disabled: !parent });
+    const saveNight = async () => { if (!(await parentGate(this.app.root, this.store, 'Changing the family’s look needs a parent'))) return; await this.save({ nightFrom: from.value || '19:00', nightTo: to.value || '07:00' }, null); this.app.theme.apply(); };
+    from.addEventListener('change', saveNight);
+    to.addEventListener('change', saveNight);
+    const night = themeMode(s) === 'night' || (s.theme || 'auto') === 'night';
+    const swatch = (dark) => h('button', { type: 'button', class: `fam-theme-swatch ${dark ? 'dark' : 'light'} ${deviceTheme() === (dark ? 'dark' : 'light') ? 'on' : ''}`, onclick: () => { setDeviceTheme(dark ? 'dark' : 'light'); this.app.theme.apply(); this.render(this.el); } },
+      h('span', { class: 'fam-theme-prev' }, h('i', {}), h('i', {}), h('i', {})), dark ? '🌙 Dark' : '☀️ Light');
+    return this.card('Appearance',
+      h('div', { class: 'fam-row-wrap' }, swatch(false), swatch(true)),
+      field('This screen', here, `Kept on this device only. Automatic ${auto}. The ☀️/🌙 button at the top switches it too.`),
+      field('Family default', fam, parent ? 'For every screen that uses the family’s setting.' : 'Only a parent can change this.'),
+      night ? h('div', { class: 'fam-row-wrap' }, field('Dark from', from), field('Light again at', to)) : null);
   }
 
   // Mealie: recipes imported from the family's own Mealie server, kept in step on a schedule.
