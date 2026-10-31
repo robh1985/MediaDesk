@@ -14,7 +14,7 @@ const { sniff } = require('./wallpapers');
 const { createFamilyAuth } = require('./family-auth');
 const { createRecipes } = require('./family-recipes');
 
-const COLLECTIONS = ['members', 'events', 'calendars', 'chores', 'chorelog', 'rewards', 'redemptions', 'lists', 'listitems', 'meals', 'recipes', 'photos'];
+const COLLECTIONS = ['members', 'events', 'calendars', 'chores', 'chorelog', 'rewards', 'redemptions', 'lists', 'listitems', 'meals', 'recipes', 'photos', 'foods', 'aisles'];
 const MAX_PHOTO = 25 * 1024 * 1024;
 const PHOTO_TYPES = { jpg: 'image/jpeg', png: 'image/png', gif: 'image/gif', webp: 'image/webp', avif: 'image/avif' };
 const FEED_CACHE_MS = 10 * 60e3;
