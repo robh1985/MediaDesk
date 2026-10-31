@@ -298,7 +298,45 @@ function createFamily({ dataDir, mock = false }) {
     return { rev: d.rev, settings: d.settings, collections: d.collections, feedToken: d.feedToken };
   };
 
-  function applyOps(ops) {
+  // What a family member (signed in, not a parent) may change, checked before anything is saved.
+  // `who`: { parent, user } — MediaDesk itself and parents may change anything.
+  function guardOps(ops, who) {
+    const d = load();
+    const me = who.user;
+    for (const op of ops) {
+      const id = op.op === 'delete' ? op.id : op.item?.id;
+      const prev = id ? d.collections[op.col]?.[id] : null;
+      // Stars for a ticked chore are always the chore's own (whoever sends them).
+      if (op.col === 'chorelog' && op.op === 'put' && op.item) {
+        const chore = d.collections.chores[op.item.chore];
+        if (!chore) throw new FamilyError(400, 'That chore is gone');
+        op.item.stars = Number(chore.stars) || 0;
+      }
+      if (who.parent) continue;
+      if (op.col === 'chores') {
+        // Their own chores, for themselves only, waiting for a parent until one approves them.
+        const own = prev && prev.createdBy === me.id && prev.approved === false;
+        if (prev && !own) throw new FamilyError(403, 'Only a parent can change this chore');
+        if (op.op === 'put') {
+          if (!me.profile) throw new FamilyError(403, 'Ask a parent to link your account to your family profile first');
+          Object.assign(op.item, { members: [me.profile], approved: false, createdBy: me.id, createdByName: `${me.first} ${me.last}`.trim() });
+        }
+      } else if (op.col === 'chorelog') {
+        if (op.op === 'put') {
+          // Whoever ticks it off gets the stars (shown as done by them).
+          if (me.profile) Object.assign(op.item, { member: me.profile, by: me.profile });
+        } else if (prev && me.profile && ![prev.member, prev.by, prev.for].includes(me.profile)) {
+          throw new FamilyError(403, 'Only whoever ticked it off (or a parent) can untick it');
+        }
+      } else if (op.col === 'redemptions') {
+        if (op.op === 'delete' || op.item?.adjust) throw new FamilyError(403, 'Only a parent can give or take stars');
+        if (!me.profile || op.item.member !== me.profile) throw new FamilyError(403, 'You can only spend your own stars');
+      }
+    }
+  }
+
+  function applyOps(ops, who = { parent: true }) {
+    guardOps(ops, who);
     const d = load();
     const results = [];
     for (const op of ops) {
@@ -447,7 +485,7 @@ function createFamily({ dataDir, mock = false }) {
         const body = await readJson(req);
         if (!Array.isArray(body.ops) || !body.ops.length) throw new FamilyError(400, 'Nothing to change');
         if (body.ops.some((o) => PARENT_COLLECTIONS.has(o.col))) needParent();
-        return sendJson(res, 200, applyOps(body.ops));
+        return sendJson(res, 200, applyOps(body.ops, { parent, user: me }));
       }
       if (p === '/settings' && req.method === 'POST') {
         const body = await readJson(req);

@@ -27,6 +27,14 @@ export class ChoresView {
       .sort((a, b) => (a.time || '99').localeCompare(b.time || '99') || (a.order ?? 0) - (b.order ?? 0) || a.title.localeCompare(b.title));
   }
 
+  // Who's signed in (on the organizer's own page): their account and family profile.
+  get user() { return this.app.session?.user || null; }
+  get me() { return this.user?.profile ? this.store.member(this.user.profile) : null; }
+  // A family member's account (not a parent's): makes chores only for themselves, for approval.
+  get member() { return Boolean(this.user && this.user.role !== 'parent'); }
+  get canApprove() { return !this.member; }
+  pending() { return this.store.all('chores').filter((c) => c.approved === false); }
+
   doneBy(chore, memberId, date) {
     const key = ymd(date);
     if (!(chore.members || []).length) return this.store.all('chorelog').find((l) => l.chore === chore.id && l.date === key && l.shared) || null;
@@ -50,6 +58,7 @@ export class ChoresView {
       this.mode === 'chores' ? h('div', { class: 'fam-seg' },
         h('button', { class: this.layout === 'day' ? 'on' : '', onclick: () => { this.layout = 'day'; this.render(el); } }, 'Day'),
         h('button', { class: this.layout === 'week' ? 'on' : '', onclick: () => { this.layout = 'week'; this.render(el); } }, 'Week')) : null,
+      this.canApprove && this.pending().length ? h('button', { class: 'fam-btn fam-approve-btn', onclick: () => this.approvals() }, `Approve (${this.pending().length})`) : null,
       h('button', { class: 'fam-btn', onclick: () => this.manage() }, 'Manage'),
       h('button', { class: 'fam-btn primary', onclick: () => this.edit(null) }, h('span', { html: ICONS.plus }), this.mode === 'routines' ? 'Routine step' : 'Chore'));
     const board = h('div', { class: 'fam-board' });
@@ -87,18 +96,22 @@ export class ChoresView {
       }
     } else body.append(...chores.map((c) => this.card(c, m)));
     if (!chores.length) body.append(h('div', { class: 'fam-muted small fam-board-empty' }, this.mode === 'routines' ? 'No routine today' : 'Nothing to do 🎈'));
-    body.append(h('button', { class: 'fam-board-add', onclick: () => this.edit(null, m?.id) }, '+ Add'));
+    if (!this.member || (m && m.id === this.me?.id)) body.append(h('button', { class: 'fam-board-add', onclick: () => this.edit(null, m?.id) }, '+ Add'));
     return h('section', { class: 'fam-board-col', style: { '--c': m?.color || '#868e96' } }, head, body);
   }
 
   card(c, m) {
     const log = this.doneBy(c, m?.id, this.date);
     const future = this.date > startOfDay(new Date());
-    const by = log && !m ? this.store.member(log.member) : null;
-    const el = h('div', { class: `fam-chore ${log ? 'done' : ''}`, style: { '--c': m?.color || by?.color || '#868e96' } },
+    // Done by someone else (up for grabs, or someone helping out): they got the stars.
+    const by = log && (!m || log.member !== m.id) ? this.store.member(log.member) : null;
+    const waiting = c.approved === false;
+    const el = h('div', { class: `fam-chore ${log ? 'done' : ''} ${waiting ? 'waiting' : ''}`, style: { '--c': m?.color || by?.color || '#868e96' } },
       h('button', { class: 'fam-chore-main', onclick: () => this.edit(c) },
         h('span', { class: 'fam-chore-emoji' }, c.emoji || '✔️'),
-        h('span', { class: 'fam-chore-text' }, h('b', {}, c.title), h('small', {}, [c.time ? fmtClock(c.time) : null, c.stars ? `${STAR} ${c.stars}` : null, by ? `Done by ${by.name}` : null].filter(Boolean).join(' · ')))),
+        h('span', { class: 'fam-chore-text' }, h('b', {}, c.title), h('small', {}, [c.time ? fmtClock(c.time) : null, c.stars ? `${STAR} ${c.stars}${waiting ? ' once approved' : ''}` : null, by ? `Done by ${by.name}` : null].filter(Boolean).join(' · ')),
+          waiting ? h('small', { class: 'fam-chore-waiting' }, 'Waiting for a parent to approve') : null)),
+      by && m ? h('span', { class: 'fam-chore-by', title: `Done by ${by.name}` }, avatar(by, 'xs')) : null,
       h('button', {
         class: 'fam-check', 'aria-label': log ? 'Mark not done' : 'Mark done', disabled: future, title: future ? 'Can’t be done ahead of time' : '',
         html: ICONS.check, onclick: (e) => this.toggle(c, m, e),
@@ -115,7 +128,19 @@ export class ChoresView {
         return;
       }
       let who = m?.id;
-      if (!m) {
+      // Signed in and ticking someone else's chore: the stars are yours. A parent says who did it.
+      if (m && this.me && this.me.id !== m.id) {
+        if (this.member) who = this.me.id;
+        else {
+          const s2 = sheet(this.app.root, {
+            title: 'Who did it?', body: h('div', { class: 'fam-who-grid' }, [m, this.me].map((x) => h('button', { type: 'button', class: 'fam-who', style: { '--c': x.color }, onclick: () => s2.close(x.id) }, avatar(x, 'lg'), x.name))), actions: [{ label: 'Cancel' }],
+          });
+          who = await s2;
+          if (!who) return;
+        }
+      }
+      if (!m && this.member && this.me) who = this.me.id;
+      else if (!m) {
         // Up for grabs: whoever did it gets the stars.
         const s = sheet(this.app.root, {
           title: 'Who did it?', body: h('div', { class: 'fam-who-grid' }, this.store.members().map((x) => h('button', { type: 'button', class: 'fam-who', style: { '--c': x.color }, onclick: () => s.close(x.id) }, avatar(x, 'lg'), x.name))), actions: [{ label: 'Cancel' }],
@@ -125,8 +150,11 @@ export class ChoresView {
       }
       const x = e.clientX || e.target.getBoundingClientRect().left;
       const y = e.clientY || e.target.getBoundingClientRect().top;
-      await this.store.put('chorelog', { id: m ? logId(c.id, who, date) : logId(c.id, `shared-${who}`, date), chore: c.id, member: who, date, stars: Number(c.stars) || 0, shared: !m, at: Date.now() });
+      // Kept under the chore's own person; `member` is who gets the stars.
+      await this.store.put('chorelog', { id: m ? logId(c.id, m.id, date) : logId(c.id, `shared-${who}`, date), chore: c.id, member: who, for: m?.id || null, by: who, date, stars: Number(c.stars) || 0, shared: !m, at: Date.now() });
       if (this.store.settings.celebrate !== false) confetti(this.app.root, x, y);
+      if (m && who !== m.id) toast(`${this.store.member(who)?.name || 'Someone'} did ${m.name}’s chore — the stars are theirs`, { timeout: 2500 });
+      if (c.approved === false && c.stars) toast('The stars count once a parent approves this chore', { timeout: 3000 });
       const left = m ? this.choresFor(m.id, this.date).filter((k) => !this.doneBy(k, m.id, this.date)).length : 1;
       if (m && !left) toast(`${m.name} finished everything! 🎉`, { type: 'success', timeout: 3000 });
     } catch (err) { toastError(err, 'Couldn’t save that'); }
@@ -170,12 +198,17 @@ export class ChoresView {
   }
 
   async edit(c, memberId) {
-    if (!(await parentGate(this.app.root, this.store, c ? 'Changing chores needs a parent.' : 'Adding chores needs a parent.'))) return;
+    // A family member makes (and changes) chores only for themselves, until a parent approves them.
+    const selfOnly = this.member;
+    if (selfOnly) {
+      if (c && !(c.createdBy === this.user.id && c.approved === false)) { toast('Only a parent can change this chore', { timeout: 2500 }); return; }
+      if (!this.me) { toast('Ask a parent to link your account to your family profile first', { timeout: 3500 }); return; }
+    } else if (!(await parentGate(this.app.root, this.store, c ? 'Changing chores needs a parent.' : 'Adding chores needs a parent.'))) return;
     const isRoutine = c ? c.kind === 'routine' : this.mode === 'routines';
     const members = this.store.members();
     const emoji = emojiButton(c?.emoji || (isRoutine ? '🌅' : '🧹'));
     const title = input({ value: c?.title || '', placeholder: isRoutine ? 'e.g. Brush teeth' : 'e.g. Feed the dog', required: true, autofocus: true, maxlength: 120 });
-    const who = memberPicker(members, c ? c.members || [] : memberId ? [memberId] : []);
+    const who = memberPicker(members, selfOnly ? [this.me.id] : c ? c.members || [] : memberId ? [memberId] : []);
     const stars = input({ type: 'number', min: 0, max: 100, value: c?.stars ?? 1, class: 'fam-input tiny' });
     const r = c?.repeat || { kind: 'daily' };
     const kind = select([['daily', 'Every day'], ['weekly', 'On these days'], ['every', 'Every few days'], ['monthly', 'Once a month'], ['once', 'Just once']], r.kind || 'daily');
@@ -203,7 +236,9 @@ export class ChoresView {
     const body = h('div', { class: 'fam-form' },
       h('div', { class: 'fam-title-row' }, emoji, title),
       field('Type', type),
-      field('Who', who, 'Each person picked has their own to tick off. Pick nobody to make it “up for grabs”.'),
+      selfOnly ? h('p', { class: 'fam-note' }, `This chore is for you. A parent needs to approve it before its stars count${c ? '' : ' — you can still tick it off meanwhile'}.`)
+        : field('Who', who, 'Each person picked has their own to tick off. Pick nobody to make it “up for grabs”.'),
+      !selfOnly && c?.approved === false ? h('p', { class: 'fam-note' }, `Made by ${c.createdByName || 'a family member'} and waiting for approval. Saving here approves it.`) : null,
       field('Repeat', h('div', {}, kind, detail)),
       partRow,
       h('div', { class: 'fam-row-wrap' }, field('Stars', stars), field('Time (optional)', time)),
@@ -219,7 +254,7 @@ export class ChoresView {
         if (kind.value === 'monthly') repeat.day = Math.min(31, Math.max(1, Number(monthDay.value) || 1));
         if (kind.value === 'once') repeat.date = onceDate.value || ymd(this.date);
         close({
-          ...(c || {}), title: title.value.trim(), emoji: emoji.value, members: who.value(), stars: Math.max(0, Number(stars.value) || 0), repeat,
+          ...(c || {}), ...(selfOnly ? {} : { approved: true }), title: title.value.trim(), emoji: emoji.value, members: selfOnly ? [this.me.id] : who.value(), stars: Math.max(0, Number(stars.value) || 0), repeat,
           time: time.value || '', kind: type.value, part: part.value, paused: paused.checked, start: c?.start || ymd(startOfDay(new Date())),
         });
       } }],
@@ -231,6 +266,46 @@ export class ChoresView {
     } catch (err) { toastError(err, 'Couldn’t save the chore'); }
   }
 }
+
+// Parents: chores family members made for themselves, to approve (with the stars they'll earn)
+// or decline. Approving also counts the stars from times they were already ticked off.
+ChoresView.prototype.approvals = async function approvals() {
+  if (!(await parentGate(this.app.root, this.store, 'Approving chores needs a parent.'))) return;
+  const list = h('div', { class: 'fam-manage' });
+  const draw = () => {
+    const pending = this.pending();
+    if (!pending.length) { s.close(); return; }
+    clear(list, pending.map((c) => {
+      const who = (c.members || []).map((id) => this.store.member(id)).filter(Boolean);
+      const ticks = this.store.all('chorelog').filter((l) => l.chore === c.id).length;
+      const stars = input({ type: 'number', min: 0, max: 100, value: c.stars ?? 1, class: 'fam-input tiny', 'aria-label': 'Stars' });
+      return h('div', { class: 'fam-manage-row fam-approval' },
+        h('span', { class: 'fam-chore-emoji' }, c.emoji || '✔️'),
+        h('div', { class: 'fam-manage-main' }, h('b', {}, c.title),
+          h('small', {}, [who.map((m) => m.name).join(', '), describeChoreRepeat(c.repeat), c.createdByName ? `made by ${c.createdByName}` : null, ticks ? `done ${ticks} time${ticks === 1 ? '' : 's'} so far` : null].filter(Boolean).join(' · '))),
+        h('label', { class: 'fam-approval-stars' }, stars, STAR),
+        h('button', { class: 'fam-btn small', onclick: async () => {
+          const ok = await sheet(this.app.root, { title: 'Decline this chore?', body: h('p', {}, `“${c.title}” is removed, and any stars waiting for it with it.`), actions: [{ label: 'Cancel' }, { label: 'Decline', danger: true, value: true }] });
+          if (!ok) return;
+          try { await this.store.batch([...this.store.all('chorelog').filter((l) => l.chore === c.id).map((l) => ({ op: 'delete', col: 'chorelog', id: l.id })), { op: 'delete', col: 'chores', id: c.id }]); draw(); this.render(this.el); } catch (err) { toastError(err); }
+        } }, 'Decline'),
+        h('button', { class: 'fam-btn small primary', onclick: async () => {
+          const n = Math.max(0, Number(stars.value) || 0);
+          try {
+            await this.store.put('chores', { ...c, approved: true, stars: n });
+            // Times it was already ticked off earn the approved number of stars.
+            const logs = this.store.all('chorelog').filter((l) => l.chore === c.id && Number(l.stars) !== n);
+            if (logs.length) await this.store.batch(logs.map((l) => ({ op: 'put', col: 'chorelog', item: { ...l, stars: n } })));
+            toast(`Approved “${c.title}”`, { type: 'success', timeout: 2000 });
+            draw(); this.render(this.el);
+          } catch (err) { toastError(err); }
+        } }, 'Approve'));
+    }));
+  };
+  const s = sheet(this.app.root, { title: 'Chores to approve', body: list, wide: true, actions: [{ label: 'Done', primary: true }] });
+  draw();
+  await s;
+};
 
 const fmtClock = (t) => { const [hh, mm] = t.split(':').map(Number); return new Date(2000, 0, 1, hh, mm).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }); };
 
@@ -303,7 +378,12 @@ export class RewardsView {
   async history() {
     const rows = [
       ...this.store.all('redemptions').map((r) => ({ at: r.at || r.created, member: r.member, text: r.title, emoji: r.emoji || '🎁', stars: -r.stars })),
-      ...this.store.all('chorelog').filter((l) => l.stars).map((l) => ({ at: l.at || parseYmd(l.date).getTime() + 12 * 36e5, member: l.member, text: this.store.get('chores', l.chore)?.title || 'Chore', emoji: this.store.get('chores', l.chore)?.emoji || '✔️', stars: l.stars })),
+      ...this.store.all('chorelog').filter((l) => l.stars).map((l) => {
+        const chore = this.store.get('chores', l.chore);
+        const waiting = chore?.approved === false;
+        const helped = l.for && l.for !== l.member ? this.store.member(l.for)?.name : null;
+        return { at: l.at || parseYmd(l.date).getTime() + 12 * 36e5, member: l.member, text: `${chore?.title || 'Chore'}${helped ? ` (for ${helped})` : ''}${waiting ? ' — waiting for a parent' : ''}`, emoji: chore?.emoji || '✔️', stars: waiting ? 0 : l.stars };
+      }),
     ].filter((r) => !this.who || r.member === this.who).sort((a, b) => b.at - a.at).slice(0, 200);
     await sheet(this.app.root, {
       title: `Star history${this.who ? ` — ${this.store.member(this.who)?.name}` : ''}`, wide: true,

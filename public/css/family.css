@@ -534,3 +534,14 @@ body.fam-page { background: #f6f3ee; overflow: hidden; height: 100dvh; }
 .fam-auth .fam-error { color: var(--f-danger); font-size: 13.5px; }
 .fam-auth .fam-error:empty { display: none; }
 .fam-auth .fam-input:user-invalid:not(:focus) { border-color: color-mix(in srgb, var(--f-danger) 50%, transparent); }
+
+/* Chores done by someone else, and chores waiting for a parent's approval */
+.fam-chore-by { flex: none; display: inline-flex; }
+.fam-chore.waiting { background: repeating-linear-gradient(135deg, color-mix(in srgb, var(--c) 9%, var(--f-panel)) 0 10px, color-mix(in srgb, var(--c) 4%, var(--f-panel)) 10px 20px); outline: 1.5px dashed color-mix(in srgb, var(--c) 45%, transparent); outline-offset: -1.5px; }
+.fam-chore-waiting { color: #c26a00 !important; font-weight: 600; }
+[data-theme="dark"] .fam-chore-waiting { color: #ffc078 !important; }
+.fam-note { margin: 0; padding: 9px 12px; border-radius: 10px; background: color-mix(in srgb, var(--f-accent) 10%, var(--f-panel)); font-size: 13.5px; }
+.fam-approve-btn { border-color: #fab005; background: color-mix(in srgb, #fab005 16%, var(--f-panel)); }
+.fam-approval { gap: 8px; flex-wrap: wrap; }
+.fam-approval-stars { display: inline-flex; align-items: center; gap: 4px; }
+.fam-approval-stars .fam-input { width: 64px; }

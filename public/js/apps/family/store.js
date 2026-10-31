@@ -112,6 +112,8 @@ export class Store {
       const r = await call('batch', { method: 'POST', body: { ops } });
       this.rev = r.rev;
       r.results.forEach((item, i) => { if (!item.deleted) this.data[ops[i].col][item.id] = item; });
+      // The server may have filled things in (who did a chore, whether it's approved): redraw.
+      this.emit('local');
       window.dispatchEvent(new Event('mediadesk:family-changed'));
       return r.results;
     } catch (err) {
@@ -171,7 +173,8 @@ export class Store {
   // Stars earned (chores done) less stars spent (rewards) and adjustments.
   stars(memberId) {
     let n = 0;
-    for (const l of this.all('chorelog')) if (l.member === memberId) n += Number(l.stars) || 0;
+    // Chores a family member made for themselves count once a parent approves them.
+    for (const l of this.all('chorelog')) if (l.member === memberId && this.get('chores', l.chore)?.approved !== false) n += Number(l.stars) || 0;
     for (const r of this.all('redemptions')) if (r.member === memberId) n -= Number(r.stars) || 0;
     return n;
   }
