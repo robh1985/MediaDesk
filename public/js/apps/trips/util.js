@@ -53,11 +53,13 @@ export const DAY_COLORS = ['#e8590c', '#1c7ed6', '#2f9e44', '#ae3ec9', '#f08c00'
 // --- Bookings ------------------------------------------------------------------------------------
 export const BOOKING_TYPES = {
   flight: ['Flight', '✈️', true], train: ['Train', '🚆', true], bus: ['Bus', '🚌', true], ferry: ['Ferry', '⛴️', true], car: ['Car rental', '🚗', false], transfer: ['Taxi / transfer', '🚕', true],
-  hotel: ['Hotel', '🏨', false], apartment: ['Apartment', '🏠', false], camping: ['Camping', '⛺', false], hostel: ['Hostel', '🛏️', false],
+  hotel: ['Hotel', '🏨', false], rental: ['Short-term rental (Airbnb, Vrbo…)', '🏡', false], apartment: ['Apartment', '🏠', false], camping: ['Camping', '⛺', false], hostel: ['Hostel', '🛏️', false],
   restaurant: ['Restaurant', '🍽️', false], event: ['Event', '🎭', false], tour: ['Tour', '🧭', false], activity: ['Activity', '🎟️', false], museum: ['Museum / tickets', '🖼️', false],
   insurance: ['Insurance', '🛡️', false], parking: ['Parking', '🅿️', false], other: ['Other', '📄', false],
 };
-export const STAYS = new Set(['hotel', 'apartment', 'camping', 'hostel']);
+export const STAYS = new Set(['hotel', 'rental', 'apartment', 'camping', 'hostel']);
+// Where a short-term rental was booked.
+export const RENTAL_SITES = ['Airbnb', 'Vrbo', 'Booking.com', 'Expedia', 'Hotels.com', 'Plum Guide', 'Evolve', 'Sonder', 'Direct with the host'];
 export const bookingType = (t) => BOOKING_TYPES[t] || BOOKING_TYPES.other;
 export const STATUS = { confirmed: ['Confirmed', '#2f9e44'], pending: ['Pending', '#f08c00'], cancelled: ['Cancelled', '#868e96'] };
 

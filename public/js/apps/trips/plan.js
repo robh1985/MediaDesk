@@ -151,7 +151,14 @@ export class PlanView {
     const stops = date ? this.stopsOf(date) : [];
     const route = date ? this.routes.get(this.routeKey(date)) : null;
     const w = date ? this.weather[date] : null;
-    const stays = date ? this.store.all('bookings').filter((b) => STAYS.has(b.type) && b.start && b.start.slice(0, 10) <= date && (b.end || b.start).slice(0, 10) > date && b.status !== 'cancelled') : [];
+    const stays = date ? this.store.all('bookings').filter((b) => STAYS.has(b.type) && b.start && b.start.slice(0, 10) <= date && (b.end || b.start).slice(0, 10) >= date && b.status !== 'cancelled') : [];
+    // A stay on a day: checking in, staying, or checking out (with the time).
+    const stayChip = (b) => {
+      const tm = (v) => (v?.length > 10 ? ` ${fmtTime(v)}` : '');
+      if (b.end && b.end.slice(0, 10) === date && b.start.slice(0, 10) !== date) return h('span', { class: 'tp-chip', title: b.title }, `🧳 Check-out${tm(b.end)} · ${b.title}`);
+      if (b.start.slice(0, 10) === date) return h('span', { class: 'tp-chip', title: b.title }, `🛏 Check-in${tm(b.start)} · ${b.title}`);
+      return h('span', { class: 'tp-chip', title: 'Staying' }, `🛏 ${b.title}`);
+    };
     const mode = date ? this.modeOf(date) : null;
     const head = date
       ? h('div', { class: 'tp-day-head', onclick: (e) => { if (e.target.closest('button, select')) return; this.day = on ? null : date; this.render(this.el); } },
@@ -159,7 +166,7 @@ export class PlanView {
         h('div', { class: 'tp-day-title' }, h('b', {}, `Day ${index + 1}`), h('span', {}, fmtDay(date, { weekday: 'long', day: 'numeric', month: 'long' })),
           h('div', { class: 'tp-day-meta' },
             w ? h('span', { class: 'tp-chip', title: w.guess ? 'Last year on this day (a guide, not a forecast)' : 'Forecast' }, `${weatherIcon(w.code)} ${Math.round(w.max)}° / ${Math.round(w.min)}°${w.guess ? '*' : ''}`) : null,
-            stays.map((b) => h('span', { class: 'tp-chip', title: 'Staying' }, `🛏 ${b.title}`)),
+            stays.map(stayChip),
             route ? h('span', { class: 'tp-chip' }, `${MODES[mode][1]} ${fmtKm(route.distance)} · ${fmtMins(route.duration)}`) : null)),
         h('div', { class: 'tp-day-tools' },
           h('button', { class: 'tp-icon-btn', title: `Getting around: ${MODES[mode][0].toLowerCase()} (click to change)`, 'aria-label': `Getting around: ${MODES[mode][0]}`, onclick: () => { const ks = Object.keys(MODES); this.store.patchTrip({ dayModes: { ...(this.trip.dayModes || {}), [date]: ks[(ks.indexOf(mode) + 1) % ks.length] } }, { label: 'travel mode' }).catch(toastError); } }, MODES[mode][1]),

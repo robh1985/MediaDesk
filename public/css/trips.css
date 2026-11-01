@@ -220,6 +220,10 @@ a.tp-leg.link { border: 0; margin-top: 4px; color: var(--accent); text-decoratio
 .tp-leg-edit .tp-field:not(.tp-searchwrap)::after { content: ''; height: 15px; }
 @container (max-width: 700px) { .tp-leg-edit { grid-template-columns: 1fr 1fr; } }
 
+.tp-stay-line { display: flex; flex-wrap: wrap; gap: 4px 14px; }
+.tp-stay-times { align-items: flex-end; }
+.tp-stay-times > small { padding-bottom: 8px; }
+
 /* Costs */
 .tp-total { display: flex; align-items: baseline; gap: 8px; }
 .tp-total b { font-size: 24px; }

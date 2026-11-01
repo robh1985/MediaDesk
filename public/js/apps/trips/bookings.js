@@ -5,7 +5,7 @@
 import { h, clear, toast, toastError } from '../../ui.js';
 import { geo } from './store.js';
 import {
-  tripDays, fmtDay, fmtTime, haversine, BOOKING_TYPES, bookingType, STATUS, STAYS, CURRENCIES, money, avatar,
+  tripDays, fmtDay, fmtTime, haversine, dayDiff, RENTAL_SITES, BOOKING_TYPES, bookingType, STATUS, STAYS, CURRENCIES, money, avatar,
   sheet, field, input, select, textarea, peoplePicker, emptyState,
 } from './util.js';
 
@@ -77,7 +77,9 @@ export class BookingsView {
       h('div', { class: 'tp-bk-icon' }, emoji),
       h('div', { class: 'tp-bk-main' },
         h('div', { class: 'tp-bk-top' }, h('b', {}, b.title || label), h('span', { class: 'tp-status', style: { '--c': stColor } }, stLabel)),
-        h('div', { class: 'muted small' }, [label, b.provider, b.start ? `${fmtDay(b.start.slice(0, 10))} ${localTime(b.start)}` : null, b.end ? `→ ${b.end.slice(0, 10) !== b.start?.slice(0, 10) ? `${fmtDay(b.end.slice(0, 10))} ` : ''}${localTime(b.end)}` : null].filter(Boolean).join(' · ')),
+        STAYS.has(b.type) ? h('div', { class: 'muted small' }, [label.replace(/ \(.*\)$/, ''), b.platform || b.provider].filter(Boolean).join(' · ')) : null,
+        STAYS.has(b.type) ? h('div', { class: 'tp-stay-line small' }, b.start ? h('span', {}, h('b', {}, 'Check-in '), `${fmtDay(b.start.slice(0, 10))}${b.start.length > 10 ? ` ${localTime(b.start)}` : ''}`) : null, b.end ? h('span', {}, h('b', {}, 'Check-out '), `${fmtDay(b.end.slice(0, 10))}${b.end.length > 10 ? ` ${localTime(b.end)}` : ''}`) : null, b.start && b.end && dayDiff(b.start.slice(0, 10), b.end.slice(0, 10)) > 0 ? h('span', { class: 'muted' }, `${dayDiff(b.start.slice(0, 10), b.end.slice(0, 10))} nights`) : null) : null,
+        STAYS.has(b.type) ? null : h('div', { class: 'muted small' }, [label, b.provider, b.start ? `${fmtDay(b.start.slice(0, 10))} ${localTime(b.start)}` : null, b.end ? `→ ${b.end.slice(0, 10) !== b.start?.slice(0, 10) ? `${fmtDay(b.end.slice(0, 10))} ` : ''}${localTime(b.end)}` : null].filter(Boolean).join(' · ')),
         (b.legs || []).length ? h('div', { class: 'tp-legs' }, b.legs.map((l) => h('div', { class: 'tp-legrow' },
           h('b', {}, l.from || '?'), h('span', { class: 'muted' }, ` ${localTime(l.depart)} → `), h('b', {}, l.to || '?'), h('span', { class: 'muted' }, ` ${localTime(l.arrive)}`),
           l.number ? h('span', { class: 'tp-chip' }, l.number) : null, l.seat ? h('span', { class: 'tp-chip' }, `Seat ${l.seat}`) : null))) : null,
@@ -104,6 +106,38 @@ export class BookingsView {
     const dt = (v) => (v ? (v.length === 10 ? `${v}T12:00` : v.slice(0, 16)) : '');
     const start = input({ type: 'datetime-local', value: dt(b.start) || (days[0] ? `${days[0]}T09:00` : '') });
     const end = input({ type: 'datetime-local', value: dt(b.end) });
+    // Stays: check-in and check-out, each a day and a time.
+    const inDate = input({ type: 'date', value: b.start?.slice(0, 10) || days[0] || '' });
+    const inTime = input({ type: 'time', value: b.start?.length > 10 ? b.start.slice(11, 16) : '15:00' });
+    const outDate = input({ type: 'date', value: b.end?.slice(0, 10) || days.at(-1) || '' });
+    const outTime = input({ type: 'time', value: b.end?.length > 10 ? b.end.slice(11, 16) : '11:00' });
+    const nights = h('small', { class: 'muted' });
+    const countNights = () => { const n = inDate.value && outDate.value ? dayDiff(inDate.value, outDate.value) : null; nights.textContent = n > 0 ? `${n} night${n === 1 ? '' : 's'}` : n === 0 ? 'Same day' : ''; };
+    inDate.addEventListener('change', () => { if (outDate.value && outDate.value < inDate.value) outDate.value = inDate.value; countNights(); });
+    outDate.addEventListener('change', () => { if (inDate.value && outDate.value < inDate.value) inDate.value = outDate.value; countNights(); });
+    countNights();
+    const stayRow = h('div', { class: 'tp-row tp-stay-times' }, field('Check-in', inDate), field('Check-in time', inTime), field('Check-out', outDate), field('Check-out time', outTime), nights);
+    const whenRow = h('div', { class: 'tp-row' }, field('From', start), field('Until', end));
+    // Short-term rentals: which site (or the host) it was booked through.
+    const site = select([...RENTAL_SITES.map((x) => [x, x]), ['__other', 'Somewhere else…']], b.platform ? (RENTAL_SITES.includes(b.platform) ? b.platform : '__other') : 'Airbnb');
+    const siteOther = input({ value: b.platform && !RENTAL_SITES.includes(b.platform) ? b.platform : '', placeholder: 'Website or company' });
+    const siteOtherField = field('Name', siteOther);
+    const codeField = field('Booking code', code);
+    const siteRow = h('div', { class: 'tp-row' }, field('Booked through', site), siteOtherField);
+    const providerRow = h('div', { class: 'tp-row' }, field('Booked with', provider), codeField);
+    const showKind = () => {
+      const stay = STAYS.has(type.value);
+      const rental = type.value === 'rental';
+      stayRow.hidden = !stay;
+      whenRow.hidden = stay;
+      siteRow.hidden = !rental;
+      providerRow.hidden = rental;
+      siteOtherField.hidden = site.value !== '__other';
+      // The booking code field lives in whichever row is showing.
+      (rental ? siteRow : providerRow).append(codeField);
+      title.placeholder = rental ? 'e.g. Cosy flat in Alfama' : stay ? 'e.g. Hotel Aurora' : 'e.g. London → Lisbon, Hotel Aurora';
+    };
+    site.addEventListener('change', showKind);
     const address = input({ value: b.address || '', placeholder: 'Address (to show it on the map)' });
     let where = Number.isFinite(b.lat) ? { lat: b.lat, lon: b.lon } : null;
     const whereNote = h('small', { class: 'muted' }, where ? '📍 On the map' : '');
@@ -138,18 +172,19 @@ export class BookingsView {
           h('button', { type: 'button', class: 'tp-icon-btn', 'aria-label': 'Remove', onclick: () => { legs.splice(i, 1); drawLegs(); } }, '✕'))),
         h('button', { type: 'button', class: 'btn btn-sm', onclick: () => { const prev = legs.at(-1); legs.push({ from: prev?.to || '', depart: prev?.arrive || start.value }); drawLegs(); } }, legs.length ? '＋ Another leg (a connection or the way back)' : '＋ Add the journey'));
     };
-    type.addEventListener('change', () => { if (!legs.length && BOOKING_TYPES[type.value]?.[2]) legs.push({ depart: start.value }); drawLegs(); });
+    type.addEventListener('change', () => { if (!legs.length && BOOKING_TYPES[type.value]?.[2]) legs.push({ depart: start.value }); drawLegs(); showKind(); });
     if (isNew && !legs.length) legs.push({ depart: start.value });
     drawLegs();
     const fileIn = h('input', { type: 'file', multiple: true });
     const existing = b.id ? this.store.all('files').filter((f) => f.bookingId === b.id && !f.deleted) : [];
+    showKind();
     const r = await sheet(this.app.root, {
       title: isNew ? 'Add a booking' : 'Booking', wide: true,
       body: h('div', { class: 'tp-form' },
         h('div', { class: 'tp-row' }, field('Kind', type), field('Status', status)),
         field('Name', title),
-        h('div', { class: 'tp-row' }, field('Booked with', provider), field('Booking code', code)),
-        h('div', { class: 'tp-row' }, field('From', start), field('Until', end)),
+        providerRow, siteRow,
+        whenRow, stayRow,
         legsBox,
         field('Where', address, whereNote),
         h('div', { class: 'tp-row' }, field('Price', price), field('Currency', cur)),
@@ -169,9 +204,12 @@ export class BookingsView {
     const firstLeg = legs.find((l) => l.depart);
     const lastLeg = [...legs].reverse().find((l) => l.arrive);
     const t = type.value;
+    const stay = STAYS.has(t);
+    const platform = t === 'rental' ? (site.value === '__other' ? siteOther.value.trim() : site.value) : null;
     const item = {
-      ...b, type: t, status: status.value, title: title.value.trim() || defaultTitle(t, legs), provider: provider.value.trim(), code: code.value.trim(),
-      start: (BOOKING_TYPES[t]?.[2] && firstLeg?.depart) || start.value || null, end: (BOOKING_TYPES[t]?.[2] && lastLeg?.arrive) || end.value || null,
+      ...b, type: t, status: status.value, title: title.value.trim() || defaultTitle(t, legs), provider: t === 'rental' ? platform : provider.value.trim(), platform, code: code.value.trim(),
+      start: stay ? (inDate.value ? `${inDate.value}T${inTime.value || '15:00'}` : null) : (BOOKING_TYPES[t]?.[2] && firstLeg?.depart) || start.value || null,
+      end: stay ? (outDate.value ? `${outDate.value}T${outTime.value || '11:00'}` : null) : (BOOKING_TYPES[t]?.[2] && lastLeg?.arrive) || end.value || null,
       legs: BOOKING_TYPES[t]?.[2] ? legs.filter((l) => l.from || l.to) : [], address: address.value.trim(), lat: where?.lat ?? null, lon: where?.lon ?? null,
       price: price.value === '' ? null : Number(price.value), currency: cur.value, travellers: people.value(), notes: notes.value,
     };
