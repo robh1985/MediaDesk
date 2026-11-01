@@ -364,7 +364,50 @@ function createTrips({ dataDir, mock = false, log = console.log }) {
     const wait = lastNominatim + 1100 - Date.now();
     if (wait > 0) await new Promise((r) => setTimeout(r, wait));
     lastNominatim = Date.now();
-    return fetchJson(`https://nominatim.openstreetmap.org/${pathAndQuery}`, { ttl: 24 * 3600e3, headers: { 'Accept-Language': 'en' } });
+    return fetchJson(`${(process.env.NOMINATIM_URL || 'https://nominatim.openstreetmap.org').replace(/\/$/, '')}/${pathAndQuery}`, { ttl: 24 * 3600e3, headers: { 'Accept-Language': 'en' } });
+  }
+  // Overpass (OpenStreetMap's database of places) is often busy. Searches go one at a time (two at
+  // once from one address gets "too many requests"), and when a server is busy or slow the next
+  // one is tried. OVERPASS_URLS can name your own.
+  const OVERPASS = (process.env.OVERPASS_URLS || 'https://overpass-api.de/api/interpreter,https://overpass.private.coffee/api/interpreter,https://maps.mail.ru/osm/tools/overpass/api/interpreter,https://overpass.kumi.systems/api/interpreter').split(',').map((u) => u.trim()).filter(Boolean);
+  let overpassFirst = 0;
+  let overpassQueue = Promise.resolve();
+  const overpassAsked = new Map();
+  function overpass(query) {
+    const hit = cache.get(`overpass ${query}`);
+    if (hit && hit.at > Date.now() - 6 * 3600e3) return Promise.resolve(hit.data);
+    if (overpassAsked.has(query)) return overpassAsked.get(query);
+    const run = overpassQueue.then(async () => {
+      let last = null;
+      for (let k = 0; k < OVERPASS.length; k++) {
+        const i = (overpassFirst + k) % OVERPASS.length;
+        const url = OVERPASS[i];
+        try {
+          const res = await fetch(url, { method: 'POST', body: `data=${encodeURIComponent(query)}`, headers: { 'User-Agent': UA, Accept: 'application/json', 'Content-Type': 'application/x-www-form-urlencoded' }, signal: AbortSignal.timeout(30e3) });
+          if (!res.ok) { last = `${new URL(url).hostname} answered ${res.status}`; continue; }
+          const data = await res.json();
+          // A server that ran out of time says so inside an answer that looks fine.
+          if (!data.elements?.length && /timed out|out of memory|runtime error/i.test(data.remark || '')) { last = `${new URL(url).hostname}: ${data.remark}`; continue; }
+          overpassFirst = i;
+          cache.set(`overpass ${query}`, { at: Date.now(), data });
+          return data;
+        } catch (err) { last = `${new URL(url).hostname}: ${err.name === 'TimeoutError' ? 'took too long' : err.message}`; }
+      }
+      log(`Trip Planner: no Overpass server answered (${last})`);
+      throw new TripError(503, 'The places database (OpenStreetMap’s Overpass) is busy right now. Try again in a minute.');
+    });
+    overpassQueue = run.catch(() => {});
+    overpassAsked.set(query, run);
+    run.finally(() => overpassAsked.delete(query)).catch(() => {});
+    return run;
+  }
+  // When Overpass can't answer, Nominatim finds the main kinds of place in an area by name.
+  const NOMINATIM_WORDS = { sights: 'tourist attraction', museum: 'museum', viewpoint: 'viewpoint', park: 'park', food: 'restaurant', cafe: 'cafe', nightlife: 'bar', shopping: 'shopping centre', hotel: 'hotel', transport: 'railway station' };
+  async function nearbyByName(lat, lon, cat, radius) {
+    const dLat = radius / 111e3;
+    const dLon = radius / (111e3 * Math.cos((lat * Math.PI) / 180));
+    const params = new URLSearchParams({ q: NOMINATIM_WORDS[cat] || 'tourist attraction', format: 'jsonv2', limit: '40', bounded: '1', viewbox: `${lon - dLon},${lat + dLat},${lon + dLon},${lat - dLat}`, addressdetails: '1', extratags: '1', namedetails: '1' });
+    return (await nominatim(`search?${params}`)).map((r) => ({ ...placeFromNominatim(r), category: cat })).filter((p) => p.name && Number.isFinite(p.lat));
   }
   const placeFromNominatim = (r) => ({
     name: r.namedetails?.name || r.name || r.display_name?.split(',')[0] || 'Place', lat: Number(r.lat), lon: Number(r.lon), address: r.display_name || '',
@@ -421,8 +464,13 @@ function createTrips({ dataDir, mock = false, log = console.log }) {
       if (mock) return demoNearby(lat, lon, cat);
       const tags = NEARBY[cat] || NEARBY.sights;
       const r = Math.min(5000, Math.max(200, Number(radius) || 1500));
-      const q = `[out:json][timeout:20];(${tags.map((t) => `nwr[${t}][name](around:${r},${lat},${lon});`).join('')});out center 60;`;
-      const data = await fetchJson('https://overpass-api.de/api/interpreter', { method: 'POST', body: `data=${encodeURIComponent(q)}`, headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, ttl: 6 * 3600e3 });
+      const q = `[out:json][timeout:25];(${tags.map((t) => `nwr[${t}][name](around:${r},${lat.toFixed(5)},${lon.toFixed(5)});`).join('')});out center 60;`;
+      let data;
+      try { data = await overpass(q); } catch (err) {
+        const found = await nearbyByName(lat, lon, cat, r).catch(() => null);
+        if (found?.length) return found;
+        throw err;
+      }
       return (data.elements || []).map((e) => ({
         name: e.tags.name, lat: e.lat ?? e.center?.lat, lon: e.lon ?? e.center?.lon, category: cat, osm: `${e.type[0]}${e.id}`,
         address: [e.tags['addr:street'] && `${e.tags['addr:street']} ${e.tags['addr:housenumber'] || ''}`.trim(), e.tags['addr:city']].filter(Boolean).join(', '),
@@ -436,8 +484,8 @@ function createTrips({ dataDir, mock = false, log = console.log }) {
       const tags = ALONG[cat] || NEARBY[cat] || ALONG.hotel;
       const r = Math.min(10000, Math.max(500, Number(radius) || 3000));
       const line = points.map(([la, lo]) => `${la.toFixed(4)},${lo.toFixed(4)}`).join(',');
-      const q = `[out:json][timeout:25];(${tags.map((t) => `nwr[${t}][name](around:${r},${line});`).join('')});out center 80;`;
-      const data = await fetchJson('https://overpass-api.de/api/interpreter', { method: 'POST', body: `data=${encodeURIComponent(q)}`, headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, ttl: 6 * 3600e3 });
+      const q = `[out:json][timeout:30];(${tags.map((t) => `nwr[${t}][name](around:${r},${line});`).join('')});out center 80;`;
+      const data = await overpass(q);
       return (data.elements || []).map((e) => ({
         name: e.tags.name, lat: e.lat ?? e.center?.lat, lon: e.lon ?? e.center?.lon, category: ALONG_CATEGORY[cat] || cat, osm: `${e.type[0]}${e.id}`,
         address: [e.tags['addr:street'] && `${e.tags['addr:street']} ${e.tags['addr:housenumber'] || ''}`.trim(), e.tags['addr:city']].filter(Boolean).join(', '),
@@ -566,7 +614,7 @@ function createTrips({ dataDir, mock = false, log = console.log }) {
     } catch (err) {
       if (!(err instanceof TripError)) log(`Trip Planner: ${err.stack || err.message}`);
       if (res.headersSent) return res.end();
-      return sendJson(res, err.status || (err.name === 'TimeoutError' ? 504 : 500), { error: err.status ? err.message : err.name === 'TimeoutError' ? 'The map service took too long to answer' : 'The Trip Planner had a problem' });
+      return sendJson(res, err.status || (err.name === 'TimeoutError' ? 504 : 500), { error: err.status ? err.message : err.name === 'TimeoutError' ? 'A map service took too long to answer. Try again in a minute.' : 'The Trip Planner had a problem' });
     }
   }
 

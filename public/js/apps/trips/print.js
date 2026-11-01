@@ -1,10 +1,55 @@
 // Trip Planner: a printable itinerary (print it, or save it as a PDF from the print dialog). Also
 // used by the read-only share page, from the same data.
 
-import { tripDays, fmtDay, fmtTime, fmtRange, catOf, bookingType, money, expenseParts, esc, TRAVEL, travelSummary } from './util.js';
+import { tripDays, fmtDay, fmtTime, fmtRange, catOf, bookingType, money, expenseParts, esc, TRAVEL, travelSummary, fmtKm, fmtMins } from './util.js';
+
+const placeKey = (p) => (Number.isFinite(p?.lat) ? `${p.lat.toFixed(4)},${p.lon.toFixed(4)}` : '');
+// The driving route saved for the journey to destination i (if it still fits the journey).
+function savedRoute(t, x, i) {
+  const r = t.legRoutes?.[x.id];
+  const from = i ? t.destinations[i - 1] : t.origin;
+  if (!r || !from || r.fromKey !== placeKey(from)) return null;
+  if (x.travel?.mode === 'car' && r.toKey !== placeKey(x)) return null;
+  return r;
+}
+
+// A drawing of the route for paper (map pictures don't print reliably): where the trip starts,
+// each destination, the driving routes worked out in the planner, and dashed lines for the rest.
+function routeSvg(t) {
+  const dests = (t.destinations || []).filter((x) => Number.isFinite(x.lat));
+  const origin = Number.isFinite(t.origin?.lat) ? t.origin : null;
+  const routes = (t.destinations || []).map((x, i) => savedRoute(t, x, i)).filter(Boolean);
+  const pts = [...(origin ? [[origin.lat, origin.lon]] : []), ...dests.map((x) => [x.lat, x.lon]), ...routes.flatMap((r) => r.line)];
+  if (pts.length < 2) return '';
+  const W = 680;
+  const H = 300;
+  const pad = 34;
+  const lat0 = pts.reduce((a, p) => a + p[0], 0) / pts.length;
+  const k = Math.cos((lat0 * Math.PI) / 180);
+  const xs = pts.map((p) => p[1] * k);
+  const ys = pts.map((p) => -p[0]);
+  const [minX, maxX, minY, maxY] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)];
+  const scale = Math.min((W - 2 * pad) / (maxX - minX || 1), (H - 2 * pad) / (maxY - minY || 1));
+  const ox = (W - (maxX - minX) * scale) / 2;
+  const oy = (H - (maxY - minY) * scale) / 2;
+  const at = (lat, lon) => [((lon * k - minX) * scale + ox).toFixed(1), ((-lat - minY) * scale + oy).toFixed(1)];
+  const out = [];
+  // Straight dashed lines between stops, then the driving routes over them.
+  const stops = [...(origin ? [origin] : []), ...dests];
+  for (let i = 1; i < stops.length; i++) {
+    const flight = stops[i].travel?.mode === 'flight';
+    out.push(`<line x1="${at(stops[i - 1].lat, stops[i - 1].lon)[0]}" y1="${at(stops[i - 1].lat, stops[i - 1].lon)[1]}" x2="${at(stops[i].lat, stops[i].lon)[0]}" y2="${at(stops[i].lat, stops[i].lon)[1]}" stroke="${flight ? '#7048e8' : '#868e96'}" stroke-width="1.5" stroke-dasharray="${flight ? '2 6' : '6 6'}"/>`);
+  }
+  for (const r of routes) out.push(`<polyline points="${r.line.map((p) => at(p[0], p[1]).join(',')).join(' ')}" fill="none" stroke="#1c7ed6" stroke-width="3.5" stroke-linejoin="round" stroke-linecap="round"/>`);
+  for (const r of routes) if (r.to?.iata) { const [x, y] = at(r.to.lat, r.to.lon); out.push(`<text x="${x}" y="${Number(y) + 16}" text-anchor="middle" class="svg-small">✈ ${esc(r.to.iata)}</text>`); }
+  const label = (p, text, mark) => { const [x, y] = at(p.lat, p.lon); return `<g><circle cx="${x}" cy="${y}" r="11" fill="#fff" stroke="#1c7ed6" stroke-width="2"/><text x="${x}" y="${Number(y) + 4}" text-anchor="middle" class="svg-mark">${mark}</text><text x="${x}" y="${Number(y) - 16}" text-anchor="middle" class="svg-label">${esc(text)}</text></g>`; };
+  if (origin) out.push(label(origin, origin.name, '⌂'));
+  dests.forEach((x) => out.push(label(x, x.name, (t.destinations.indexOf(x) + 1))));
+  return `<svg class="route-map" viewBox="0 0 ${W} ${H}" role="img" aria-label="Map of the route">${out.join('')}</svg>`;
+}
 
 // The itinerary as HTML, from a trip's data ({ trip, places, items, bookings, … }).
-export function itineraryHtml(d) {
+export function itineraryHtml(d, { routeMap = true } = {}) {
   const t = d.trip;
   const all = (col) => Object.values(d[col] || {});
   const days = tripDays(t);
@@ -24,10 +69,12 @@ export function itineraryHtml(d) {
     if (t.origin) rows.push(`<li class="r-origin"><span class="r-icon">🏠</span><div><small>Starting from</small><b>${esc(t.origin.name)}</b></div></li>`);
     dests.forEach((x, i) => {
       const tr = x.travel;
-      if (tr?.mode) rows.push(`<li class="r-travel"><span class="r-icon">${TRAVEL[tr.mode][1]}</span><div><b>${esc(TRAVEL[tr.mode][0])}</b>${travelSummary(tr) ? ` <small>${esc(travelSummary(tr))}</small>` : ''}</div></li>`);
+      const r = savedRoute(t, x, i);
+      const drive = r ? `<br><small class="r-drive">🚗 ${esc(r.to?.iata ? `Driving to ${r.to.iata}` : `Driving to ${x.name}`)}: ${esc(fmtMins(r.duration))} · ${esc(fmtKm(r.distance))}</small>` : '';
+      if (tr?.mode) rows.push(`<li class="r-travel"><span class="r-icon">${TRAVEL[tr.mode][1]}</span><div><b>${esc(TRAVEL[tr.mode][0])}</b>${travelSummary(tr) ? ` <small>${esc(travelSummary(tr))}</small>` : ''}${drive}</div></li>`);
       rows.push(`<li class="r-dest"><span class="r-icon r-num">${i + 1}</span><div><b>${esc(x.name)}</b>${x.arrive ? ` <small>${esc(fmtRange(x.arrive, x.depart || x.arrive))}</small>` : ''}${x.address && x.address !== x.name ? `<br><small>${esc(x.address)}</small>` : ''}</div></li>`);
     });
-    html += `<section class="route"><h2>Route</h2><ul class="route-list">${rows.join('')}</ul></section>`;
+    html += `<section class="route"><h2>Route</h2>${routeMap ? routeSvg(t) : ''}<ul class="route-list">${rows.join('')}</ul></section>`;
   }
   html += days.map((day, i) => { const list = items(day); return `<section class="day"><h2>Day ${i + 1} <small>${esc(fmtDay(day, { weekday: 'long', day: 'numeric', month: 'long' }))}</small></h2>${list.length ? `<ol>${list.map(row).join('')}</ol>` : '<p class="muted">Free day</p>'}</section>`; }).join('');
   const pool = items(null).filter((it) => it.kind === 'place');
@@ -57,6 +104,7 @@ ol, ul { margin: 0; padding-left: 22px; } li { margin: 4px 0; } li.note { color:
 small { color: #666; } small.n { color: #444; } .muted { color: #888; }
 table { border-collapse: collapse; width: 100%; } td, th { text-align: left; border-bottom: 1px solid #eee; padding: 5px 6px; vertical-align: top; } tr.x { text-decoration: line-through; color: #888; }
 .checks { list-style: none; padding-left: 0; columns: 2; }
+.route-map { display: block; width: 100%; max-width: 680px; height: auto; margin: 4px 0 10px; border: 1px solid #ddd; border-radius: 8px; background: #f4f8fb; } .svg-label { font: 600 12px system-ui, sans-serif; fill: #111; paint-order: stroke; stroke: #fff; stroke-width: 3px; } .svg-mark { font: 700 11px system-ui, sans-serif; fill: #1c4f9c; } .svg-small { font: 600 10px system-ui, sans-serif; fill: #5f3dc4; paint-order: stroke; stroke: #fff; stroke-width: 3px; } .r-drive { color: #1c4f9c !important; } .route { break-inside: avoid; }
 .route-list { list-style: none; padding: 0; } .route-list li { display: flex; gap: 10px; align-items: flex-start; margin: 0; padding: 4px 0; } .route-list .r-travel { padding-left: 4px; color: #555; } .r-icon { width: 24px; text-align: center; flex: none; } .r-num { display: inline-block; width: 22px; height: 22px; border-radius: 50%; background: #1c7ed6; color: #fff; font-weight: 700; font-size: 12px; line-height: 22px; } .route-list small { color: #666; } .r-origin small { display: block; }
 section.day { break-inside: avoid; }
 @media print { body { margin: 0; } }`;

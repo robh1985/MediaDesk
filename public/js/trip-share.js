@@ -20,7 +20,7 @@ async function start() {
   document.documentElement.style.setProperty('--c', t.color || '#1c7ed6');
   const days = tripDays(t);
   const place = (id) => d.places?.[id];
-  main.innerHTML = `<div class="ts-layout"><div class="ts-map" id="ts-map"></div><div class="ts-body"><nav class="ts-days" id="ts-days"><button class="on" data-day="">All days</button>${days.map((x, i) => `<button data-day="${x}"><i style="background:${DAY_COLORS[i % DAY_COLORS.length]}"></i>Day ${i + 1}<small>${esc(fmtDay(x))}</small></button>`).join('')}</nav><article class="ts-doc">${itineraryHtml(d)}${notesHtml(d)}</article><footer class="muted">Shared from MediaDesk Trip Planner</footer></div></div>`;
+  main.innerHTML = `<div class="ts-layout"><div class="ts-map" id="ts-map"></div><div class="ts-body"><nav class="ts-days" id="ts-days"><button class="on" data-day="">All days</button>${days.map((x, i) => `<button data-day="${x}"><i style="background:${DAY_COLORS[i % DAY_COLORS.length]}"></i>Day ${i + 1}<small>${esc(fmtDay(x))}</small></button>`).join('')}</nav><article class="ts-doc">${itineraryHtml(d, { routeMap: false })}${notesHtml(d)}</article><footer class="muted">Shared from MediaDesk Trip Planner</footer></div></div>`;
   // Photos of places.
   for (const li of main.querySelectorAll('.ts-doc li')) li.classList.add('ts-li');
   try {

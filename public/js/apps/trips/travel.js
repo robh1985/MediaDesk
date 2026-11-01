@@ -178,8 +178,10 @@ async function alongRoute(view, x, cat) {
     h('div', { class: 'tp-panel-head' }, h('b', {}, `${ALONG[cat][1]} ${ALONG[cat][0]} on the way to ${x.name}`), h('button', { class: 'tp-icon-btn', 'aria-label': 'Close', onclick: () => { view.alongCat = null; view.closePanel(); } }, '✕')),
     h('div', { class: 'tp-catchips' }, h('small', { class: 'muted' }, 'Within'), [1000, 3000, 5000, 10000].map((r) => h('button', { class: `tp-catchip ${r === radius ? 'on' : ''}`, onclick: () => { view.alongRadius = r; alongRoute(view, x, cat); } }, fmtKm(r))), h('small', { class: 'muted' }, 'of the road')),
     results);
+  const ask = view.alongAsk = (view.alongAsk || 0) + 1;
   try {
     const list = await geo.along(cat, pts, radius);
+    if (ask !== view.alongAsk) return;
     view.preview(list);
     const where = (p) => { let best = 0; let bd = Infinity; pts.forEach((q, i) => { const d = haversine(p, { lat: q[0], lon: q[1] }); if (d < bd) { bd = d; best = i; } }); return [along[best], bd]; };
     const rows = list.map((p) => ({ p, at: where(p) })).sort((a, b) => a.at[0] - b.at[0]);
@@ -187,7 +189,7 @@ async function alongRoute(view, x, cat) {
       h('button', { class: 'tp-result-main', onclick: () => view.map?.setView([p.lat, p.lon], 15) }, h('b', {}, p.name), h('small', {}, [`${fmtKm(at[0])} along`, at[1] > 300 ? `${fmtKm(at[1])} off the road` : null, p.stars ? `${'★'.repeat(Math.min(5, Number(p.stars) || 0))}` : null, p.brand, p.hours].filter(Boolean).join(' · '))),
       h('button', { class: 'btn btn-sm btn-primary', onclick: (e) => { e.currentTarget.disabled = true; e.currentTarget.textContent = '✓'; view.addPlace(p, day, { open: false, dest: x.id }); } }, day ? `Add to day ${days.indexOf(day) + 1}` : 'Add')))
       : h('p', { class: 'muted small' }, `Nothing found within ${fmtKm(radius)} of the route. Try a wider search.`));
-  } catch (err) { clear(results, h('p', { class: 'tp-error small' }, err.message)); }
+  } catch (err) { if (ask === view.alongAsk) clear(results, h('p', { class: 'tp-error small' }, err.message), h('button', { class: 'btn btn-sm', onclick: () => alongRoute(view, x, cat) }, 'Try again')); }
 }
 
 // The map: where the trip starts, each destination, and the journeys between them (a computed

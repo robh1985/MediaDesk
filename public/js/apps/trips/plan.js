@@ -467,15 +467,18 @@ export class PlanView {
     const run = async (cat, btn) => {
       this.panel.querySelectorAll('.tp-catchip').forEach((b) => b.classList.toggle('on', b === btn));
       clear(results, h('p', { class: 'muted small' }, 'Looking around…'));
+      // Only the last kind chosen counts (an earlier search may still be on its way).
+      const ask = this.exploreAsk = (this.exploreAsk || 0) + 1;
       try {
         const list = await geo.nearby(center.lat, center.lon, cat);
+        if (ask !== this.exploreAsk) return;
         this.preview(list);
         if (list.length) fitTo(this.map, [center, ...list]);
         clear(results, list.length ? list.sort((a, b) => haversine(center, a) - haversine(center, b)).map((p) => h('div', { class: 'tp-result' },
           h('button', { class: 'tp-result-main', onclick: () => this.map.setView([p.lat, p.lon], 17) }, h('b', {}, p.name), h('small', {}, [fmtKm(haversine(center, p)), p.cuisine, p.hours].filter(Boolean).join(' · '))),
           h('button', { class: 'btn btn-sm btn-primary', onclick: (e) => { e.currentTarget.disabled = true; e.currentTarget.textContent = '✓'; this.addPlace(p, this.day, { open: false }); } }, 'Add')))
           : h('p', { class: 'muted small' }, 'Nothing of that kind nearby'));
-      } catch (err) { clear(results, h('p', { class: 'tp-error small' }, err.message)); }
+      } catch (err) { if (ask === this.exploreAsk) clear(results, h('p', { class: 'tp-error small' }, err.message), h('button', { class: 'btn btn-sm', onclick: () => run(cat, btn) }, 'Try again')); }
     };
     clear(this.panel, h('div', { class: 'tp-panel-head' }, h('b', {}, `Near ${center.name}`), h('button', { class: 'tp-icon-btn', 'aria-label': 'Close', onclick: () => this.closePanel() }, '✕')),
       h('div', { class: 'tp-catchips' }, Object.entries(CATEGORIES).filter(([k]) => !['other', 'activity'].includes(k)).map(([k, [l, e]]) => h('button', { class: 'tp-catchip', onclick: (ev) => run(k, ev.currentTarget) }, `${e} ${l}`))),
