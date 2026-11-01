@@ -50,31 +50,48 @@ export class ListsView {
   shown(lists) {
     const f = this.app.filter;
     if (!f.size) return lists;
-    return lists.filter((l) => !(l.members || []).length || l.members.some((id) => f.has(id)));
+    return lists.filter((l) => !Array.isArray(l.members) || !l.members.length || l.members.some((id) => f.has(id)));
   }
 
-  lists() { return this.store.all('lists').sort((a, b) => (a.order ?? 0) - (b.order ?? 0) || a.title.localeCompare(b.title)); }
+  lists() { return this.store.all('lists').sort((a, b) => (a.order ?? 0) - (b.order ?? 0) || String(a.title || '').localeCompare(String(b.title || ''))); }
   items(listId) { return this.store.all('listitems').filter((i) => i.list === listId).sort((a, b) => (a.done - b.done) || (a.order ?? 0) - (b.order ?? 0)); }
 
   render(el) {
     this.el = el;
-    const lists = this.shown(this.lists());
+    const all = this.lists();
+    const lists = this.shown(all);
+    // Lists the people picked at the top leave out (to-do lists for someone else): say so.
+    const hidden = all.length - lists.length;
     if (!lists.find((l) => l.id === this.listId)) this.listId = lists[0]?.id || null;
     // The lists: a menu beside the left one (a grid at the top on a phone), each in its colour,
     // with how many things are left on it and who it's for.
     const row = this.app.subMenu('Lists', lists.map((l) => {
-      const left = this.items(l.id).filter((i) => !i.done).length;
-      const who = (l.members || []).map((id) => this.store.member(id)).filter(Boolean).slice(0, 3);
-      return [l.id, l.title, l.emoji || '📝', l.color || '#1c7ed6', { cls: 'fam-list-tab', extra: h('span', { class: 'fam-sub-extra' },
-        who.length ? h('span', { class: 'fam-agenda-who' }, who.map((m) => avatar(m, 'xs'))) : null,
-        left ? h('span', { class: 'fam-list-count' }, left) : null) }];
+      // One odd list (no name, say) must never stop the others showing.
+      const title = String(l.title || l.name || 'Untitled list');
+      let extra = null;
+      try {
+        const left = this.items(l.id).filter((i) => !i.done).length;
+        const who = (Array.isArray(l.members) ? l.members : []).map((id) => this.store.member(id)).filter(Boolean).slice(0, 3);
+        extra = h('span', { class: 'fam-sub-extra' },
+          who.length ? h('span', { class: 'fam-agenda-who' }, who.map((m) => avatar(m, 'xs'))) : null,
+          left ? h('span', { class: 'fam-list-count' }, left) : null);
+      } catch (err) { console.warn('Family Organizer: list', l.id, err); }
+      return [l.id, title, typeof l.emoji === 'string' && l.emoji ? l.emoji : '📝', typeof l.color === 'string' && l.color ? l.color : '#1c7ed6', { cls: 'fam-list-tab', extra }];
     }), this.listId, (id) => { this.listId = id; this.render(el); }, 'fam-lists-nav', {
-      after: h('button', { class: 'fam-rail-btn fam-list-tab add', style: { '--rc': '#868e96' }, onclick: () => this.editList(null) }, h('span', { html: ICONS.plus }), h('span', {}, 'New list')),
+      after: h('div', { class: 'fam-sub-after' },
+        h('button', { class: 'fam-rail-btn fam-list-tab add', style: { '--rc': '#868e96' }, onclick: () => this.editList(null) }, h('span', { html: ICONS.plus }), h('span', {}, 'New list')),
+        hidden ? h('button', { class: 'fam-lists-hidden', title: 'Lists for other people are hidden by the people picked at the top', onclick: () => this.app.clearFilter() },
+          `${hidden} hidden`, h('b', {}, 'Show all')) : null),
     });
     const main = h('div', { class: 'fam-list-main' });
     clear(el, row, h('div', { class: 'fam-lists' }, main));
     const list = this.store.get('lists', this.listId);
-    if (!list) { clear(main, h('div', { class: 'fam-empty' }, h('div', { class: 'fam-empty-emoji' }, '🛒'), 'Make a grocery list, a to-do list or a packing list.', h('button', { class: 'fam-btn primary', onclick: () => this.editList(null) }, 'New list'))); return; }
+    if (!list) {
+      clear(main, h('div', { class: 'fam-empty' }, h('div', { class: 'fam-empty-emoji' }, '🛒'),
+        hidden ? `${hidden} list${hidden === 1 ? ' is' : 's are'} hidden by the people picked at the top.` : 'Make a grocery list, a to-do list or a packing list.',
+        hidden ? h('button', { class: 'fam-btn primary', onclick: () => this.app.clearFilter() }, 'Show everyone’s lists') : h('button', { class: 'fam-btn primary', onclick: () => this.editList(null) }, 'New list')));
+      return;
+    }
     this.drawList(main, list);
   }
 

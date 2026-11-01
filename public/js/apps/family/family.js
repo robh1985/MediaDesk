@@ -191,7 +191,7 @@ class FamilyOrganizer {
     const buttons = items.map(([id, label, icon, color, more = {}]) => h('button', {
       class: `fam-rail-btn ${id === current ? 'on' : ''} ${more.cls || ''}`, style: { '--rc': color }, dataset: { section: id }, 'aria-current': id === current ? 'page' : null, onclick: () => pick(id),
     }, String(icon).startsWith('<') ? h('span', { html: icon }) : h('span', { class: 'fam-rail-emoji' }, icon),
-      h('span', {}, ...label.split('/').flatMap((part, i) => (i ? ['/', h('wbr'), part] : [part]))), more.extra || null));
+      h('span', {}, ...String(label ?? '').split('/').flatMap((part, i) => (i ? ['/', h('wbr'), part] : [part]))), more.extra || null));
     if (after) buttons.push(after);
     const tab = this.tab;
     // Phone ↔ wide (a window resized, a tablet turned): the menu moves.
@@ -241,6 +241,9 @@ class FamilyOrganizer {
     this.drawFilter();
     this.refresh();
   }
+
+  // Show everyone again (the "All" button at the top).
+  clearFilter() { this.filter = new Set(); this.prefs.filter = []; savePrefs(this.prefs); this.drawFilter(); this.refresh(); }
 
   drawFilter() {
     const members = this.store.members();

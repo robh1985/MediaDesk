@@ -846,3 +846,7 @@ h3.fam-bk-h { font-size: .9em; letter-spacing: .14em; text-transform: uppercase;
 .fam-pic-edit { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
 .fam-pic-tools { display: flex; flex-direction: column; gap: 8px; }
 .fam-swatch.taken { cursor: not-allowed; opacity: .45; color: #fff; font-size: 12px !important; font-weight: 800; text-shadow: 0 1px 2px rgba(0,0,0,.4); }
+.fam-sub-after { display: contents; }
+.fam-lists-hidden { display: flex; flex-direction: column; align-items: center; gap: 2px; margin-top: 6px; padding: 8px 4px; border: 1px dashed var(--f-line); border-radius: 12px; background: none; cursor: pointer; font-size: 11.5px !important; color: var(--f-muted) !important; text-align: center; }
+.fam-lists-hidden b { color: var(--f-accent); font-size: 12px; }
+.fam-subrow .fam-lists-hidden { margin-top: 0; }
