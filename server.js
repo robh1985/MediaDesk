@@ -128,6 +128,7 @@ function loadConfig() {
   if (MOCK) cfg.fileRoots = require('./mock').demoFileRoots();
   if (env.GAMES_DIR) cfg.gamesFolder = env.GAMES_DIR;
   if (env.EBOOKS_DIR) cfg.ebooksFolder = env.EBOOKS_DIR;
+  if (env.EBOOK_CONVERT_PATH) cfg.ebookConvertPath = env.EBOOK_CONVERT_PATH;
   return cfg;
 }
 
@@ -498,6 +499,7 @@ async function updateConfig(req, res) {
   saveConfig(next);
   if (toolsChanged || body.recheckTools) await media.detect(config);
   if (sevenChanged || body.recheckTools) await archive.detect();
+  if (body.recheckTools || typeof body.ebookConvertPath === 'string') await ebooks.detectCalibre();
   sendJson(res, 200, publicConfig());
 }
 
@@ -626,6 +628,11 @@ const ebooks = createEbooks({
   getFolder: () => config.ebooksFolder || '',
   mock: MOCK,
   sample: MOCK ? require('./mock-ebooks').createSample() : null,
+  // CBR / CB7 / CBT comics go through the Archive Expander's 7-Zip; AZW3, Word and the like through Calibre.
+  getSevenZip: () => archive.status().path,
+  getConvertPath: () => config.ebookConvertPath || '',
+  resolveShared: (root, rel) => files.resolveInShared(config, Number(root), rel),
+  filesEnabled: () => filesStatus().enabled,
 });
 const family = createFamily({ dataDir: MOCK ? path.join(require('node:os').tmpdir(), 'mediadesk-demo-data') : path.dirname(CONFIG_PATH), mock: MOCK });
 const archive = createArchive({ getConfig: () => config, resolveInShared: files.resolveInShared, filesEnabled: () => filesStatus().enabled });
@@ -745,7 +752,7 @@ async function handle(req, res) {
       // Folder tags and aliases can be tried out too (kept in memory).
       if (Array.isArray(body.fileTags)) config.fileTags = files.cleanTags(body.fileTags);
       if (body.fileRootInfo || Array.isArray(body.fileTags)) config.fileRootInfo = files.cleanRootInfo(body.fileRootInfo || config.fileRootInfo, config.fileRoots || [], config.fileTags || []);
-      if (body.recheckTools) { await media.detect(config); await archive.detect(); }
+      if (body.recheckTools) { await media.detect(config); await archive.detect(); await ebooks.detectCalibre(); }
       return sendJson(res, 200, publicConfig());
     }
     return updateConfig(req, res);

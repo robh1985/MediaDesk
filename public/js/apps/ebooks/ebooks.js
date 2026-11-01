@@ -10,7 +10,7 @@ import { appIcon } from '../../icons.js';
 import { openApp } from '../../wm.js';
 import { pickFile, fileUrl, filesEnabled } from '../../fileapi.js';
 import { Flipbook } from './flipbook.js';
-import { bookFor, formatOf, madeCover, markText } from './sources.js';
+import { bookFor, formatOf, viewOf, ACCEPT, madeCover, markText } from './sources.js';
 
 let cssAdded = false;
 function addCss() {
@@ -42,6 +42,7 @@ const I = {
   close: svg('<path d="M6 6l12 12M18 6 6 18"/>'),
   library: svg('<path d="M4 4h4v16H4zM10 4h4v16h-4zM16.5 4.5l3.8 1-3.9 15-3.8-1z"/>'),
   open: svg('<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>'),
+  plus: svg('<path d="M12 5v14M5 12h14"/>'),
   refresh: svg('<path d="M20 11a8 8 0 0 0-14.9-3.9L4 9M4 4v5h5M4 13a8 8 0 0 0 14.9 3.9L20 15M20 20v-5h-5"/>'),
   settings: svg('<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8 2 2 0 1 1-2.8 2.8 1.7 1.7 0 0 0-2.9 1.2 2 2 0 1 1-4 0 1.7 1.7 0 0 0-2.9-1.2 2 2 0 1 1-2.8-2.8 1.7 1.7 0 0 0-1.2-2.9 2 2 0 1 1 0-4 1.7 1.7 0 0 0 1.2-2.9 2 2 0 1 1 2.8-2.8 1.7 1.7 0 0 0 2.9-1.2 2 2 0 1 1 4 0 1.7 1.7 0 0 0 2.9 1.2 2 2 0 1 1 2.8 2.8 1.7 1.7 0 0 0 1.2 2.9 2 2 0 1 1 0 4 1.7 1.7 0 0 0-1.2 1.2z"/>'),
 };
@@ -57,7 +58,44 @@ const api = async (path, opts = {}) => {
   if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`);
   return data;
 };
-const FORMAT_LABEL = { epub: 'EPUB', pdf: 'PDF', cbz: 'Comic' };
+const FORMAT_LABEL = { epub: 'EPUB', pdf: 'PDF', cbz: 'Comic', cbr: 'Comic', cb7: 'Comic', cbt: 'Comic', mobi: 'Kindle', azw3: 'Kindle', fb2: 'FB2', txt: 'Text', rtf: 'RTF', docx: 'Word', odt: 'ODT', lit: 'LIT' };
+const KIND = (f) => (f === 'pdf' ? 'pdf' : ['cbz', 'cbr', 'cb7', 'cbt'].includes(f) ? 'comic' : 'book');
+const NEED_TEXT = { '7-Zip': 'This comic book is opened by 7-Zip on the MediaDesk server, which isn’t installed (see Settings → Files).', Calibre: 'This kind of book is converted by Calibre on the MediaDesk server, which isn’t installed. Install Calibre there (or set EBOOK_CONVERT_PATH) to read it.' };
+
+// Send a file to the server, with progress.
+function upload(url, file, onProgress) {
+  return new Promise((resolve, reject) => {
+    const x = new XMLHttpRequest();
+    x.open('POST', url);
+    x.withCredentials = true;
+    x.setRequestHeader('X-MediaDesk', '1');
+    x.setRequestHeader('Content-Type', 'application/octet-stream');
+    x.responseType = url.includes('/convert') ? 'arraybuffer' : 'json';
+    x.upload.onprogress = (e) => { if (e.lengthComputable) onProgress?.(e.loaded / e.total); };
+    x.onload = () => {
+      if (x.status >= 200 && x.status < 300) resolve(x.response);
+      else {
+        let msg = `HTTP ${x.status}`;
+        try { msg = (x.responseType === 'json' ? x.response : JSON.parse(new TextDecoder().decode(x.response)))?.error || msg; } catch { /* keep the status */ }
+        reject(new Error(msg));
+      }
+    };
+    x.onerror = () => reject(new Error('The upload didn’t get through'));
+    x.send(file);
+  });
+}
+// A small question with buttons; resolves to the chosen button's value (null if closed).
+function ask(title, text, buttons) {
+  return new Promise((resolve) => {
+    const done = (v) => { overlay.remove(); resolve(v); };
+    const overlay = h('div', { class: 'dialog-overlay', onclick: (e) => { if (e.target === overlay) done(null); } },
+      h('div', { class: 'dialog ebk-ask' }, h('h3', {}, title), h('p', { class: 'muted' }, text),
+        h('div', { class: 'dialog-actions' }, buttons.map((b) => h('button', { class: `btn ${b.primary ? 'btn-primary' : ''}`, onclick: () => done(b.value) }, b.label)))));
+    overlay.addEventListener('keydown', (e) => { if (e.key === 'Escape') done(null); });
+    document.body.append(overlay);
+    overlay.querySelector('.btn-primary')?.focus();
+  });
+}
 const isBookName = (name) => Boolean(formatOf(name));
 
 export const ebooksApp = {
@@ -87,7 +125,22 @@ class EbookReader {
     this.win.setTitle('eBook Reader');
     const head = h('div', { class: 'ebk-libhead' });
     const body = h('div', { class: 'ebk-libbody' }, h('div', { class: 'ebk-loading-inline' }, h('div', { class: 'spinner' }), 'Opening the library…'));
-    clear(this.root, h('div', { class: 'ebk-lib' }, head, body));
+    const libEl = h('div', { class: 'ebk-lib' }, head, body);
+    // Drop books here: added to the library (or, without a books folder, one is opened to read).
+    let depth = 0;
+    libEl.addEventListener('dragenter', (e) => { if (e.dataTransfer?.types.includes('Files')) { depth++; libEl.classList.add('dropping'); } });
+    libEl.addEventListener('dragleave', () => { if (--depth <= 0) { depth = 0; libEl.classList.remove('dropping'); } });
+    libEl.addEventListener('dragover', (e) => { if (e.dataTransfer?.types.includes('Files')) e.preventDefault(); });
+    libEl.addEventListener('drop', (e) => {
+      depth = 0;
+      libEl.classList.remove('dropping');
+      const files = [...(e.dataTransfer?.files || [])];
+      if (!files.length) return;
+      e.preventDefault();
+      if (this.lib?.configured && this.lib.writable) this.addBooks(files);
+      else this.openLocal(files[0]);
+    });
+    clear(this.root, libEl);
     let lib;
     try { lib = await api('library'); } catch (err) { clear(body, this.empty('😕', `The library couldn’t be opened: ${err.message}`)); return; }
     this.lib = lib;
@@ -105,7 +158,8 @@ class EbookReader {
     const cont = h('div', {});
     const drawShelf = () => {
       const q = this.q.toLowerCase();
-      let books = lib.books.filter((b) => (this.filter === 'all' || b.format === this.filter) && (!q || `${b.title} ${b.author} ${b.path}`.toLowerCase().includes(q)));
+      const want = { epub: 'book', pdf: 'pdf', cbz: 'comic' }[this.filter];
+      let books = lib.books.filter((b) => (this.filter === 'all' || KIND(b.format) === want) && (!q || `${b.title} ${b.author} ${b.path}`.toLowerCase().includes(q)));
       const at = (b) => reading[b.id]?.at || 0;
       books = books.sort({
         title: (a, b) => a.title.localeCompare(b.title, undefined, { numeric: true }),
@@ -150,7 +204,7 @@ class EbookReader {
     const pct = s?.progress ? Math.round(s.progress * 100) : 0;
     return h('button', { class: 'ebk-book', title: `${b.title}${b.author ? ` — ${b.author}` : ''}`, onclick: () => this.openFrom({ id: b.id }) },
       h('div', { class: 'ebk-book-cover', dataset: { id: b.id } }, this.coverEl(b),
-        h('span', { class: `ebk-badge ${b.format}` }, FORMAT_LABEL[b.format]),
+        h('span', { class: `ebk-badge ${KIND(b.format)} f-${b.format}` }, FORMAT_LABEL[b.format] || b.format.toUpperCase()),
         pct ? h('div', { class: 'ebk-book-progress' }, h('i', { style: { width: `${pct}%` } })) : null,
         s?.finished || pct >= 99 ? h('span', { class: 'ebk-done' }, '✓') : null),
       h('div', { class: 'ebk-book-label' }, h('b', {}, b.title), b.author ? h('span', {}, b.author) : null));
@@ -187,9 +241,14 @@ class EbookReader {
       } }, h('span', { html: I.open }), 'From Files…') : null,
       h('button', { onclick: () => {
         close();
-        const input = h('input', { type: 'file', accept: '.epub,.pdf,.cbz', onchange: () => { const file = input.files[0]; if (file) this.openFrom({ file }); } });
+        const input = h('input', { type: 'file', accept: ACCEPT, onchange: () => { const file = input.files[0]; if (file) this.openFrom({ file }); } });
         input.click();
-      } }, h('span', { html: I.download }), 'From this computer…'));
+      } }, h('span', { html: I.download }), 'From this computer…'),
+      this.lib?.configured ? h('button', { disabled: !this.lib.writable, title: this.lib.writable ? '' : 'MediaDesk can’t write to the books folder', onclick: () => {
+        close();
+        const input = h('input', { type: 'file', accept: ACCEPT, multiple: true, onchange: () => this.addBooks([...input.files]) });
+        input.click();
+      } }, h('span', { html: I.plus }), 'Add books to the library…') : null);
     document.body.append(menu);
     setTimeout(() => document.addEventListener('pointerdown', away, true));
   }
@@ -197,24 +256,128 @@ class EbookReader {
   // --- Opening a book -------------------------------------------------------------------------
 
   async openFrom(o) {
+    const lib = this.lib || await api('library').catch(() => null);
+    this.lib = lib;
+    const tools = lib?.tools || {};
     let src;
     if (o.id) {
-      const lib = this.lib || await api('library').catch(() => null);
-      this.lib = lib;
       const b = lib?.books.find((x) => x.id === o.id);
       if (!b) { toast('That book isn’t in the library any more', { type: 'error' }); this.showLibrary(); return; }
-      src = { key: b.id, url: `/portal/ebooks/file/${b.id}`, download: `/portal/ebooks/file/${b.id}`, format: b.format, title: b.title, author: b.author, name: b.path.split('/').pop() };
+      if (!b.view) { toast('This book can’t be opened yet', { type: 'error', body: NEED_TEXT[b.need] || '' }); return; }
+      src = { key: b.id, url: `/portal/ebooks/file/${b.id}${b.as ? `?as=${b.as}` : ''}`, download: `/portal/ebooks/file/${b.id}`, format: b.format, view: b.view, title: b.title, author: b.author, name: b.path.split('/').pop() };
     } else if (o.file) {
-      const format = formatOf(o.file.name);
-      if (!format) { toast('Open an EPUB, PDF or CBZ file', { type: 'error' }); return; }
-      src = { key: `l:${o.file.name}:${o.file.size}`, data: await o.file.arrayBuffer(), format, title: o.file.name.replace(/\.[^.]+$/, ''), name: o.file.name };
+      return this.openLocal(o.file);
     } else {
       const name = o.name || o.path.split('/').pop();
       const format = formatOf(name);
-      if (!format) { toast('Open an EPUB, PDF or CBZ file', { type: 'error' }); return; }
-      src = { key: `f:${o.root}:${o.path}`, url: fileUrl(o.root, o.path, true), download: fileUrl(o.root, o.path), format, title: name.replace(/\.[^.]+$/, ''), name };
+      if (!format) { toast('That isn’t a kind of book the eBook Reader opens', { type: 'error' }); return; }
+      const v = viewOf(format, tools);
+      if (!v.view) { toast('This book can’t be opened yet', { type: 'error', body: NEED_TEXT[v.need] || '' }); return; }
+      const url = v.as ? `/portal/ebooks/shared?${new URLSearchParams({ root: o.root, path: o.path, as: v.as })}` : fileUrl(o.root, o.path, true);
+      src = { key: `f:${o.root}:${o.path}`, url, download: fileUrl(o.root, o.path), format, view: v.view, title: name.replace(/\.[^.]+$/, ''), name };
     }
     this.read(src);
+  }
+
+  // A book from this device: read here (offering to add it to the library), or, for formats the
+  // server has to convert, added to the library first or converted just for now.
+  async openLocal(file) {
+    const lib = this.lib;
+    const format = formatOf(file.name);
+    if (!format) { toast('That isn’t a kind of book the eBook Reader opens', { type: 'error', body: 'EPUB, PDF, Kindle (MOBI, AZW, AZW3), FB2, text and comic books (CBZ, CBR, CB7, CBT) open here; Word, RTF, ODT and LIT need Calibre on the server.' }); return; }
+    const v = viewOf(format, lib?.tools || {});
+    if (!v.view) { toast('This book can’t be opened yet', { type: 'error', body: NEED_TEXT[v.need] || '' }); return; }
+    const canKeep = Boolean(lib?.configured && lib.writable);
+    const base = { key: `l:${file.name}:${file.size}`, format, view: v.view, title: file.name.replace(/\.[^.]+$/, ''), name: file.name, file };
+    if (v.as) {
+      const choice = canKeep ? await ask(`Open “${base.title}”`, 'The MediaDesk server opens this kind of book. Add it to your library to keep it there and read it on any device, or just read it now.', [
+        { label: 'Cancel', value: null }, { label: 'Just read it', value: 'read' }, { label: 'Add to library and read', value: 'add', primary: true }]) : 'read';
+      if (!choice) return;
+      if (choice === 'add') {
+        const added = await this.addBooks([file], { open: true });
+        if (added) return;
+      }
+      const t = toast(`Getting ${base.title} ready…`, { timeout: 0 });
+      try {
+        const data = await upload(`/portal/ebooks/convert?${new URLSearchParams({ name: file.name, as: v.as })}`, file);
+        t?.dismiss?.();
+        this.read({ ...base, data, local: true });
+      } catch (err) { t?.dismiss?.(); toastError(err, 'This book couldn’t be opened'); }
+      return;
+    }
+    this.read({ ...base, data: await file.arrayBuffer(), local: true });
+  }
+
+  // Add books to the library (uploaded into the books folder).
+  async addBooks(files, { open = false, folder = null } = {}) {
+    const lib = this.lib;
+    if (!lib?.configured) { toast('Choose a books folder first', { body: 'In Settings → eBook Reader', type: 'error', action: { label: 'Settings', onClick: () => openApp('settings', { tab: 'ebooks' }) } }); return null; }
+    let last = null;
+    for (const file of files) {
+      const format = formatOf(file.name);
+      if (!format) { toast(`${file.name} isn’t a book the library takes`, { type: 'error' }); continue; }
+      const dest = folder ?? this.folderFor(format);
+      const t = toast(`Adding ${file.name}…`, { timeout: 0 });
+      try {
+        const r = await upload(`/portal/ebooks/upload?${new URLSearchParams({ name: file.name, folder: dest || '' })}`, file, (p) => t?.setBody?.(`${Math.round(p * 100)}%`));
+        t?.dismiss?.();
+        last = r.book;
+        toast(r.existed ? `${file.name} is already in your library` : `Added ${r.book?.title || file.name} to your library`, { type: 'success', timeout: 2500 });
+      } catch (err) { t?.dismiss?.(); toastError(err, `Couldn’t add ${file.name}`); }
+    }
+    this.lib = await api('library?refresh=1').catch(() => this.lib);
+    if (open && last) { this.openFrom({ id: last.id }); return last; }
+    if (!this.book) this.showLibrary();
+    return last;
+  }
+  // Comics go in a "Comics" folder if there is one.
+  folderFor(format) {
+    if (KIND(format) !== 'comic') return '';
+    return (this.lib?.folders || []).find((f) => /^comics?$/i.test(f.split('/').pop())) || '';
+  }
+
+  // Reading a book from this device: offer to keep it in the library.
+  offerToKeep() {
+    const lib = this.lib;
+    const src = this.src;
+    if (!src?.local || !src.file) return null;
+    if (!lib?.configured) return null;
+    if (!lib.writable) return null;
+    const folders = ['', ...(lib.folders || [])];
+    const sel = h('select', { class: 'input ebk-keep-folder', 'aria-label': 'Folder' }, folders.map((f) => h('option', { value: f, selected: f === this.folderFor(src.format) }, f ? `in ${f}` : 'in the books folder')));
+    const msg = h('span', {}, 'This book is only on this device. Add it to your library to read it anywhere and keep your place.');
+    const btn = h('button', { class: 'btn btn-primary btn-sm', onclick: async () => {
+      btn.disabled = true;
+      sel.disabled = true;
+      try {
+        const r = await upload(`/portal/ebooks/upload?${new URLSearchParams({ name: src.file.name, folder: sel.value })}`, src.file, (p) => { msg.textContent = `Adding to your library… ${Math.round(p * 100)}%`; });
+        const book = r.book;
+        // Carry the reading place over to the library copy.
+        if (book) {
+          const old = src.key;
+          Object.assign(src, { key: book.id, url: `/portal/ebooks/file/${book.id}${book.as ? `?as=${book.as}` : ''}`, download: `/portal/ebooks/file/${book.id}`, local: false, file: null });
+          this.saveState();
+          api('state', { method: 'POST', body: JSON.stringify({ key: old, forget: true }) }).catch(() => {});
+          this.lib = await api('library?refresh=1').catch(() => this.lib);
+          this.addDownload();
+        }
+        bar.classList.add('done');
+        clear(bar, h('span', {}, r.existed ? '✓ It was already in your library — your place is kept there.' : '✓ Added to your library. Your place is kept on the server.'));
+        setTimeout(() => bar.remove(), 4000);
+      } catch (err) {
+        btn.disabled = false;
+        sel.disabled = false;
+        msg.textContent = `Couldn’t add it: ${err.message}`;
+      }
+    } }, 'Add to library');
+    const bar = h('div', { class: 'ebk-keep' }, h('span', { class: 'ebk-keep-icon', html: I.download }), msg, sel, btn,
+      h('button', { class: 'ebk-tbtn small', 'aria-label': 'Not now', html: I.close, onclick: () => bar.remove() }));
+    return bar;
+  }
+  addDownload() {
+    const tools = this.reader?.querySelector('.ebk-tools');
+    if (!tools || tools.querySelector('[aria-label=Download]') || !this.src.download) return;
+    tools.append(h('a', { class: 'ebk-tbtn', title: 'Download', 'aria-label': 'Download', href: this.src.download, download: this.src.name || '', html: I.download }));
   }
 
   async read(src) {
@@ -284,7 +447,7 @@ class EbookReader {
     const bottom = h('div', { class: 'ebk-bottom' }, h('div', { class: 'ebk-slider-wrap' }, this.slider, this.sliderTip), tools);
     this.side = h('div', { class: 'ebk-side', hidden: true });
     this.strip = h('div', { class: 'ebk-strip', hidden: true });
-    clear(this.reader, top, h('div', { class: 'ebk-mid' }, this.side, h('div', { class: 'ebk-stagewrap' }, this.stage, arrowL, arrowR), ), this.strip, bottom);
+    clear(this.reader, top, this.offerToKeep(), h('div', { class: 'ebk-mid' }, this.side, h('div', { class: 'ebk-stagewrap' }, this.stage, arrowL, arrowR), ), this.strip, bottom);
     this.reader.className = `ebk-reader backdrop-${this.prefs.backdrop} paper-${this.prefs.paper}`;
 
     // The flipbook. EPUB pages are laid out for the page size it settles on.

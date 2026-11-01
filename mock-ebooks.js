@@ -175,13 +175,155 @@ ${i === 0 ? '' : `<rect x="30" y="660" width="600" height="310" rx="10" fill="#f
   return zip(pages.map((svg, i) => [`Space Cat/page${String(i + 1).padStart(2, '0')}.svg`, svg]));
 }
 
+// --- A RAR (version 4, files stored): comic books are often .cbr --------------------------------
+function rar(files) {
+  const parts = [Buffer.from([0x52, 0x61, 0x72, 0x21, 0x1a, 0x07, 0x00])];
+  const seal = (h) => { h.writeUInt16LE(crc32(h.subarray(2)) & 0xffff, 0); return h; };
+  const main = Buffer.alloc(13);
+  main[2] = 0x73; main.writeUInt16LE(13, 5);
+  parts.push(seal(main));
+  for (const [name, content] of files) {
+    const data = Buffer.from(content);
+    const nm = Buffer.from(name);
+    const h = Buffer.alloc(32 + nm.length);
+    h[2] = 0x74; h.writeUInt16LE(0x8000, 3); h.writeUInt16LE(h.length, 5);
+    h.writeUInt32LE(data.length, 7); h.writeUInt32LE(data.length, 11); h[15] = 0;
+    h.writeUInt32LE(crc32(data), 16); h.writeUInt32LE(0x5a210000, 20); h[24] = 20; h[25] = 0x30;
+    h.writeUInt16LE(nm.length, 26); h.writeUInt32LE(0x20, 28); nm.copy(h, 32);
+    parts.push(seal(h), data);
+  }
+  const end = Buffer.alloc(7);
+  end[2] = 0x7b; end.writeUInt16LE(0x4000, 3); end.writeUInt16LE(7, 5);
+  parts.push(seal(end));
+  return Buffer.concat(parts);
+}
+
+// --- A PNG (a picture for covers in formats that can't hold SVG) -------------------------------
+function png(w, h, pixel) {
+  const raw = Buffer.alloc((w * 3 + 1) * h);
+  for (let y = 0; y < h; y++) { raw[y * (w * 3 + 1)] = 0; for (let x = 0; x < w; x++) { const [r, g, b] = pixel(x, y); const o = y * (w * 3 + 1) + 1 + x * 3; raw[o] = r; raw[o + 1] = g; raw[o + 2] = b; } }
+  const chunk = (type, data) => { const len = Buffer.alloc(4); len.writeUInt32BE(data.length); const td = Buffer.concat([Buffer.from(type), data]); const c = Buffer.alloc(4); c.writeUInt32BE(crc32(td)); return Buffer.concat([len, td, c]); };
+  const ihdr = Buffer.alloc(13); ihdr.writeUInt32BE(w, 0); ihdr.writeUInt32BE(h, 4); ihdr[8] = 8; ihdr[9] = 2;
+  return Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk('IHDR', ihdr), chunk('IDAT', zlib.deflateSync(raw)), chunk('IEND', Buffer.alloc(0))]);
+}
+// A cover: a coloured gradient with stripes (a sunrise for the fable, the sea for the Kindle book).
+const coverPng = (top, bottom) => png(300, 450, (x, y) => {
+  const t = y / 450;
+  const band = Math.abs(Math.sin((y + x * 0.3) / 18)) > 0.97 ? 30 : 0;
+  return top.map((c, i) => Math.min(255, Math.round(c + (bottom[i] - c) * t) + band));
+});
+
+// --- A Kindle book (MOBI, text stored uncompressed) ----------------------------------------------
+function kindleMobi() {
+  const title = 'Tales of the Sallow Coast';
+  const author = 'Margaret Hale';
+  const story = [
+    ['The Fisherman’s Daughter', 'Every morning before the sun was up, Nell Brannock rowed her father’s blue dinghy out past the harbour wall. She knew every rock on the Sallow Coast by name, and some of them, she said, by temper.'],
+    ['The Bell in the Fog', 'When the fog came down thick as wool, the old bell on the harbour wall rang by itself. The fishermen said it was the wind. The children said it was the ghost of the first harbour master, who had never once been late for anything.'],
+    ['The Lighthouse Cat', 'Pilot had one eye, three and a half lives left, and an opinion about everything. He did not care for boats, gulls, rain, or the new grey machine in the lamp room, which hummed at him in a way he found disrespectful.'],
+  ];
+  const para = (t) => Array.from({ length: 9 }, (_, i) => `<p>${i === 0 ? t : `${t.split('. ')[1] || t} The tide turned, as tides do, and the village went on about its business.`}</p>`).join('');
+  let html = `<html><head><guide><reference type="toc" title="Contents" filepos=TOCPOS /></guide></head><body>`;
+  html += `<h1 align="center">${title}</h1><p align="center"><i>${author}</i></p><mbp:pagebreak/>`;
+  html += `<a name="toc"></a><h2>Contents</h2>${story.map((s, i) => `<p><a filepos=CH${i}POS>${i + 1}. ${s[0]}</a></p>`).join('')}<mbp:pagebreak/>`;
+  story.forEach(([t, body], i) => { html += `<h2>CHAPTERMARK${i}${t}</h2>${para(body)}${i === 1 ? '<p align="center"><img recindex="00002" /></p>' : ''}<mbp:pagebreak/>`; });
+  html += '</body></html>';
+  // Positions of the chapters (filepos is a byte offset in the text).
+  const pad = (n) => String(n).padStart(10, '0');
+  for (let pass = 0; pass < 2; pass++) {
+    let bytes = Buffer.from(html.replace(/CHAPTERMARK\d/g, ''), 'utf8').toString('latin1');
+    story.forEach((_, i) => {
+      const at = Buffer.from(html.slice(0, html.indexOf(`<h2>CHAPTERMARK${i}`)).replace(/CHAPTERMARK\d/g, ''), 'utf8').length;
+      html = html.replace(new RegExp(`filepos=(CH${i}POS|\\d{10})(?= *>${i + 1}\\.)`), `filepos=${pad(at)}`);
+    });
+    const tocAt = Buffer.from(html.slice(0, html.indexOf('<a name="toc">')).replace(/CHAPTERMARK\d/g, ''), 'utf8').length;
+    html = html.replace(/filepos=(TOCPOS|\d{10}) \/>/, `filepos=${pad(tocAt)} />`);
+    void bytes;
+  }
+  const text = Buffer.from(html.replace(/CHAPTERMARK\d/g, ''), 'utf8');
+  const textRecs = [];
+  for (let o = 0; o < text.length; o += 4096) textRecs.push(text.subarray(o, o + 4096));
+  const images = [coverPng([20, 60, 110], [120, 190, 220]), coverPng([240, 200, 120], [200, 90, 40])];
+  // Record 0: PalmDOC header, MOBI header, EXTH (author, title, cover), the full name.
+  const nameBuf = Buffer.from(title);
+  const exthRecs = [[100, Buffer.from(author)], [503, Buffer.from(title)], [201, (() => { const b = Buffer.alloc(4); b.writeUInt32BE(0); return b; })()]];
+  const exthBody = Buffer.concat(exthRecs.map(([t, d]) => { const h = Buffer.alloc(8); h.writeUInt32BE(t, 0); h.writeUInt32BE(d.length + 8, 4); return Buffer.concat([h, d]); }));
+  const exthHead = Buffer.alloc(12); exthHead.write('EXTH', 0, 'latin1'); exthHead.writeUInt32BE(12 + exthBody.length, 4); exthHead.writeUInt32BE(exthRecs.length, 8);
+  const exthPad = Buffer.alloc((4 - ((12 + exthBody.length) % 4)) % 4);
+  const mobiLen = 232;
+  const r0 = Buffer.alloc(16 + mobiLen);
+  r0.writeUInt16BE(1, 0); r0.writeUInt32BE(text.length, 4); r0.writeUInt16BE(textRecs.length, 8); r0.writeUInt16BE(4096, 10);
+  r0.write('MOBI', 16, 'latin1'); r0.writeUInt32BE(mobiLen, 20); r0.writeUInt32BE(2, 24); r0.writeUInt32BE(65001, 28); r0.writeUInt32BE(12345, 32); r0.writeUInt32BE(6, 36);
+  for (let o = 40; o < 80; o += 4) r0.writeUInt32BE(0xffffffff, o);
+  const firstImage = 1 + textRecs.length;
+  r0.writeUInt32BE(firstImage, 80);
+  const nameOff = 16 + mobiLen + exthHead.length + exthBody.length + exthPad.length;
+  r0.writeUInt32BE(nameOff, 84); r0.writeUInt32BE(nameBuf.length, 88); r0.writeUInt32BE(9, 92);
+  r0.writeUInt32BE(6, 104); r0.writeUInt32BE(firstImage, 108); r0.writeUInt32BE(0x40, 128);
+  r0.writeUInt32BE(0xffffffff, 192); r0.writeUInt16BE(0, 242);
+  const rec0 = Buffer.concat([r0, exthHead, exthBody, exthPad, nameBuf, Buffer.alloc(4)]);
+  const eof = Buffer.from([0xe9, 0x8e, 0x0d, 0x0a]);
+  const records = [rec0, ...textRecs, ...images, eof];
+  const head = Buffer.alloc(78);
+  head.write('Tales_of_the_Sallow_Coast', 0, 'latin1'); head.write('BOOK', 60, 'latin1'); head.write('MOBI', 64, 'latin1'); head.writeUInt16BE(records.length, 76);
+  const list = Buffer.alloc(records.length * 8 + 2);
+  let off = 78 + list.length;
+  records.forEach((r, i) => { list.writeUInt32BE(off, i * 8); list.writeUInt32BE(i * 2, i * 8 + 4); off += r.length; });
+  return Buffer.concat([head, list, ...records]);
+}
+
+// --- A FictionBook (FB2) ------------------------------------------------------------------------
+function fableFb2() {
+  const cover = coverPng([250, 210, 140], [210, 90, 70]).toString('base64');
+  const sec = (title, paras, extra = '') => `<section><title><p>${title}</p></title>${paras.map((t) => `<p>${t}</p>`).join('')}${extra}</section>`;
+  return `<?xml version="1.0" encoding="utf-8"?>
+<FictionBook xmlns="http://www.gribuser.ru/xml/fictionbook/2.0" xmlns:l="http://www.w3.org/1999/xlink">
+<description><title-info><genre>fable</genre><author><first-name>Aesop</first-name><last-name>Retold</last-name></author><book-title>Three Small Fables</book-title>
+<annotation><p>Old stories, newly told. A demo book made by MediaDesk.</p></annotation><coverpage><image l:href="#cover.png"/></coverpage><lang>en</lang></title-info></description>
+<body><title><p>Three Small Fables</p></title><epigraph><p>Slow and steady wins the race.</p></epigraph>
+${sec('The Hare and the Tortoise', ['A hare once laughed at a tortoise for being slow.<a l:href="#n1" type="note">[1]</a> “Let us race,” said the tortoise, “and we shall see.”', 'The hare ran far ahead, then lay down under a tree and fell asleep. The tortoise plodded on, step after step, and never stopped.', 'When the hare woke, the tortoise was already at the finish, and all the animals were cheering. <emphasis>Slow and steady</emphasis>, they said, <strong>wins the race</strong>.'])}
+${sec('The Crow and the Pitcher', ['A thirsty crow found a pitcher with a little water at the bottom, too low for her beak to reach.', 'One by one she dropped pebbles into the pitcher, and one by one the water rose, until at last she could drink.'], '<poem><stanza><v>Little by little,</v><v>stone after stone,</v><v>the clever crow</v><v>drank on her own.</v></stanza></poem>')}
+${sec('The Lion and the Mouse', ['A lion caught a mouse, and laughed when the mouse promised to repay him if he let her go. But he let her go.', 'Weeks later the lion was caught in a hunter’s net. The mouse heard him roar, came running, and gnawed through the ropes until he was free.', 'No act of kindness, however small, is ever wasted.'])}
+</body>
+<body name="notes"><section id="n1"><title><p>1</p></title><p>Hares can run at more than forty miles an hour. Tortoises cannot.</p></section></body>
+<binary id="cover.png" content-type="image/png">${cover}</binary>
+</FictionBook>`;
+}
+
+// --- Plain text ---------------------------------------------------------------------------------
+function plainText() {
+  const chap = (n, t, paras) => `CHAPTER ${n}\n${t}\n\n${paras.join('\n\n')}\n\n`;
+  return `A GUIDE TO THE NIGHT SKY\nBy MediaDesk\n\nA demo book in plain text.\n\n\n${chap('I', 'The Moon', [
+    'The Moon is the easiest thing to find in the night sky, and the best place to start. Even a small pair of binoculars shows its craters, mountains and the dark, flat plains that early astronomers thought were seas.',
+    'Look along the line between light and dark, called the terminator. There the shadows are longest, and the craters stand out most sharply.',
+  ])}${chap('II', 'The Planets', [
+    'Planets do not twinkle the way stars do. Venus is the brightest, low in the west after sunset or in the east before dawn. Jupiter is next, and binoculars show its four largest moons as tiny points of light in a line.',
+    'Saturn looks like a steady yellowish star; a small telescope shows its rings. Mars is unmistakably orange-red.',
+  ])}${chap('III', 'Constellations', [
+    'Start with the Plough, seven bright stars shaped like a saucepan. The two stars at the end of the pan point to Polaris, the North Star, which barely moves all night.',
+    'In winter, look for Orion: three stars in a row for his belt, with bright red Betelgeuse at one shoulder and blue-white Rigel at one foot.',
+  ])}`;
+}
+
 function createSample() {
   const dir = path.join(os.tmpdir(), 'mediadesk-demo-books');
   fs.mkdirSync(path.join(dir, 'Comics'), { recursive: true });
   fs.writeFileSync(path.join(dir, 'The Lighthouse Keeper.epub'), storyEpub());
   fs.writeFileSync(path.join(dir, 'The Kitchen Garden - MediaDesk.pdf'), gardenPdf());
   fs.writeFileSync(path.join(dir, 'Comics', 'Space Cat.cbz'), comicCbz());
+  // The same comic as a RAR (.cbr), and books in other formats.
+  const cat = zipFilesOf(comicCbz());
+  fs.writeFileSync(path.join(dir, 'Comics', 'Space Cat Returns.cbr'), rar(cat.map(([n, d]) => [n.replace('Space Cat/', 'Returns/'), d])));
+  fs.writeFileSync(path.join(dir, 'Tales of the Sallow Coast.mobi'), kindleMobi());
+  fs.writeFileSync(path.join(dir, 'Three Small Fables.fb2'), fableFb2());
+  fs.writeFileSync(path.join(dir, 'A Guide to the Night Sky.txt'), plainText());
   return { dir };
 }
 
-module.exports = { createSample, zip, storyEpub, gardenPdf, comicCbz };
+// The files in one of our own zips (back out again).
+function zipFilesOf(buf) {
+  const { zipEntries, zipRead } = require('./ebooks');
+  return [...zipEntries(buf).values()].map((e) => [e.name, zipRead(buf, e)]);
+}
+
+module.exports = { createSample, zip, rar, storyEpub, gardenPdf, comicCbz, kindleMobi, fableFb2, plainText };

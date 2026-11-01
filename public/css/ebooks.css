@@ -219,7 +219,7 @@
 .ebk-flow pre { white-space: pre-wrap; font-size: .85em; }
 .ebk-flow hr { border: 0; text-align: center; margin: 1em 0; }
 .ebk-flow hr::after { content: '❧'; opacity: .6; }
-.ebk-flow .drop::first-letter, .ebk-flow h1 + p::first-letter { float: left; font-size: 3.1em; line-height: .85; padding: .06em .08em 0 0; }
+.ebk-flow .drop::first-letter, .ebk-flow p.ebk-drop::first-letter { float: left; font-size: 3.1em; line-height: .85; padding: .06em .08em 0 0; }
 .ebk-pdfpage { background: #fff; display: flex; align-items: center; justify-content: center; }
 .ebk-pdfcanvas { width: 100%; height: 100%; display: block; opacity: 0; transition: opacity .2s; }
 .ebk-pdfpage.ready .ebk-pdfcanvas { opacity: 1; }
@@ -237,3 +237,22 @@
   .ebk-top-title span { display: none; }
   .ebk-tools { justify-content: flex-start; }
 }
+/* More formats, adding books */
+.ebk-badge.book { background: #2b8a3e; }
+.ebk-badge.comic { background: #7048e8; }
+.ebk-badge.f-mobi, .ebk-badge.f-azw3 { background: #e67700; }
+.ebk-badge.f-fb2 { background: #1971c2; }
+.ebk-badge.f-txt { background: #495057; }
+.ebk-badge.f-docx, .ebk-badge.f-rtf, .ebk-badge.f-odt { background: #364fc7; }
+.ebk-lib { position: relative; }
+.ebk-lib.dropping::after { content: 'Drop books to add them to your library'; position: absolute; inset: 10px; border: 3px dashed var(--accent); border-radius: 16px; background: color-mix(in srgb, var(--accent) 10%, var(--bg)); display: grid; place-items: center; font-size: 18px; font-weight: 600; color: var(--accent); z-index: 20; pointer-events: none; }
+.ebk-keep { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 8px 14px; background: rgba(255, 216, 168, .16); border-bottom: 1px solid rgba(255, 216, 168, .25); font-size: 13.5px; z-index: 4; }
+.backdrop-light .ebk-keep { background: rgba(255, 196, 120, .25); }
+.ebk-keep > span:nth-child(2) { flex: 1 1 260px; }
+.ebk-keep-icon { width: 20px; height: 20px; flex: none; transform: rotate(180deg); }
+.ebk-keep-icon svg { width: 100%; height: 100%; }
+.ebk-keep-folder { width: auto; max-width: 200px; height: 32px; padding: 0 8px; }
+.ebk-keep.done { background: rgba(64, 192, 87, .18); border-color: rgba(64, 192, 87, .3); }
+.ebk-ask { max-width: 460px; }
+.ebk-cont-cover .ebk-madecover { font-size: 4.6px; gap: 3px; padding: 10% 8%; }
+.ebk-cont-cover .ebk-madecover-title { border-width: 1px; }

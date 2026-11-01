@@ -8,7 +8,7 @@ services:
     volumes:
       - ./config:/config
       # - /mnt/games:/games      # The Game Console: its root folder (then set GAMES_DIR below); writable, for saves
-      # - /mnt/books:/books:ro   # eBook Reader: your EPUB, PDF and CBZ books (then set EBOOKS_DIR below)
+      # - /mnt/books:/books      # eBook Reader: your books (then set EBOOKS_DIR below); writable to add books from devices
       # Folders for the Files app: mount them here, then add the container path (e.g. /media) in Settings > Files.
       # - /mnt/media:/media
     environment:

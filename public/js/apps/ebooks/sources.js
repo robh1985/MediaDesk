@@ -94,6 +94,16 @@ export function madeCover(title, author, big = true) {
     h('div', { class: 'ebk-madecover-title' }, title || 'Untitled'), author ? h('div', { class: 'ebk-madecover-author' }, author) : null);
 }
 
+// A drop cap on a chapter's opening paragraph (a real paragraph after its heading, not a title
+// page's author line).
+function dropCap(node) {
+  const head = node.querySelector('h1, h2');
+  if (!head || node.querySelector('.drop')) return;
+  let p = head.nextElementSibling;
+  while (p && p.localName !== 'p') { if (p.textContent.trim()) return; p = p.nextElementSibling; }
+  if (p && p.textContent.trim().length > 140 && !p.style.textAlign && /^[A-Za-z“"‘']/.test(p.textContent.trim())) p.classList.add('ebk-drop');
+}
+
 // --- EPUB ----------------------------------------------------------------------------------------
 
 const BLOCK = new Set(['p', 'div', 'section', 'article', 'aside', 'header', 'footer', 'main', 'nav', 'blockquote', 'ul', 'ol', 'li', 'dl', 'dt', 'dd', 'table', 'thead', 'tbody', 'tfoot', 'tr', 'td', 'th', 'caption', 'figure', 'figcaption', 'pre', 'hr', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6']);
@@ -148,6 +158,7 @@ class EpubBook {
       const hEl = node.querySelector('h1, h2, h3')?.cloneNode(true);
       hEl?.querySelectorAll('br').forEach((br) => br.replaceWith(' · '));
       const heading = hEl?.textContent.trim() || '';
+      dropCap(node);
       this.chapters.push({ href: item.href, node, title: heading.replace(/\s+/g, ' ').slice(0, 80) });
       onProgress?.(0.6 + 0.35 * (n / spine.length));
     }
@@ -205,6 +216,12 @@ class EpubBook {
     return url;
   }
 
+  // A picture in the book (an <img> in a chapter at `base`), as a blob: address.
+  async imageUrl(node, base) {
+    const src = node.getAttribute('src');
+    return src ? this.blobUrl(resolvePath(base, safeDecode(src))) : null;
+  }
+
   // Copy the allowed parts of a chapter's XHTML.
   async clean(from, into, base) {
     for (const node of [...from.childNodes]) {
@@ -223,8 +240,7 @@ class EpubBook {
       if (!BLOCK.has(tag) && !INLINE.has(tag)) { await this.clean(node, into, base); continue; }
       const el = document.createElement(tag);
       if (tag === 'img') {
-        const src = node.getAttribute('src');
-        const url = src ? await this.blobUrl(resolvePath(base, safeDecode(src))) : null;
+        const url = await this.imageUrl(node, base);
         if (!url) continue;
         el.src = url;
         el.alt = node.getAttribute('alt') || '';
@@ -529,9 +545,280 @@ class ComicBook {
   destroy() { for (const u of this.urls.values()) URL.revokeObjectURL(u); }
 }
 
+// --- Other reflowing books: they become chapters of cleaned HTML, laid out like an EPUB -----------
+
+const imageType = (b) => (b[0] === 0xff && b[1] === 0xd8 ? 'image/jpeg' : b[0] === 0x89 && b[1] === 0x50 ? 'image/png' : b[0] === 0x47 && b[1] === 0x49 ? 'image/gif' : b[0] === 0x52 && b[8] === 0x57 ? 'image/webp' : b[0] === 0x42 && b[1] === 0x4d ? 'image/bmp' : null);
+const decodeText = (bytes, enc) => { try { return new TextDecoder(enc || 'utf-8', { fatal: !enc }).decode(bytes); } catch { return new TextDecoder('windows-1252').decode(bytes); } };
+
+class HtmlBook extends EpubBook {
+  // Chapters from HTML strings: [{ html, base }]; cleaned exactly like EPUB chapters.
+  async addChapters(parts, onProgress) {
+    this.chapters = [];
+    for (let n = 0; n < parts.length; n++) {
+      const doc = new DOMParser().parseFromString(`<!doctype html><body>${parts[n].html}</body>`, 'text/html');
+      const node = h('div', { class: 'ebk-chapter' });
+      await this.clean(doc.body, node, parts[n].base);
+      if (!node.textContent.trim() && !node.querySelector('img')) continue;
+      dropCap(node);
+      const hEl = node.querySelector('h1, h2, h3')?.cloneNode(true);
+      hEl?.querySelectorAll('br').forEach((br) => br.replaceWith(' · '));
+      this.chapters.push({ href: `${parts[n].base}@${n}`, node, title: (hEl?.textContent.trim() || '').replace(/\s+/g, ' ').slice(0, 80) });
+      onProgress?.(0.5 + 0.45 * (n / parts.length));
+    }
+    if (!this.chapters.length) throw new Error('This book has no readable text');
+    // Contents: the chapters' headings (a book's own contents page and its links work too).
+    this.tocEntries = this.chapters.filter((c) => c.title).map((c) => ({ label: c.title, href: c.href, level: 0 }));
+  }
+  blobFrom(bytes, type) {
+    const url = URL.createObjectURL(new Blob([bytes], { type }));
+    this.urls.push(url);
+    return url;
+  }
+}
+
+// Kindle MOBI / AZW (and the MOBI copy inside most AZW3 files): a Palm database of compressed
+// text records (HTML), with pictures in records of their own.
+class MobiBook extends HtmlBook {
+  async load(onProgress) {
+    const buf = new Uint8Array(await fetchBytes(this.src, (p) => onProgress?.(p * 0.4)));
+    const dv = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
+    const latin = (a, b) => String.fromCharCode(...buf.subarray(a, b));
+    if (buf.length < 78 || latin(60, 68) !== 'BOOKMOBI') throw new Error(latin(60, 68) === 'TEXtREAd' ? 'This is a plain Palm document, not a Kindle book' : 'This isn’t a Kindle book');
+    const n = dv.getUint16(76);
+    const offs = Array.from({ length: n }, (_, i) => dv.getUint32(78 + i * 8));
+    const rec = (i) => (i < n ? buf.subarray(offs[i], i + 1 < n ? offs[i + 1] : buf.length) : null);
+    const r0 = offs[0];
+    const compression = dv.getUint16(r0);
+    const textRecords = dv.getUint16(r0 + 8);
+    if (dv.getUint16(r0 + 12)) throw new Error('This Kindle book has DRM, so it can only be read in Amazon’s Kindle apps');
+    if (compression === 17480) throw new Error('This Kindle book uses a kind of compression MediaDesk can’t read. With Calibre on the server it can be converted.');
+    const hlen = dv.getUint32(r0 + 20);
+    const encoding = dv.getUint32(r0 + 28) === 65001 ? 'utf-8' : 'windows-1252';
+    const firstImage = dv.getUint32(r0 + 108);
+    const extraFlags = hlen >= 0xe4 ? dv.getUint16(r0 + 242) : 0;
+    // Title, author and cover from EXTH.
+    let title = new TextDecoder(encoding).decode(buf.subarray(r0 + dv.getUint32(r0 + 84), r0 + dv.getUint32(r0 + 84) + dv.getUint32(r0 + 88))).trim();
+    const authors = [];
+    let cover = null;
+    if (dv.getUint32(r0 + 128) & 0x40) {
+      let p = r0 + 16 + hlen;
+      if (latin(p, p + 4) === 'EXTH') {
+        const count = dv.getUint32(p + 8);
+        p += 12;
+        for (let i = 0; i < count && p + 8 <= buf.length; i++) {
+          const type = dv.getUint32(p);
+          const len = dv.getUint32(p + 4);
+          const data = buf.subarray(p + 8, p + len);
+          if (type === 100) authors.push(new TextDecoder(encoding).decode(data).trim());
+          if (type === 503) title = new TextDecoder(encoding).decode(data).trim() || title;
+          if (type === 201 && data.length >= 4) cover = new DataView(data.buffer, data.byteOffset, 4).getUint32(0);
+          p += Math.max(8, len);
+        }
+      }
+    }
+    this.title = title || this.src.title || 'Untitled';
+    this.author = authors.join(', ') || this.src.author || '';
+    // The text: each record without its trailing entries, decompressed.
+    const trailing = (d) => {
+      let size = d.length;
+      let num = 0;
+      for (let f = extraFlags >> 1; f; f >>= 1) {
+        if (!(f & 1)) continue;
+        let bit = 0;
+        let res = 0;
+        let ps = size - num;
+        for (;;) { const v = d[ps - 1]; res |= (v & 0x7f) << bit; bit += 7; ps--; if ((v & 0x80) || bit >= 28 || ps === 0) break; }
+        num += res;
+      }
+      if (extraFlags & 1) num += (d[size - num - 1] & 3) + 1;
+      return size - num;
+    };
+    const chunks = [];
+    for (let i = 1; i <= textRecords; i++) {
+      const d = rec(i);
+      if (!d) break;
+      const body = d.subarray(0, trailing(d));
+      chunks.push(compression === 2 ? palmdoc(body) : body);
+    }
+    let total = 0;
+    for (const c of chunks) total += c.length;
+    let text = new Uint8Array(total);
+    let o = 0;
+    for (const c of chunks) { text.set(c, o); o += c.length; }
+    onProgress?.(0.5);
+    // Links point at byte positions in the text: mark those places so they can be found.
+    let raw = '';
+    for (let i = 0; i < text.length; i += 8192) raw += String.fromCharCode(...text.subarray(i, i + 8192));
+    const targets = [...new Set([...raw.matchAll(/filepos\s*=\s*["']?0*(\d+)/gi)].map((m) => Number(m[1])))].filter((x) => x < raw.length).sort((a, b) => b - a);
+    for (const t of targets) raw = `${raw.slice(0, t)}<a id="fp${t}"></a>${raw.slice(t)}`;
+    raw = raw.replace(/<a([^>]*?)\sfilepos\s*=\s*["']?0*(\d+)["']?/gi, '<a$1 href="#fp$2"');
+    text = Uint8Array.from(raw, (c) => c.charCodeAt(0));
+    let html = new TextDecoder(encoding).decode(text);
+    html = html.replace(/^[\s\S]*?<body[^>]*>/i, '').replace(/<\/body>[\s\S]*$/i, '');
+    // Pictures: <img recindex="00012"> (MOBI) or src="kindle:embed:000C" (KF8).
+    this.records = { rec, firstImage };
+    if (cover != null && firstImage < 0xffffffff) {
+      const c = rec(firstImage + cover);
+      const type = c && imageType(c);
+      this.coverUrl = type ? this.blobFrom(c, type) : null;
+    }
+    // Each page break starts a new chapter.
+    const parts = html.split(/<mbp:pagebreak\s*\/?>/i).map((x) => ({ html: x, base: 'mobi' }));
+    await this.addChapters(parts, onProgress);
+    onProgress?.(1);
+  }
+  async imageUrl(node) {
+    const { rec, firstImage } = this.records;
+    let idx = node.getAttribute('recindex');
+    const src = node.getAttribute('src') || '';
+    const kf8 = /kindle:embed:([0-9a-v]+)/i.exec(src);
+    if (kf8) idx = parseInt(kf8[1], 32);
+    if (idx == null || firstImage >= 0xffffffff) return null;
+    const d = rec(firstImage + Number(idx) - 1);
+    const type = d && imageType(d);
+    return type ? this.blobFrom(d, type) : null;
+  }
+}
+
+// PalmDOC compression (LZ77 with a few byte codes).
+function palmdoc(d) {
+  const out = new Uint8Array(d.length * 8 + 16);
+  let o = 0;
+  for (let i = 0; i < d.length;) {
+    const c = d[i++];
+    if (c >= 1 && c <= 8) { for (let k = 0; k < c && i < d.length; k++) out[o++] = d[i++]; } else if (c < 0x80) out[o++] = c;
+    else if (c >= 0xc0) { out[o++] = 32; out[o++] = c ^ 0x80; } else {
+      const c2 = d[i++];
+      const v = (c << 8) | c2;
+      const dist = (v >> 3) & 0x7ff;
+      const len = (v & 7) + 3;
+      for (let k = 0; k < len; k++) { out[o] = out[o - dist]; o++; }
+    }
+  }
+  return out.subarray(0, o);
+}
+
+// FictionBook (FB2): XML. Its sections become chapters; pictures are inside it, base64.
+const FB2_TAGS = { p: 'p', emphasis: 'em', strong: 'strong', strikethrough: 's', sub: 'sub', sup: 'sup', code: 'code', subtitle: 'h4', 'text-author': 'p', v: 'p', stanza: 'div', poem: 'blockquote', cite: 'blockquote', epigraph: 'blockquote', table: 'table', tr: 'tr', td: 'td', th: 'th' };
+class Fb2Book extends HtmlBook {
+  async load(onProgress) {
+    const bytes = new Uint8Array(await fetchBytes(this.src, (p) => onProgress?.(p * 0.4)));
+    const head = new TextDecoder('latin1').decode(bytes.subarray(0, 300));
+    const enc = /encoding=["']([^"']+)/i.exec(head)?.[1];
+    const xml = new DOMParser().parseFromString(decodeText(bytes, enc), 'application/xml');
+    if (xml.querySelector('parsererror') || xml.documentElement.localName !== 'FictionBook') throw new Error('This isn’t a FictionBook (FB2) file');
+    const first = (root, name) => root?.getElementsByTagNameNS('*', name)[0] || null;
+    const info = first(xml, 'title-info');
+    this.title = first(info, 'book-title')?.textContent.trim() || this.src.title || 'Untitled';
+    this.author = [...(info?.getElementsByTagNameNS('*', 'author') || [])].map((a) => ['first-name', 'middle-name', 'last-name'].map((t) => first(a, t)?.textContent.trim()).filter(Boolean).join(' ')).filter(Boolean).join(', ') || this.src.author || '';
+    this.binaries = new Map([...xml.getElementsByTagNameNS('*', 'binary')].map((b) => [b.getAttribute('id'), b]));
+    const href = (el) => (el.getAttributeNS('http://www.w3.org/1999/xlink', 'href') || el.getAttribute('l:href') || el.getAttribute('xlink:href') || el.getAttribute('href') || '');
+    const coverImg = first(first(info, 'coverpage'), 'image');
+    if (coverImg) this.coverUrl = this.binary(href(coverImg).replace(/^#/, ''));
+    const esc = (t) => t.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+    const toHtml = (node, depth) => [...node.childNodes].map((c) => {
+      if (c.nodeType === 3) return esc(c.nodeValue);
+      if (c.nodeType !== 1) return '';
+      const tag = c.localName;
+      const id = c.getAttribute('id') ? ` id="${esc(c.getAttribute('id'))}"` : '';
+      if (tag === 'section') return `<section${id}>${toHtml(c, depth + 1)}</section>`;
+      if (tag === 'title') return `<h${Math.min(5, depth + 1)}${id}>${[...c.children].map((x) => toHtml(x, depth)).join('<br>')}</h${Math.min(5, depth + 1)}>`;
+      if (tag === 'image') return `<img src="${esc(href(c))}" alt=""${id}>`;
+      if (tag === 'a') return `<a href="${esc(href(c))}"${id}>${toHtml(c, depth)}</a>`;
+      if (tag === 'empty-line') return '<br>';
+      const t = FB2_TAGS[tag];
+      return t ? `<${t}${id}${tag === 'text-author' ? ' style="text-align:right;font-style:italic"' : ''}>${toHtml(c, depth)}</${t}>` : toHtml(c, depth);
+    }).join('');
+    const parts = [];
+    const bodies = [...xml.documentElement.children].filter((c) => c.localName === 'body');
+    for (const body of bodies) {
+      const notes = /notes|comments/i.test(body.getAttribute('name') || '');
+      if (notes) { parts.push({ html: `<h2>Notes</h2>${toHtml(body, 1)}`, base: 'fb2' }); continue; }
+      // The body's title and epigraph, then each top-level section on its own.
+      let lead = '';
+      for (const c of body.children) {
+        if (c.localName === 'section') { if (lead) { parts.push({ html: lead, base: 'fb2' }); lead = ''; } parts.push({ html: toHtml({ childNodes: [c] }, 0), base: 'fb2' }); } else if (c.localName === 'title') lead += `<h1>${[...c.children].map((x) => toHtml(x, 0)).join('<br>')}</h1>`;
+        else lead += toHtml({ childNodes: [c] }, 0);
+      }
+      if (lead) parts.push({ html: lead, base: 'fb2' });
+    }
+    await this.addChapters(parts, onProgress);
+    onProgress?.(1);
+  }
+  binary(id) {
+    const b = this.binaries.get(id);
+    if (!b) return null;
+    try {
+      const bytes = Uint8Array.from(atob(b.textContent.replace(/\s+/g, '')), (c) => c.charCodeAt(0));
+      return this.blobFrom(bytes, imageType(bytes) || b.getAttribute('content-type') || 'image/jpeg');
+    } catch { return null; }
+  }
+  async imageUrl(node) { return this.binary((node.getAttribute('src') || '').replace(/^#/, '')); }
+}
+
+// Plain text: paragraphs from blank lines, chapters from "Chapter …" headings.
+const CHAPTER_LINE = /^\s*((chapter|book|part|section|canto|letter)\s+([0-9]+|[ivxlcdm]+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|[a-z]+teen|twenty[\w-]*|thirty[\w-]*)\b.{0,60}|prologue|epilogue|introduction|preface|foreword|afterword|appendix.{0,40})\s*$/i;
+class TextBook extends HtmlBook {
+  async load(onProgress) {
+    const bytes = new Uint8Array(await fetchBytes(this.src, (p) => onProgress?.(p * 0.5)));
+    let text = decodeText(bytes).replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n');
+    this.title = this.src.title || 'Untitled';
+    this.author = this.src.author || '';
+    const blank = /\n[ \t]*\n/.test(text);
+    const rawParas = (blank ? text.split(/\n[ \t]*\n+/) : text.split('\n'));
+    // A short first line on its own is the title ("A GUIDE TO THE NIGHT SKY" / "By …").
+    let lead = '';
+    if (blank && rawParas[0] && rawParas[0].includes('\n') && rawParas[0].split('\n')[0].trim().length < 80) {
+      const [first, ...rest] = rawParas[0].split('\n');
+      rawParas[0] = first;
+      lead = rest.join(' ').trim();
+    }
+    const paras = rawParas.map((p) => p.replace(/\s*\n\s*/g, ' ').trim()).filter(Boolean);
+    const esc = (t) => t.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+    const heads = paras.map((p, i) => (CHAPTER_LINE.test(p) || (blank && /^CHAPTER\b/.test(p)) ? i : -1)).filter((i) => i >= 0);
+    const parts = [];
+    let cur = '';
+    let count = 0;
+    const flush = () => { if (cur) parts.push({ html: cur, base: 'txt' }); cur = ''; count = 0; };
+    paras.forEach((p, i) => {
+      const lines = p.split(/(?<=[^.!?,;:])\s{2,}/);
+      if (heads.length >= 2 && heads.includes(i)) {
+        flush();
+        // "CHAPTER I The Moon": a chapter line, with a short title line after it.
+        const m = /^(\s*(?:chapter|book|part|section)\s+\S+)\s+(.{1,80})$/i.exec(p);
+        cur += m ? `<h2>${esc(m[1])}<br>${esc(m[2])}</h2>` : `<h2>${esc(p)}</h2>`;
+        return;
+      }
+      if (i === 0 && p.length < 80 && !/[.!?]$/.test(p)) { cur += `<h1>${esc(p)}</h1>${lead ? `<p style="text-align:center"><i>${esc(lead)}</i></p>` : ''}`; return; }
+      cur += `<p>${esc(lines.join(' '))}</p>`;
+      // Long stretches without chapters still break up, so pages lay out quickly.
+      if (++count >= 160 && heads.length < 2) flush();
+    });
+    flush();
+    await this.addChapters(parts, onProgress);
+    onProgress?.(1);
+  }
+}
+
 export function bookFor(src) {
-  if (src.format === 'pdf') return new PdfBook(src);
-  if (src.format === 'cbz') return new ComicBook(src);
+  const view = src.view || src.format;
+  if (view === 'pdf') return new PdfBook(src);
+  if (view === 'cbz') return new ComicBook(src);
+  if (view === 'mobi') return new MobiBook(src);
+  if (view === 'fb2') return new Fb2Book(src);
+  if (view === 'txt') return new TextBook(src);
   return new EpubBook(src);
 }
-export const formatOf = (name) => ({ epub: 'epub', pdf: 'pdf', cbz: 'cbz' })[String(name).split('.').pop().toLowerCase()] || null;
+
+// Every kind of file the reader takes, and the format it is (as the server sees it).
+export const FORMATS = { epub: 'epub', pdf: 'pdf', cbz: 'cbz', cbr: 'cbr', cb7: 'cb7', cbt: 'cbt', mobi: 'mobi', azw: 'mobi', prc: 'mobi', azw3: 'azw3', fb2: 'fb2', txt: 'txt', rtf: 'rtf', docx: 'docx', odt: 'odt', lit: 'lit' };
+export const formatOf = (name) => FORMATS[String(name).split('.').pop().toLowerCase()] || null;
+// How a format is read: here as it is, or after the server converts it (as), or not without a tool.
+export function viewOf(format, tools = {}) {
+  if (['epub', 'pdf', 'cbz', 'mobi', 'fb2', 'txt'].includes(format)) return { view: format };
+  if (['cbr', 'cb7', 'cbt'].includes(format)) return tools.sevenZip ? { view: 'cbz', as: 'cbz' } : { view: null, need: '7-Zip' };
+  if (format === 'azw3') return tools.calibre ? { view: 'epub', as: 'epub' } : { view: 'mobi' };
+  if (['rtf', 'docx', 'odt', 'lit'].includes(format)) return tools.calibre ? { view: 'epub', as: 'epub' } : { view: null, need: 'Calibre' };
+  return { view: null };
+}
+export const ACCEPT = Object.keys(FORMATS).map((x) => `.${x}`).join(',');

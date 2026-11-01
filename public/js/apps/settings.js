@@ -422,13 +422,24 @@ function renderEbooks(container) {
   if (cfg.mock) container.append(h('div', { class: 'notice' }, 'Demo mode: the eBook Reader shows a few small books MediaDesk makes itself, and the folder can’t be changed.'));
   container.append(
     section('Books folder',
-      h('p', { class: 'muted small' }, 'The folder with your eBooks on the computer running MediaDesk, as a full path. EPUB books, PDFs and comic books (.cbz) in it and its subfolders appear in the library, with their covers. Where you’re up to in each book is kept by MediaDesk, so a book opens at the same page on any device. Books in shared folders can also be opened from Files.'),
+      h('p', { class: 'muted small' }, 'The folder with your eBooks on the computer running MediaDesk, as a full path. Books in it and its subfolders appear in the library, with their covers: EPUB, PDF, Kindle (MOBI, AZW, AZW3), FictionBook (FB2), plain text and comic books (CBZ, CBR, CB7, CBT). Books opened from a device can be added to it. Where you’re up to in each book is kept by MediaDesk, so a book opens at the same page on any device. Books in shared folders can also be opened from Files.'),
       h('label', { class: 'field' }, h('span', {}, 'Folder'), input),
       status,
       h('div', { class: 'btn-row' }, save, h('button', { class: 'btn', onclick: () => import('../wm.js').then((wm) => wm.openApp('ebooks')) }, h('span', { html: icon.external }), 'Open the eBook Reader'))));
+  const toolsEl = h('div', {});
+  container.append(section('Opening other formats', toolsEl));
   fetch('/portal/ebooks/library', { credentials: 'same-origin' }).then((r) => r.json()).then((lib) => {
     if (lib.error) status.textContent = lib.error;
-    else if (lib.configured) status.textContent = `${lib.books.length} book${lib.books.length === 1 ? '' : 's'} found.`;
+    else if (lib.configured) status.textContent = `${lib.books.length} book${lib.books.length === 1 ? '' : 's'} found${lib.writable === false ? ' (the folder is read-only, so books can’t be added from devices)' : ''}.`;
+    const t = lib.tools || {};
+    const row = (ok, name, what) => h('div', { style: { display: 'flex', gap: '10px', alignItems: 'flex-start', margin: '8px 0' } },
+      h('span', { html: (ok ? icon.check : icon.x).replace('<svg', '<svg width="18" height="18"'), style: { color: ok ? 'var(--ok)' : 'var(--text-muted)', flex: 'none', width: '18px', height: '18px', marginTop: '1px' } }),
+      h('span', {}, h('b', {}, name), ` — ${what}${ok ? '' : ' (not installed)'}`));
+    clear(toolsEl,
+      h('p', { class: 'muted small' }, 'EPUB, PDF, Kindle MOBI/AZW, FB2, text and CBZ comics open as they are. Other formats are converted on the MediaDesk server, once each, by tools installed there:'),
+      row(t.sevenZip, '7-Zip', 'comic books in RAR, 7z and tar archives (CBR, CB7, CBT)'),
+      row(t.calibre, 'Calibre', 'AZW3 (better than reading its MOBI copy), Word (DOCX), RTF, ODT and LIT books, converted to EPUB. Install Calibre on the server, or set EBOOK_CONVERT_PATH to its ebook-convert program, then press Check again.'),
+      h('div', { class: 'btn-row' }, h('button', { class: 'btn', onclick: async (e) => { e.currentTarget.disabled = true; try { state.config = await portal.saveConfig({ recheckTools: true }); } catch { /* shown below */ } clear(container); renderEbooks(container); } }, h('span', { html: icon.refresh }), 'Check again')));
   }).catch((err) => { status.textContent = err.message; });
   save.onclick = async () => {
     save.disabled = true;

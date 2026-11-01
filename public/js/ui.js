@@ -100,6 +100,14 @@ export function toast(title, { body = '', type = 'info', icon = null, timeout = 
   const dismiss = () => { el.classList.add('leaving'); setTimeout(() => el.remove(), 250); };
   host.append(el);
   if (timeout) setTimeout(dismiss, timeout);
+  // For a toast that stays (timeout 0) while something happens: update it, then dismiss it.
+  el.dismiss = dismiss;
+  el.setBody = (text) => {
+    let b = el.querySelector('.toast-text > span');
+    if (!b) { b = h('span'); el.querySelector('.toast-text strong').after(b); }
+    b.textContent = text;
+  };
+  return el;
 }
 
 export const toastError = (err, title = 'Something went wrong') => toast(title, { body: err?.message || String(err), type: 'error', timeout: 8000 });
