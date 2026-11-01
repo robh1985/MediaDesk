@@ -8,6 +8,7 @@ services:
     volumes:
       - ./config:/config
       # - /mnt/games:/games      # The Game Console: its root folder (then set GAMES_DIR below); writable, for saves
+      # - /mnt/books:/books:ro   # eBook Reader: your EPUB, PDF and CBZ books (then set EBOOKS_DIR below)
       # Folders for the Files app: mount them here, then add the container path (e.g. /media) in Settings > Files.
       # - /mnt/media:/media
     environment:
@@ -26,6 +27,7 @@ services:
       # PLEX_URL: "http://plex:32400"   # or use Settings → Plex → Sign in with Plex
       # PLEX_TOKEN: ""
       # GAMES_DIR: "/games"
+      # EBOOKS_DIR: "/books"
       # PIKVM_URL: "https://pikvm.local"
       # PIKVM_USERNAME: "admin"
       # PIKVM_PASSWORD: ""

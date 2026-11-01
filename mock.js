@@ -657,6 +657,7 @@ function demoFileRoots() {
     ['Demo Pack/data/sample.bin', blob(40)],
   ]));
   put('Downloads/README.txt', 'Demo folder for MediaDesk Files.\nEverything here is recreated each time demo mode starts.\n');
+  put('Media/Books/The Lighthouse Keeper.epub', require('./mock-ebooks').storyEpub());
   demoRoots = [path.join(base, 'Media'), path.join(base, 'Downloads'), path.join(base, 'Logs')];
   return demoRoots;
 }

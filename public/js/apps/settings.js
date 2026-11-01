@@ -39,6 +39,7 @@ export const settingsApp = {
       page('music', 'Music', appIconSmall('music'), renderMusic),
       page('files', 'Files', appIconSmall('files'), renderFiles),
       page('console', 'The Game Console', appIconSmall('console'), renderConsole),
+      page('ebooks', 'eBook Reader', appIconSmall('ebooks'), renderEbooks),
       page('appearance', 'Appearance', icon.image, renderAppearance),
       page('dock', 'Dock & Desktop', icon.grid, renderDockPage),
       page('screensaver', 'Screensaver', icon.moon, renderScreensaver),
@@ -408,6 +409,34 @@ function renderConsole(container) {
       toast('Games folder saved', { type: 'success', icon: appIcon.console });
       clear(container);
       renderConsole(container);
+    } catch (err) { toastError(err, 'Could not save the folder'); save.disabled = false; }
+  };
+}
+
+function renderEbooks(container) {
+  const cfg = state.config;
+  const input = h('input', { class: 'input', value: cfg.ebooks?.folder || '', disabled: cfg.mock, spellcheck: 'false', placeholder: 'For example D:\\Books or /mnt/books' });
+  const save = h('button', { class: 'btn btn-primary', disabled: cfg.mock }, h('span', { html: icon.check }), 'Save folder');
+  const status = h('div', { class: 'small muted' });
+  container.append(h('div', { class: 'pane-header' }, h('span', { class: 'settings-app-icon', html: appIcon.ebooks }), h('h2', {}, 'eBook Reader')));
+  if (cfg.mock) container.append(h('div', { class: 'notice' }, 'Demo mode: the eBook Reader shows a few small books MediaDesk makes itself, and the folder can’t be changed.'));
+  container.append(
+    section('Books folder',
+      h('p', { class: 'muted small' }, 'The folder with your eBooks on the computer running MediaDesk, as a full path. EPUB books, PDFs and comic books (.cbz) in it and its subfolders appear in the library, with their covers. Where you’re up to in each book is kept by MediaDesk, so a book opens at the same page on any device. Books in shared folders can also be opened from Files.'),
+      h('label', { class: 'field' }, h('span', {}, 'Folder'), input),
+      status,
+      h('div', { class: 'btn-row' }, save, h('button', { class: 'btn', onclick: () => import('../wm.js').then((wm) => wm.openApp('ebooks')) }, h('span', { html: icon.external }), 'Open the eBook Reader'))));
+  fetch('/portal/ebooks/library', { credentials: 'same-origin' }).then((r) => r.json()).then((lib) => {
+    if (lib.error) status.textContent = lib.error;
+    else if (lib.configured) status.textContent = `${lib.books.length} book${lib.books.length === 1 ? '' : 's'} found.`;
+  }).catch((err) => { status.textContent = err.message; });
+  save.onclick = async () => {
+    save.disabled = true;
+    try {
+      state.config = await portal.saveConfig({ ebooksFolder: input.value.trim() });
+      toast('Books folder saved', { type: 'success', icon: appIcon.ebooks });
+      clear(container);
+      renderEbooks(container);
     } catch (err) { toastError(err, 'Could not save the folder'); save.disabled = false; }
   };
 }

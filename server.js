@@ -18,6 +18,7 @@ const { createGames } = require('./games');
 const { createPikvm } = require('./pikvm');
 const { createArchive } = require('./archive');
 const { createFamily } = require('./family');
+const { createEbooks } = require('./ebooks');
 
 const ROOT = __dirname;
 
@@ -126,6 +127,7 @@ function loadConfig() {
   if (env.FILE_ROOTS) cfg.fileRoots = env.FILE_ROOTS.split(path.delimiter).filter(Boolean);
   if (MOCK) cfg.fileRoots = require('./mock').demoFileRoots();
   if (env.GAMES_DIR) cfg.gamesFolder = env.GAMES_DIR;
+  if (env.EBOOKS_DIR) cfg.ebooksFolder = env.EBOOKS_DIR;
   return cfg;
 }
 
@@ -169,6 +171,7 @@ function publicConfig() {
     media: { ...media.status(), ffmpegPath: config.ffmpegPath || '', libreOfficePath: config.libreOfficePath || '' },
     archive: { ...archive.status(), sevenZipPath: config.sevenZipPath || '' },
     games: { folder: MOCK ? '(demo games)' : config.gamesFolder || '' },
+    ebooks: { folder: MOCK ? '(demo books)' : config.ebooksFolder || '' },
   };
 }
 
@@ -474,6 +477,15 @@ async function updateConfig(req, res) {
     } else delete next.gamesFolder;
     games.invalidate();
   }
+  if (typeof body.ebooksFolder === 'string') {
+    const folder = body.ebooksFolder.trim();
+    if (folder) {
+      const { roots, errors } = await files.validateRoots([folder]);
+      if (errors.length) return sendJson(res, 400, { error: `Books folder: ${errors[0]}` });
+      next.ebooksFolder = roots[0];
+    } else delete next.ebooksFolder;
+    ebooks.invalidate();
+  }
   let toolsChanged = false;
   for (const key of ['ffmpegPath', 'libreOfficePath']) {
     if (typeof body[key] === 'string' && body[key].trim() !== (next[key] || '')) { next[key] = body[key].trim(); toolsChanged = true; }
@@ -609,6 +621,12 @@ const games = createGames({
   sample: MOCK ? require('./mock-games').createSample() : null,
 });
 const pikvm = createPikvm({ getConfig: () => config.services.pikvm });
+const ebooks = createEbooks({
+  dataDir: MOCK ? path.join(require('node:os').tmpdir(), 'mediadesk-demo-data') : path.dirname(CONFIG_PATH),
+  getFolder: () => config.ebooksFolder || '',
+  mock: MOCK,
+  sample: MOCK ? require('./mock-ebooks').createSample() : null,
+});
 const family = createFamily({ dataDir: MOCK ? path.join(require('node:os').tmpdir(), 'mediadesk-demo-data') : path.dirname(CONFIG_PATH), mock: MOCK });
 const archive = createArchive({ getConfig: () => config, resolveInShared: files.resolveInShared, filesEnabled: () => filesStatus().enabled });
 const wallpapers = createWallpapers(MOCK ? path.join(require('node:os').tmpdir(), 'mediadesk-demo-wallpapers') : path.join(path.dirname(CONFIG_PATH), 'wallpapers'));
@@ -722,7 +740,7 @@ async function handle(req, res) {
     if (MOCK) {
       // Demo mode: app preferences can be tried out (kept in memory); connections can't change.
       const body = await readJson(req);
-      if (body.services || body.fileRoots || typeof body.gamesFolder === 'string') return sendJson(res, 400, { error: 'Connections and folders are read-only in demo mode' });
+      if (body.services || body.fileRoots || typeof body.gamesFolder === 'string' || typeof body.ebooksFolder === 'string') return sendJson(res, 400, { error: 'Connections and folders are read-only in demo mode' });
       if (body.appSettings) config.appSettings = appSettings.merge(config.appSettings, body.appSettings);
       // Folder tags and aliases can be tried out too (kept in memory).
       if (Array.isArray(body.fileTags)) config.fileTags = files.cleanTags(body.fileTags);
@@ -749,6 +767,7 @@ async function handle(req, res) {
 
   if (p.startsWith('/portal/plex/')) return plexSignIn(req, res, p);
   if (p.startsWith('/portal/games/')) return games.handle(req, res, url, { sendJson, readJson });
+  if (p.startsWith('/portal/ebooks/')) return ebooks.handle(req, res, url, { sendJson, readJson, readBody });
   if (p.startsWith('/portal/archive/')) return archive.handle(req, res, url, { sendJson, readJson });
 
   const m = p.match(/^\/api\/(radarr|sonarr|nzbget|jellyfin|plex|pikvm)(?:\/(.*))?$/);

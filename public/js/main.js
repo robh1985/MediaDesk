@@ -24,6 +24,7 @@ import { paintApp } from './apps/paint.js';
 import { paintProApp } from './apps/paintpro.js';
 import { familyApp } from './apps/family/family.js';
 import { pikvmApp } from './apps/pikvm.js';
+import { ebooksApp } from './apps/ebooks/ebooks.js';
 
 applyAppearance();
 
@@ -32,7 +33,7 @@ if (/[?&#]touchdebug\b/.test(location.href)) {
   import('./touchdebug.js').then((m) => m.startTouchDebug());
 }
 
-[dashboardApp, makeArrApp('radarr'), makeArrApp('sonarr'), nzbgetApp, jellyfinApp, plexApp, plexViewerApp, pikvmApp, consoleApp, musicApp, filesApp, notesApp, logViewerApp, archiveApp, convertApp, paintApp, paintProApp, familyApp, previewApp, calculatorApp, settingsApp, webviewApp,
+[dashboardApp, makeArrApp('radarr'), makeArrApp('sonarr'), nzbgetApp, jellyfinApp, plexApp, plexViewerApp, pikvmApp, consoleApp, musicApp, filesApp, notesApp, logViewerApp, archiveApp, convertApp, paintApp, paintProApp, familyApp, ebooksApp, previewApp, calculatorApp, settingsApp, webviewApp,
   { id: 'launcher', name: 'Search', icon: '', open() {} }].forEach(registerApp);
 
 async function boot() {

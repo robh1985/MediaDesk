@@ -464,6 +464,7 @@ class FileBrowser {
       { label: e.dir ? 'Open' : kindOf(e) === 'text' ? 'Open in Notes' : 'Open in Preview', icon: e.dir ? icon.folder : icon.eye, disabled: many, action: () => this.open(e) },
       !e.dir ? { label: 'Download', icon: icon.download, action: () => this.download() } : null,
       !e.dir && /\.(log|lo_|txt)$/i.test(e.name) ? { label: 'Open in Log Viewer', icon: appIcon.logs, disabled: many, action: () => openApp('logs', { root: this.root, path: join(this.path, e.name), key: `${this.root}:${join(this.path, e.name)}` }) } : null,
+      !e.dir && /\.(epub|pdf|cbz)$/i.test(e.name) ? { label: 'Read in eBook Reader', icon: appIcon.ebooks, disabled: many, action: () => openApp('ebooks', { root: this.root, path: join(this.path, e.name), name: e.name }) } : null,
       !e.dir && kindOf(e) !== 'text' ? { label: 'Open in Notes', icon: appIcon.notes, disabled: many, action: () => openApp('notes', { root: this.root, path: join(this.path, e.name) }) } : null,
       ...this.archiveItems(e, many),
       !e.dir && /\.(png|jpe?g|gif|webp|bmp|svg|avif|ora)$/i.test(e.name) ? { label: 'Edit in Paint Pro', icon: appIcon.paintpro, disabled: many, action: () => openApp('paintpro', { root: this.root, path: join(this.path, e.name) }) } : null,
@@ -731,6 +732,7 @@ class FileBrowser {
   preview(e) {
     const p = join(this.path, e.name);
     if (kindOf(e) === 'text') openApp('notes', { root: this.root, path: p });
+    else if (/\.(epub|cbz)$/i.test(e.name)) openApp('ebooks', { root: this.root, path: p, name: e.name });
     else openApp('preview', { key: `${this.root}:${p}`, root: this.root, path: p, size: e.size, modified: e.modified });
   }
 }
