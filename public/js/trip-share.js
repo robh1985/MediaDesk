@@ -3,7 +3,7 @@
 
 import { tripDays, fmtDay, DAY_COLORS, catOf, esc } from './apps/trips/util.js';
 import { itineraryHtml } from './apps/trips/print.js';
-import { loadLeaflet, placeIcon, fitTo } from './apps/trips/map.js';
+import { loadLeaflet, placeIcon, fitTo, tileLayer } from './apps/trips/map.js';
 
 const token = location.pathname.split('/').filter(Boolean)[1];
 const main = document.getElementById('trip');
@@ -20,14 +20,15 @@ async function start() {
   document.documentElement.style.setProperty('--c', t.color || '#1c7ed6');
   const days = tripDays(t);
   const place = (id) => d.places?.[id];
-  main.innerHTML = `<div class="ts-layout"><div class="ts-map" id="ts-map"></div><div class="ts-body"><nav class="ts-days" id="ts-days"><button class="on" data-day="">All days</button>${days.map((x, i) => `<button data-day="${x}"><i style="background:${DAY_COLORS[i % DAY_COLORS.length]}"></i>Day ${i + 1}<small>${esc(fmtDay(x))}</small></button>`).join('')}</nav><article class="ts-doc">${itineraryHtml(d)}${notesHtml(d)}</article><footer class="muted">Shared from MediaDesk Trip Planner · map © OpenStreetMap contributors</footer></div></div>`;
+  main.innerHTML = `<div class="ts-layout"><div class="ts-map" id="ts-map"></div><div class="ts-body"><nav class="ts-days" id="ts-days"><button class="on" data-day="">All days</button>${days.map((x, i) => `<button data-day="${x}"><i style="background:${DAY_COLORS[i % DAY_COLORS.length]}"></i>Day ${i + 1}<small>${esc(fmtDay(x))}</small></button>`).join('')}</nav><article class="ts-doc">${itineraryHtml(d)}${notesHtml(d)}</article><footer class="muted">Shared from MediaDesk Trip Planner</footer></div></div>`;
   // Photos of places.
   for (const li of main.querySelectorAll('.ts-doc li')) li.classList.add('ts-li');
   try {
     const L = await loadLeaflet();
     const map = L.map('ts-map', { worldCopyJump: true }).setView([45, 10], 4);
     const dark = matchMedia('(prefers-color-scheme: dark)').matches;
-    L.tileLayer(dark ? 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png' : 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', { subdomains: 'abcd', maxZoom: 20, attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>' }).addTo(map);
+    tileLayer(L, dark ? 'dark' : 'osm').addTo(map);
+    if (dark) document.getElementById('ts-map').classList.add('tp-dark-tiles');
     const layers = L.layerGroup().addTo(map);
     const draw = (only) => {
       layers.clearLayers();

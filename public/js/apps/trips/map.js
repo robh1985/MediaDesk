@@ -15,23 +15,33 @@ export function loadLeaflet() {
   return loading;
 }
 
-// Map styles: OpenStreetMap's own, or CARTO's light and dark (also from OpenStreetMap data).
+// Map styles, all from OpenStreetMap data and free to use without a key. The dark style is
+// OpenStreetMap's own map with its colours turned round.
+const OSM = '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors';
 export const STYLES = {
-  osm: ['Standard', 'https://tile.openstreetmap.org/{z}/{x}/{y}.png', '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors', 19],
-  light: ['Light', 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions" target="_blank" rel="noopener">CARTO</a>', 20],
-  dark: ['Dark', 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions" target="_blank" rel="noopener">CARTO</a>', 20],
-  topo: ['Terrain', 'https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', 'Map data &copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors, SRTM | Style &copy; <a href="https://opentopomap.org" target="_blank" rel="noopener">OpenTopoMap</a>', 17],
+  osm: ['Standard', 'https://tile.openstreetmap.org/{z}/{x}/{y}.png', OSM, 19],
+  dark: ['Dark', 'https://tile.openstreetmap.org/{z}/{x}/{y}.png', OSM, 19, true],
+  topo: ['Terrain', 'https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', `Map data ${OSM}, SRTM | Style &copy; <a href="https://opentopomap.org" target="_blank" rel="noopener">OpenTopoMap</a>`, 17],
 };
+
+// Tile servers want to know which site a map is on (MediaDesk sends no Referer to other sites by
+// default, and OpenStreetMap refuses tiles without one), so tiles say where they're from: the
+// address of this MediaDesk, never the page.
+export function tileLayer(L, key) {
+  const [, url, attribution, maxZoom] = STYLES[key] || STYLES.osm;
+  return L.tileLayer(url, { attribution, maxZoom, subdomains: 'abc', referrerPolicy: 'strict-origin-when-cross-origin' });
+}
 
 export async function makeMap(el, { style, center = [48, 10], zoom = 4 } = {}) {
   const L = await loadLeaflet();
   const map = L.map(el, { zoomControl: true, attributionControl: true, worldCopyJump: true }).setView(center, zoom);
-  const choice = style || (document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light');
-  map.tiles = L.tileLayer(STYLES[choice][1], { attribution: STYLES[choice][2], maxZoom: STYLES[choice][3], subdomains: 'abcd', crossOrigin: true }).addTo(map);
   map.setStyle = (k) => {
-    map.removeLayer(map.tiles);
-    map.tiles = L.tileLayer(STYLES[k][1], { attribution: STYLES[k][2], maxZoom: STYLES[k][3], subdomains: 'abcd', crossOrigin: true }).addTo(map);
+    if (!STYLES[k]) k = 'osm';
+    if (map.tiles) map.removeLayer(map.tiles);
+    map.tiles = tileLayer(L, k).addTo(map);
+    el.classList.toggle('tp-dark-tiles', Boolean(STYLES[k][4]));
   };
+  map.setStyle(style || (document.documentElement.dataset.theme === 'dark' ? 'dark' : 'osm'));
   // Leaflet needs telling when its box changes size (windows resize, panels open).
   const ro = new ResizeObserver(() => map.invalidateSize());
   ro.observe(el);

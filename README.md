@@ -212,7 +212,7 @@ so the server needs internet access for them (the browser only talks to MediaDes
 | [Open-Meteo](https://open-meteo.com) | Weather forecasts, and last year's weather for days further ahead |
 | [Frankfurter](https://www.frankfurter.app) | Exchange rates (from the European Central Bank) |
 
-Map pictures come from OpenStreetMap, CARTO and OpenTopoMap straight to the browser. Answers are
+Map pictures come from OpenStreetMap (and OpenTopoMap for the terrain style) straight to the browser, which tells them only the address of your MediaDesk, as their rules ask. Answers are
 cached, and in the demo all of these are answered with made-up data.
 
 A share link (`/trip/…`) and a calendar address (`/trip-feed/….ics`) work without signing in: anyone

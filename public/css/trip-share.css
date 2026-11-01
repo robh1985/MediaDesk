@@ -31,3 +31,5 @@ footer { margin-top: 30px; font-size: 12px; }
 .tp-pin-body > span { transform: rotate(45deg); font-size: 14px; }
 .tp-pin-body > b { position: absolute; top: -6px; right: -8px; transform: rotate(45deg); min-width: 17px; height: 17px; padding: 0 4px; border-radius: 9px; background: #fff; color: #111; font: 700 11px/17px system-ui, sans-serif; text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,.3); }
 @media (max-width: 800px) { .ts-layout { grid-template-columns: 1fr; grid-template-rows: 45vh auto; height: auto; } .ts-map { height: 45vh; } .ts-body { border-left: 0; padding: 0 16px 16px; } }
+
+.tp-dark-tiles .leaflet-tile-pane { filter: invert(1) hue-rotate(180deg) brightness(.92) contrast(.88) saturate(.7); }

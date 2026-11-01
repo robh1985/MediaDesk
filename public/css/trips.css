@@ -333,3 +333,5 @@ a.tp-leg.link { border: 0; margin-top: 4px; color: var(--accent); text-decoratio
   .tp-dash { padding: 16px; }
   .tp-page { padding: 12px 12px 30px; }
 }
+
+.tp-dark-tiles .leaflet-tile-pane { filter: invert(1) hue-rotate(180deg) brightness(.92) contrast(.88) saturate(.7); }
