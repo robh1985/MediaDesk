@@ -186,11 +186,13 @@ class FamilyOrganizer {
   // A section's parts (Calendar's views, Chores and Routines, Meal plan and Recipe box, Settings'
   // pages) as a menu beside the left one, styled like it. On a phone, where there's no room
   // beside it, the menu is returned to be put at the top of the section instead.
-  // items: [id, label, icon, colour]
-  subMenu(title, items, current, pick, cls = '') {
-    const buttons = items.map(([id, label, icon, color]) => h('button', {
-      class: `fam-rail-btn ${id === current ? 'on' : ''}`, style: { '--rc': color }, dataset: { section: id }, 'aria-current': id === current ? 'page' : null, onclick: () => pick(id),
-    }, h('span', { html: icon }), h('span', {}, ...label.split('/').flatMap((part, i) => (i ? ['/', h('wbr'), part] : [part])))));
+  // items: [id, label, icon (an SVG, or an emoji), colour, { cls, extra }]; after: more to show below.
+  subMenu(title, items, current, pick, cls = '', { after = null } = {}) {
+    const buttons = items.map(([id, label, icon, color, more = {}]) => h('button', {
+      class: `fam-rail-btn ${id === current ? 'on' : ''} ${more.cls || ''}`, style: { '--rc': color }, dataset: { section: id }, 'aria-current': id === current ? 'page' : null, onclick: () => pick(id),
+    }, String(icon).startsWith('<') ? h('span', { html: icon }) : h('span', { class: 'fam-rail-emoji' }, icon),
+      h('span', {}, ...label.split('/').flatMap((part, i) => (i ? ['/', h('wbr'), part] : [part]))), more.extra || null));
+    if (after) buttons.push(after);
     const tab = this.tab;
     // Phone ↔ wide (a window resized, a tablet turned): the menu moves.
     this.subMq ||= matchMedia('(max-width: 760px)');

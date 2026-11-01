@@ -60,17 +60,19 @@ export class ListsView {
     this.el = el;
     const lists = this.shown(this.lists());
     if (!lists.find((l) => l.id === this.listId)) this.listId = lists[0]?.id || null;
-    const side = h('div', { class: 'fam-lists-side' },
-      lists.map((l) => {
-        const left = this.items(l.id).filter((i) => !i.done).length;
-        return h('button', { class: `fam-list-tab ${l.id === this.listId ? 'on' : ''}`, style: { '--c': l.color || '#1c7ed6' }, onclick: () => { this.listId = l.id; this.render(el); } },
-          h('span', { class: 'fam-list-emoji' }, l.emoji || '📝'), h('span', { class: 'fam-list-name' }, l.title),
-          (l.members || []).length ? h('span', { class: 'fam-agenda-who' }, l.members.map((id) => this.store.member(id)).filter(Boolean).slice(0, 3).map((m) => avatar(m, 'xs'))) : null,
-          h('span', { class: 'fam-list-count' }, left || ''));
-      }),
-      h('button', { class: 'fam-list-tab add', onclick: () => this.editList(null) }, h('span', { class: 'fam-list-emoji', html: ICONS.plus }), h('span', { class: 'fam-list-name' }, 'New list')));
+    // The lists: a menu beside the left one (a grid at the top on a phone), each in its colour,
+    // with how many things are left on it and who it's for.
+    const row = this.app.subMenu('Lists', lists.map((l) => {
+      const left = this.items(l.id).filter((i) => !i.done).length;
+      const who = (l.members || []).map((id) => this.store.member(id)).filter(Boolean).slice(0, 3);
+      return [l.id, l.title, l.emoji || '📝', l.color || '#1c7ed6', { cls: 'fam-list-tab', extra: h('span', { class: 'fam-sub-extra' },
+        who.length ? h('span', { class: 'fam-agenda-who' }, who.map((m) => avatar(m, 'xs'))) : null,
+        left ? h('span', { class: 'fam-list-count' }, left) : null) }];
+    }), this.listId, (id) => { this.listId = id; this.render(el); }, 'fam-lists-nav', {
+      after: h('button', { class: 'fam-rail-btn fam-list-tab add', style: { '--rc': '#868e96' }, onclick: () => this.editList(null) }, h('span', { html: ICONS.plus }), h('span', {}, 'New list')),
+    });
     const main = h('div', { class: 'fam-list-main' });
-    clear(el, h('div', { class: 'fam-lists' }, side, main));
+    clear(el, row, h('div', { class: 'fam-lists' }, main));
     const list = this.store.get('lists', this.listId);
     if (!list) { clear(main, h('div', { class: 'fam-empty' }, h('div', { class: 'fam-empty-emoji' }, '🛒'), 'Make a grocery list, a to-do list or a packing list.', h('button', { class: 'fam-btn primary', onclick: () => this.editList(null) }, 'New list'))); return; }
     this.drawList(main, list);

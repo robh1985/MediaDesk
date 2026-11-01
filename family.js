@@ -342,6 +342,11 @@ function createFamily({ dataDir, mock = false }) {
     }
   }
 
+  function checkColor(d, id, color) {
+    const taken = Object.values(d.collections.members).find((m) => m.id !== id && String(m.color || '').toLowerCase() === String(color).toLowerCase());
+    if (taken) throw new FamilyError(409, `${taken.name} already has that colour — pick another`);
+  }
+
   function applyOps(ops, who = { parent: true }) {
     guardOps(ops, who);
     const d = load();
@@ -354,6 +359,7 @@ function createFamily({ dataDir, mock = false }) {
         delete col[op.id];
         if (op.col === 'photos' && old?.file) fsp.rm(path.join(photoDir, path.basename(old.file)), { force: true }).catch(() => {});
         if (op.col === 'recipes' && old?.image) recipes.dropImage(old.image);
+        if (op.col === 'members' && old?.photo) recipes.dropImage(old.photo);
         if (op.col === 'calendars') feeds.delete(op.id);
         results.push({ id: op.id, deleted: true });
       } else if (op.op === 'put') {
@@ -366,6 +372,8 @@ function createFamily({ dataDir, mock = false }) {
         if (op.col === 'calendars') {
           if (next.custom) { delete next.url; next.name = String(next.name || 'Calendar').slice(0, 60); } else { next.url = feedUrl(next.url); if (prev?.url !== next.url) feeds.delete(id); }
         }
+        // Everyone has their own colour: a new colour can't be someone else's.
+        if (op.col === 'members' && next.color && String(next.color).toLowerCase() !== String(prev?.color || '').toLowerCase()) checkColor(d, id, next.color);
         if (op.col === 'photos' && prev) next.file = prev.file;
         if (op.col === 'photos' && !prev) throw new FamilyError(400, 'Upload the photo first');
         col[id] = next;
@@ -502,6 +510,31 @@ function createFamily({ dataDir, mock = false }) {
         if (!Array.isArray(body.ops) || !body.ops.length) throw new FamilyError(400, 'Nothing to change');
         if (body.ops.some((o) => PARENT_COLLECTIONS.has(o.col))) needParent();
         return sendJson(res, 200, applyOps(body.ops, { parent, user: me }));
+      }
+      // Your own profile's picture and colour (any signed-in family member, for themselves only).
+      if (p === '/me/profile' && req.method === 'POST') {
+        if (!me) throw new FamilyError(400, 'Sign in to your own account to change your profile');
+        const d = load();
+        const m = me.profile && d.collections.members[me.profile];
+        if (!m) throw new FamilyError(400, 'Ask a parent to link your account to your family profile first');
+        const body = await readJson(req);
+        const next = { ...m };
+        if ('color' in body) {
+          if (!/^#[0-9a-f]{6}$/i.test(String(body.color))) throw new FamilyError(400, 'That isn’t a colour');
+          if (String(body.color).toLowerCase() !== String(m.color || '').toLowerCase()) checkColor(d, m.id, body.color);
+          next.color = String(body.color).toLowerCase();
+        }
+        if ('emoji' in body) next.emoji = String(body.emoji || '').slice(0, 16);
+        if ('photo' in body) {
+          if (body.photo !== null && !/^[\w.-]{1,120}$/.test(String(body.photo))) throw new FamilyError(400, 'That picture can’t be used');
+          if (m.photo && m.photo !== body.photo) recipes.dropImage(m.photo);
+          next.photo = body.photo || null;
+        }
+        next.updated = Date.now();
+        d.collections.members[m.id] = next;
+        d.rev++;
+        await persist();
+        return sendJson(res, 200, { member: next });
       }
       if (p === '/settings' && req.method === 'POST') {
         const body = await readJson(req);

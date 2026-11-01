@@ -183,6 +183,8 @@ export class Store {
   recipeImageUrl(r) { return r?.image ? `${BASE}/recipes/image/${encodeURIComponent(r.image)}` : null; }
   async uploadRecipeImage(file) { return (await call('recipes/image', { method: 'POST', body: file, raw: true })).image; }
   async importRecipeUrl(url) { return (await call('recipes/import-url', { method: 'POST', body: { url } })).recipe; }
+  // Your own profile's picture and colour.
+  async updateMyProfile(body) { const r = await call('me/profile', { method: 'POST', body }); await this.refresh(); return r.member; }
   mealieStatus() { return call('mealie'); }
   mealieSave(body) { return call('mealie', { method: 'POST', body }); }
   async mealieSync() { const r = await call('mealie/sync', { method: 'POST', body: {} }); await this.refresh(); return r; }

@@ -21,7 +21,7 @@ export class SettingsView {
   constructor(app) {
     this.app = app;
     this.store = app.store;
-    this.section = 'accounts';
+    this.section = null; // the first section (My account when signed in)
   }
 
   render(el, section) {
@@ -33,9 +33,8 @@ export class SettingsView {
     this.el = el;
     if (section) this.section = ALIASES[section] || section;
     const session = this.app.session || {};
-    const sections = [['accounts', 'Accounts', ICONS.family, '#7048e8'], ['calendars', 'Calendars', ICONS.calendar, '#1c7ed6'], ['general', 'General', ICONS.sliders, '#0ca678'],
-      ['display', 'Photo frame & sleep', ICONS.photos, '#d6336c'], ['chores', 'Chores/Routines', ICONS.chores, '#2f9e44'],
-      session.user ? ['account', 'My account', ICONS.user, '#f08c00'] : null].filter(Boolean);
+    const sections = [session.user ? ['account', 'My account', ICONS.user, '#f08c00'] : null, ['accounts', 'Accounts', ICONS.family, '#7048e8'], ['calendars', 'Calendars', ICONS.calendar, '#1c7ed6'], ['general', 'General', ICONS.sliders, '#0ca678'],
+      ['display', 'Photo frame & sleep', ICONS.photos, '#d6336c'], ['chores', 'Chores/Routines', ICONS.chores, '#2f9e44']].filter(Boolean);
     if (!sections.some(([id]) => id === this.section)) this.section = sections[0][0];
     // The sections: a menu beside the left one (a grid across the top on a phone).
     const row = this.app.subMenu('Settings', sections, this.section, (id) => { this.section = id; this.render(el); }, 'fam-settings-nav');
@@ -88,19 +87,51 @@ export class SettingsView {
     try { await this.store.batch(list.map((m, n) => ({ op: 'put', col: 'members', item: { ...m, order: n } }))); this.render(this.el); } catch (err) { toastError(err); }
   }
 
+  // Colours other people already have: colour → name.
+  takenColors(exceptId) {
+    return new Map(this.store.members().filter((x) => x.id !== exceptId && x.color).map((x) => [String(x.color).toLowerCase(), x.name]));
+  }
+
+  // A profile's picture: an emoji, or a photo of them.
+  pictureEditor(m, onChange) {
+    let cur = { emoji: m?.emoji || '', photo: m?.photo || null };
+    const preview = h('div', { class: 'fam-pic-preview' });
+    const fileIn = h('input', { type: 'file', accept: 'image/*', hidden: true });
+    const emoji = emojiButton(cur.emoji, (e) => { cur = { emoji: e, photo: null }; draw(); onChange?.(cur); });
+    const draw = () => {
+      clear(preview, avatar({ ...m, name: m?.name || '?', color: m?.color, ...cur }, 'xl'));
+      removeBtn.hidden = !cur.photo;
+    };
+    const removeBtn = h('button', { type: 'button', class: 'fam-btn small', onclick: () => { cur = { ...cur, photo: null }; draw(); onChange?.(cur); } }, 'Remove photo');
+    fileIn.addEventListener('change', async () => {
+      const f = fileIn.files[0];
+      fileIn.value = '';
+      if (!f) return;
+      try { cur = { ...cur, photo: await this.store.uploadRecipeImage(f) }; draw(); onChange?.(cur); } catch (err) { toastError(err, 'Couldn’t use that picture'); }
+    });
+    draw();
+    const el = h('div', { class: 'fam-pic-edit' }, preview,
+      h('div', { class: 'fam-pic-tools' },
+        h('div', { class: 'fam-row-wrap' }, h('span', { class: 'fam-label' }, 'Emoji'), emoji),
+        h('div', { class: 'fam-row-wrap' }, h('button', { type: 'button', class: 'fam-btn small', onclick: () => fileIn.click() }, h('span', { html: ICONS.upload }), 'Use a photo'), removeBtn), fileIn));
+    el.value = () => cur;
+    el.setColor = (c) => { m = { ...(m || {}), color: c }; draw(); };
+    return el;
+  }
+
   async editMember(m) {
     if (!(await parentGate(this.app.root, this.store, 'Changing profiles needs a parent.'))) return;
-    const used = new Set(this.store.members().map((x) => x.color));
-    let color = m?.color || COLORS.find((c) => !used.has(c)) || COLORS[0];
+    const taken = this.takenColors(m?.id);
+    let color = m?.color || COLORS.find((c) => !taken.has(c.toLowerCase())) || COLORS[0];
     const name = input({ value: m?.name || '', placeholder: 'Name', required: true, autofocus: true, maxlength: 40 });
-    const emoji = emojiButton(m?.emoji || '');
-    const colors = colorPicker(color, (c) => { color = c; });
+    const pic = this.pictureEditor({ ...(m || {}), color });
+    const colors = colorPicker(color, (c) => { color = c; pic.setColor(c); }, { taken });
     const role = select([['parent', 'Parent'], ['kid', 'Kid'], ['other', 'Other']], m?.role || 'kid');
     const birthday = input({ type: 'date', value: m?.birthday || '' });
     const out = await sheet(this.app.root, {
       title: m ? `Edit ${m.name}` : 'Add a person',
-      body: h('div', { class: 'fam-form' }, h('div', { class: 'fam-title-row' }, emoji, name), field('Colour', colors), h('div', { class: 'fam-row-wrap' }, field('Role', role), field('Birthday', birthday, 'Adds a yearly birthday to the calendar.'))),
-      actions: [m ? { label: 'Remove', danger: true, left: true, value: 'delete' } : null, { label: 'Cancel' }, { label: 'Save', primary: true, submit: true, onClick: (close) => { if (!name.value.trim()) return name.focus(); close({ ...(m || { order: this.store.members().length }), name: name.value.trim(), emoji: emoji.value, color, role: role.value, birthday: birthday.value || null }); } }],
+      body: h('div', { class: 'fam-form' }, name, pic, field('Colour', colors, 'Colours with a letter belong to someone else.'), h('div', { class: 'fam-row-wrap' }, field('Role', role), field('Birthday', birthday, 'Adds a yearly birthday to the calendar.'))),
+      actions: [m ? { label: 'Remove', danger: true, left: true, value: 'delete' } : null, { label: 'Cancel' }, { label: 'Save', primary: true, submit: true, onClick: (close) => { if (!name.value.trim()) return name.focus(); close({ ...(m || { order: this.store.members().length }), name: name.value.trim(), ...pic.value(), color, role: role.value, birthday: birthday.value || null }); } }],
     });
     if (!out) return;
     try {
@@ -575,6 +606,21 @@ export class SettingsView {
 
   draw_account(body) {
     const u = this.app.session.user;
+    // Their own profile: picture and colour.
+    const me = u.profile ? this.store.get('members', u.profile) : null;
+    if (me) {
+      const save = async (patch, msg) => {
+        try { await this.store.updateMyProfile(patch); toast(msg, { type: 'success', timeout: 1500 }); this.app.drawFilter(); } catch (err) { toastError(err); }
+        this.render(this.el, 'account');
+      };
+      const pic = this.pictureEditor(me, (v) => save(v, 'Picture changed'));
+      const colors = colorPicker(me.color, (c) => save({ color: c }, 'Colour changed'), { taken: this.takenColors(me.id) });
+      body.append(this.card('My profile',
+        h('div', { class: 'fam-muted' }, `How ${me.name} shows on the calendar, chores and lists.`),
+        pic, field('My colour', colors, 'Everyone has their own colour; ones with a letter are taken.')));
+    } else {
+      body.append(this.card('My profile', h('p', { class: 'fam-muted' }, 'Your account isn’t linked to a family profile yet. Ask a parent to link it in Settings → Accounts; then you can choose your picture and colour here.')));
+    }
     const first = input({ value: u.first, maxlength: 60, autocomplete: 'given-name' });
     const last = input({ value: u.last, maxlength: 60, autocomplete: 'family-name' });
     const email = input({ type: 'email', value: u.email, maxlength: 200, autocomplete: 'email' });

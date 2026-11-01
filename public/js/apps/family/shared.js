@@ -1,7 +1,7 @@
 // Pieces the Family Organizer's screens share: sheets (its dialogs), profile avatars and pickers,
 // the emoji picker, colour swatches, weather icons and the parent PIN.
 
-import { h, clear } from '../../ui.js';
+import { h, clear, toast } from '../../ui.js';
 
 export const COLORS = ['#e8590c', '#f08c00', '#e0b000', '#66a80f', '#2f9e44', '#0ca678', '#1098ad', '#1c7ed6', '#4263eb', '#7048e8', '#ae3ec9', '#d6336c', '#c2255c', '#868e96', '#495057', '#8d6e63'];
 
@@ -61,6 +61,13 @@ export const toggle = (label, checked, onChange) => {
 
 export function avatar(m, size = 'md') {
   if (!m) return h('span', { class: `fam-avatar ${size} family`, title: 'Everyone', html: ICONS.family });
+  // A photo of them, or an emoji, or their first initial.
+  if (m.photo) {
+    const el = h('span', { class: `fam-avatar ${size} photo`, style: { '--c': m.color }, title: m.name });
+    // A photo that won't load (just removed, say) falls back to their emoji or initial.
+    el.append(h('img', { src: `/portal/family/recipes/image/${encodeURIComponent(m.photo)}`, alt: '', loading: 'lazy', onerror: () => { el.classList.remove('photo'); el.replaceChildren(m.emoji || (m.name || '?').slice(0, 1).toUpperCase()); } }));
+    return el;
+  }
   return h('span', { class: `fam-avatar ${size}`, style: { '--c': m.color }, title: m.name }, m.emoji || (m.name || '?').slice(0, 1).toUpperCase());
 }
 
@@ -98,11 +105,20 @@ export function emojiButton(value, onPick) {
   return btn;
 }
 
-export function colorPicker(value, onPick) {
+// taken: colours other people already have (colour → their name); those can't be picked.
+export function colorPicker(value, onPick, { taken = new Map() } = {}) {
   let cur = value || COLORS[0];
   const row = h('div', { class: 'fam-colors' });
-  const draw = () => clear(row, COLORS.map((c) => h('button', { type: 'button', class: `fam-swatch ${c === cur ? 'on' : ''}`, style: { background: c }, 'aria-label': c, onclick: () => { cur = c; draw(); onPick?.(c); } })),
-    h('label', { class: 'fam-swatch custom', title: 'Another colour', style: { background: COLORS.includes(cur) ? '' : cur } }, h('input', { type: 'color', value: cur, oninput: (e) => { cur = e.target.value; draw(); onPick?.(cur); } })));
+  const owner = (c) => taken.get(String(c).toLowerCase());
+  const pick = (c) => {
+    if (owner(c)) { toast(`That’s ${owner(c)}’s colour — pick another`, { timeout: 2500 }); draw(); return; }
+    cur = c; draw(); onPick?.(c);
+  };
+  const draw = () => clear(row, COLORS.map((c) => {
+    const who = owner(c);
+    return h('button', { type: 'button', class: `fam-swatch ${c.toLowerCase() === String(cur).toLowerCase() ? 'on' : ''} ${who ? 'taken' : ''}`, style: { background: c }, 'aria-label': who ? `${c}, ${who}’s colour` : c, title: who ? `${who}’s colour` : '', disabled: Boolean(who), onclick: () => pick(c) }, who ? who.slice(0, 1).toUpperCase() : null);
+  }),
+    h('label', { class: 'fam-swatch custom', title: 'Another colour', style: { background: COLORS.includes(cur) ? '' : cur } }, h('input', { type: 'color', value: cur, onchange: (e) => pick(e.target.value) })));
   draw();
   row.value = () => cur;
   return row;
