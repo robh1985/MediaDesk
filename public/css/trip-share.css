@@ -1,0 +1,33 @@
+:root { --bg: #f8f9fa; --fg: #16181d; --muted: #6b7280; --card: #fff; --line: #e5e7eb; --c: #1c7ed6; color-scheme: light dark; }
+@media (prefers-color-scheme: dark) { :root { --bg: #15171b; --fg: #e9ecef; --muted: #9aa0a8; --card: #1e2126; --line: #2e3238; } }
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg); font: 15px/1.5 system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; }
+.muted { color: var(--muted); }
+a { color: var(--c); }
+.ts-gone { display: grid; place-items: center; height: 100vh; text-align: center; }
+.ts-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(340px, 520px); height: 100vh; }
+.ts-map { height: 100%; }
+.ts-body { overflow: auto; padding: 0 24px 24px; border-left: 1px solid var(--line); background: var(--card); }
+.ts-days { position: sticky; top: 0; z-index: 2; display: flex; gap: 6px; overflow-x: auto; padding: 12px 0; background: var(--card); border-bottom: 1px solid var(--line); }
+.ts-days button { flex: none; display: flex; align-items: center; gap: 6px; padding: 6px 10px; border-radius: 999px; border: 1px solid var(--line); background: transparent; color: inherit; font: inherit; font-size: 13px; cursor: pointer; }
+.ts-days button small { color: var(--muted); }
+.ts-days button.on { border-color: var(--c); background: color-mix(in srgb, var(--c) 14%, transparent); }
+.ts-days i { width: 10px; height: 10px; border-radius: 50%; }
+.ts-doc header { padding: 18px 0 4px; }
+.ts-doc h1 { font-size: 26px; margin: 0 0 4px; }
+.ts-doc h2 { font-size: 17px; margin: 24px 0 8px; padding-bottom: 4px; border-bottom: 2px solid var(--line); }
+.ts-doc h2 small, .ts-doc small { color: var(--muted); font-weight: 400; }
+.ts-doc ol, .ts-doc ul { padding-left: 22px; margin: 0; }
+.ts-doc li { margin: 6px 0; }
+.ts-doc li.note { list-style: none; margin-left: -18px; color: var(--muted); font-style: italic; counter-increment: none; }
+.ts-doc table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.ts-doc td, .ts-doc th { text-align: left; padding: 6px; border-bottom: 1px solid var(--line); vertical-align: top; }
+.ts-doc tr.x { text-decoration: line-through; color: var(--muted); }
+.ts-doc .checks { list-style: none; padding: 0; columns: 2; }
+.ts-note { padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; margin: 8px 0; }
+footer { margin-top: 30px; font-size: 12px; }
+.tp-pin { background: none; border: 0; }
+.tp-pin-body { position: relative; width: 30px; height: 30px; margin: 2px; border-radius: 50% 50% 50% 0; transform: rotate(-45deg); background: var(--c); border: 2px solid #fff; box-shadow: 0 2px 6px rgba(0,0,0,.35); display: grid; place-items: center; }
+.tp-pin-body > span { transform: rotate(45deg); font-size: 14px; }
+.tp-pin-body > b { position: absolute; top: -6px; right: -8px; transform: rotate(45deg); min-width: 17px; height: 17px; padding: 0 4px; border-radius: 9px; background: #fff; color: #111; font: 700 11px/17px system-ui, sans-serif; text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,.3); }
+@media (max-width: 800px) { .ts-layout { grid-template-columns: 1fr; grid-template-rows: 45vh auto; height: auto; } .ts-map { height: 45vh; } .ts-body { border-left: 0; padding: 0 16px 16px; } }

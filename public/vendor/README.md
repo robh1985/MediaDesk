@@ -9,6 +9,10 @@ These are loaded only when needed (by Preview, Plex Viewer and the eBook Reader)
 | `sheetjs/` | [SheetJS Community Edition](https://sheetjs.com/) (`xlsx`) | 0.18.5 | Apache-2.0 | Spreadsheets (.xlsx, .xls, .ods, .csv) |
 | `hlsjs/` | [hls.js](https://github.com/video-dev/hls.js) (light build) | 1.7.3 | Apache-2.0 | Playing Plex video streams in Plex Viewer (browsers other than Safari) |
 | `jszip/` | [JSZip](https://stuk.github.io/jszip/) | 3.10.2 | MIT (dual MIT/GPLv3) | PowerPoint (.pptx) slides; reading EPUB and CBZ books in the eBook Reader |
+| `leaflet/` | [Leaflet](https://leafletjs.com) | 1.9.4 | BSD-2-Clause | Maps in the Trip Planner |
+| `leaflet.markercluster/` | [Leaflet.markercluster](https://github.com/Leaflet/Leaflet.markercluster) | 1.5.3 | MIT | Grouping nearby places on the Trip Planner's map |
+| `world-atlas/` | [world-atlas](https://github.com/topojson/world-atlas) (Natural Earth, 1:50m countries), with ISO country codes from [i18n-iso-countries](https://github.com/michaelwittig/node-i18n-iso-countries) | 2.0.2 | ISC (map data: public domain); MIT (codes) | The Trip Planner's Atlas |
+| `airports/` | [mwgg/Airports](https://github.com/mwgg/Airports) (IATA airports only, trimmed to code, name, city, country, position and time zone) | 2024 | MIT | Finding airports for flights in the Trip Planner |
 
 For Office files, Mammoth, SheetJS and JSZip run inside a dedicated Web Worker (`public/js/apps/office-worker.js`)
 with a time limit, so a malformed or hostile file cannot affect the MediaDesk page. Their output is shown

@@ -19,6 +19,7 @@ const { createPikvm } = require('./pikvm');
 const { createArchive } = require('./archive');
 const { createFamily } = require('./family');
 const { createEbooks } = require('./ebooks');
+const { createTrips } = require('./trips');
 
 const ROOT = __dirname;
 
@@ -311,6 +312,14 @@ function serveFamilyPage(req, res) {
   familyHtml ||= fs.readFileSync(path.join(PUBLIC_DIR, 'family.html'), 'utf8').replace(/(href|src)="(css|js)\//g, `$1="/v/${BUILD_ID}/$2/`);
   res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store, max-age=0' });
   res.end(req.method === 'HEAD' ? undefined : familyHtml);
+}
+
+// A shared trip's page (read-only, no sign-in), with the same versioned assets.
+let tripShareHtml = null;
+function serveTripSharePage(req, res) {
+  tripShareHtml ||= fs.readFileSync(path.join(PUBLIC_DIR, 'trip-share.html'), 'utf8').replace(/(href|src)="(css|js)\//g, `$1="/v/${BUILD_ID}/$2/`);
+  res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store, max-age=0', 'X-Robots-Tag': 'noindex', 'Referrer-Policy': 'no-referrer' });
+  res.end(req.method === 'HEAD' ? undefined : tripShareHtml);
 }
 
 function serveStatic(req, res, pathname) {
@@ -623,6 +632,7 @@ const games = createGames({
   sample: MOCK ? require('./mock-games').createSample() : null,
 });
 const pikvm = createPikvm({ getConfig: () => config.services.pikvm });
+const tripPlanner = createTrips({ dataDir: MOCK ? path.join(require('node:os').tmpdir(), 'mediadesk-demo-data') : path.dirname(CONFIG_PATH), mock: MOCK });
 const ebooks = createEbooks({
   dataDir: MOCK ? path.join(require('node:os').tmpdir(), 'mediadesk-demo-data') : path.dirname(CONFIG_PATH),
   getFolder: () => config.ebooksFolder || '',
@@ -717,6 +727,9 @@ async function handle(req, res) {
 
   // The family calendar for phones: its address has its own secret instead of a login.
   if (p.startsWith('/family-feed/') && req.method === 'GET') return family.feed(req, res, p, { sendJson });
+  // Trip Planner: a trip shared read-only by its secret link, and trips as calendar feeds.
+  if (/^\/trip\/[\w-]{20,}\/?$/.test(p) && req.method === 'GET') return serveTripSharePage(req, res);
+  if ((p.startsWith('/trip-share/') || p.startsWith('/trip-feed/')) && (req.method === 'GET' || req.method === 'HEAD')) return tripPlanner.publicHandle(req, res, url, { sendJson });
 
   const isApi = p.startsWith('/api/') || p.startsWith('/portal/');
   if (!isApi) return serveStatic(req, res, p);
@@ -774,6 +787,7 @@ async function handle(req, res) {
 
   if (p.startsWith('/portal/plex/')) return plexSignIn(req, res, p);
   if (p.startsWith('/portal/games/')) return games.handle(req, res, url, { sendJson, readJson });
+  if (p.startsWith('/portal/trips/')) return tripPlanner.handle(req, res, url, { sendJson, readJson });
   if (p.startsWith('/portal/ebooks/')) return ebooks.handle(req, res, url, { sendJson, readJson, readBody });
   if (p.startsWith('/portal/archive/')) return archive.handle(req, res, url, { sendJson, readJson });
 
