@@ -6,7 +6,7 @@
 import { h, clear } from '../../ui.js';
 import { geo } from './store.js';
 import { airportByCode, nearestAirport } from './bookings.js';
-import { TRAVEL, travelSummary, directionsLink, fmtKm, fmtMins, fmtDay, haversine, tripDays, esc } from './util.js';
+import { TRAVEL, travelSummary, directionsLink, units, fmtKm, fmtMins, fmtDay, haversine, tripDays, esc } from './util.js';
 
 // What to look for along a road trip.
 export const ALONG = {
@@ -170,13 +170,13 @@ async function alongRoute(view, x, cat) {
   const panel = view.panel;
   panel.hidden = false;
   panel.dataset.kind = 'along';
-  const radius = view.alongRadius || 3000;
+  const radius = view.alongRadius || (units() === 'km' ? 3000 : 3219);
   const results = h('div', { class: 'tp-explore-list' }, h('p', { class: 'muted small' }, 'Looking along the route…'));
   const days = tripDays(view.trip);
   const day = x.arrive && days.includes(x.arrive) ? x.arrive : null;
   clear(panel,
     h('div', { class: 'tp-panel-head' }, h('b', {}, `${ALONG[cat][1]} ${ALONG[cat][0]} on the way to ${x.name}`), h('button', { class: 'tp-icon-btn', 'aria-label': 'Close', onclick: () => { view.alongCat = null; view.closePanel(); } }, '✕')),
-    h('div', { class: 'tp-catchips' }, h('small', { class: 'muted' }, 'Within'), [1000, 3000, 5000, 10000].map((r) => h('button', { class: `tp-catchip ${r === radius ? 'on' : ''}`, onclick: () => { view.alongRadius = r; alongRoute(view, x, cat); } }, fmtKm(r))), h('small', { class: 'muted' }, 'of the road')),
+    h('div', { class: 'tp-catchips' }, h('small', { class: 'muted' }, 'Within'), (units() === 'km' ? [1000, 3000, 5000, 10000] : [805, 3219, 4828, 9656]).map((r) => h('button', { class: `tp-catchip ${r === radius ? 'on' : ''}`, onclick: () => { view.alongRadius = r; alongRoute(view, x, cat); } }, fmtKm(r))), h('small', { class: 'muted' }, 'of the road')),
     results);
   const ask = view.alongAsk = (view.alongAsk || 0) + 1;
   try {

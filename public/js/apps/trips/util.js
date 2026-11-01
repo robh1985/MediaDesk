@@ -30,7 +30,16 @@ export function countdown(trip) {
   return 'Done';
 }
 export const fmtMins = (sec) => { const m = Math.round(sec / 60); return m < 60 ? `${m} min` : `${Math.floor(m / 60)} h${m % 60 ? ` ${m % 60} min` : ''}`; };
-export const fmtKm = (m) => (m < 1000 ? `${Math.round(m)} m` : `${(m / 1000).toFixed(m < 10000 ? 1 : 0)} km`);
+// Distances in the open trip's unit: miles (the default) or kilometres.
+export const UNITS = { mi: 'Miles', km: 'Kilometers' };
+let unit = 'mi';
+export const setUnits = (u) => { unit = u === 'km' ? 'km' : 'mi'; };
+export const units = () => unit;
+export const fmtKm = (m) => {
+  if (unit === 'km') return m < 1000 ? `${Math.round(m)} m` : `${(m / 1000).toFixed(m < 10000 ? 1 : 0)} km`;
+  const mi = m / 1609.344;
+  return mi < 0.1 ? `${Math.round(m * 3.28084 / 10) * 10} ft` : `${mi.toFixed(mi < 10 ? 1 : 0)} mi`;
+};
 
 // --- Places ------------------------------------------------------------------------------------
 export const CATEGORIES = {

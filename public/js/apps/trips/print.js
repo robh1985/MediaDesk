@@ -1,7 +1,7 @@
 // Trip Planner: a printable itinerary (print it, or save it as a PDF from the print dialog). Also
 // used by the read-only share page, from the same data.
 
-import { tripDays, fmtDay, fmtTime, fmtRange, catOf, bookingType, money, expenseParts, esc, TRAVEL, travelSummary, fmtKm, fmtMins } from './util.js';
+import { tripDays, fmtDay, fmtTime, fmtRange, catOf, bookingType, money, expenseParts, esc, TRAVEL, travelSummary, fmtKm, fmtMins, setUnits } from './util.js';
 
 const placeKey = (p) => (Number.isFinite(p?.lat) ? `${p.lat.toFixed(4)},${p.lon.toFixed(4)}` : '');
 // The driving route saved for the journey to destination i (if it still fits the journey).
@@ -51,6 +51,7 @@ function routeSvg(t) {
 // The itinerary as HTML, from a trip's data ({ trip, places, items, bookings, … }).
 export function itineraryHtml(d, { routeMap = true } = {}) {
   const t = d.trip;
+  setUnits(t.units);
   const all = (col) => Object.values(d[col] || {});
   const days = tripDays(t);
   const items = (date) => all('items').filter((it) => (it.date || null) === date).sort((a, b) => (a.order ?? 0) - (b.order ?? 0));

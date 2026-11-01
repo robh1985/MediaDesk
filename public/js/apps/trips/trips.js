@@ -15,7 +15,7 @@ import { AtlasView } from './atlas.js';
 import { printTrip } from './print.js';
 import { placeInput, destinationsEditor, destinationLabel, travelEditor } from './destinations.js';
 import {
-  today, addDays, dayDiff, fmtRange, countdown, CURRENCIES, DAY_COLORS, avatar, sheet, field, input, select, textarea, emptyState,
+  today, addDays, dayDiff, fmtRange, UNITS, setUnits, countdown, CURRENCIES, DAY_COLORS, avatar, sheet, field, input, select, textarea, emptyState,
 } from './util.js';
 
 let cssAdded = false;
@@ -124,9 +124,10 @@ class TripPlanner {
     const where = whereTo({ start: start.value, end: end.value });
     const dates = linkDates(start, end, (a, b) => where.setRange(a, b));
     const cur = select(CURRENCIES.map((c) => [c, c]), 'USD');
+    const dist = select(Object.entries(UNITS), 'mi');
     const r = await sheet(this.root, {
       title: 'New trip', wide: true,
-      body: h('div', { class: 'tp-form' }, field('Name', title), where.multi, h('div', { class: 'tp-row' }, field('From', start), field('To', end)), where.origin, where.el, field('Money in', cur, 'Costs are added up in this currency')),
+      body: h('div', { class: 'tp-form' }, field('Name', title), where.multi, h('div', { class: 'tp-row' }, field('From', start), field('To', end)), where.origin, where.el, h('div', { class: 'tp-row' }, field('Money in', cur, 'Costs are added up in this currency'), field('Distances in', dist, 'For routes and searches'))),
       actions: [{ label: 'Cancel' }, { label: 'Create', primary: true, submit: true, value: true }],
     });
     if (!r) return;
@@ -134,7 +135,7 @@ class TripPlanner {
       const me = window.mediadesk?.user?.name || 'Me';
       const places = await where.value();
       const origin = await where.originValue();
-      const { trip } = await api('create', { method: 'POST', body: { origin, title: title.value.trim() || (places[0] ? `${places[0].name} trip` : 'New trip'), destination: destinationLabel(places), destinations: places, start: start.value || null, end: end.value || null, currency: cur.value, color: COLORS[Math.floor(Math.random() * COLORS.length)], cover: COVERS[Math.floor(Math.random() * COVERS.length)], members: [{ name: me, color: '#3b82f6' }] } });
+      const { trip } = await api('create', { method: 'POST', body: { origin, title: title.value.trim() || (places[0] ? `${places[0].name} trip` : 'New trip'), destination: destinationLabel(places), destinations: places, start: start.value || null, end: end.value || null, currency: cur.value, units: dist.value, color: COLORS[Math.floor(Math.random() * COLORS.length)], cover: COVERS[Math.floor(Math.random() * COVERS.length)], members: [{ name: me, color: '#3b82f6' }] } });
       this.openTrip(trip.id);
     } catch (err) { toastError(err); }
   }
@@ -166,6 +167,7 @@ class TripPlanner {
     const store = new TripStore(id);
     try { await store.load(); } catch (err) { clear(this.root, emptyState('⚠️', err.message, h('button', { class: 'btn', onclick: () => this.showDashboard() }, 'Back to trips'))); return; }
     this.store = store;
+    setUnits(store.trip.units);
     this.views = {};
     this.tab = tab;
     this.unsub = store.on((why) => this.refresh(why));
@@ -191,6 +193,7 @@ class TripPlanner {
     this.drawHead();
   }
   drawHead() {
+    setUnits(this.store.trip.units);
     const t = this.store.trip;
     clear(this.headEl, h('span', { class: 'tp-trip-cover' }, t.cover || '🗺️'),
       h('div', {}, h('h2', {}, t.title), h('p', { class: 'muted small' }, [t.destination, t.start ? fmtRange(t.start, t.end) : null, t.start ? countdown(t) : null].filter(Boolean).join(' · '))),
@@ -262,6 +265,7 @@ class TripPlanner {
     const dates = linkDates(start, end, (a, b) => where.setRange(a, b));
     const cur = select(CURRENCIES.map((c) => [c, c]), t.currency || 'EUR');
     const budget = input({ type: 'number', min: 0, step: 1, value: t.budget || '', placeholder: 'None' });
+    const dist = select(Object.entries(UNITS), t.units === 'km' ? 'km' : 'mi');
     let color = t.color || COLORS[0];
     let cover = t.cover || '🗺️';
     const colors = h('div', { class: 'tp-swatches' });
@@ -285,7 +289,7 @@ class TripPlanner {
         h('div', { class: 'tp-row' }, field('From', start), field('To', end)),
         h('p', { class: 'muted small' }, 'Changing the start date moves the whole plan (and bookings) with it.'),
         where.origin, where.el,
-        h('div', { class: 'tp-row' }, field('Money in', cur), field(`Budget (${t.currency || 'EUR'})`, budget)),
+        h('div', { class: 'tp-row' }, field('Money in', cur), field(`Budget (${t.currency || 'EUR'})`, budget), field('Distances in', dist)),
         field('Colour', colors), field('Picture', covers),
         field('Travellers', memberBox, 'Everyone on the trip: for splitting costs, packing and to-dos.')),
       actions: [
@@ -305,7 +309,7 @@ class TripPlanner {
               if (start.value) await this.store.redate(start.value, end.value || start.value);
               else await this.store.patchTrip({ start: null, end: null });
             }
-            await this.store.patchTrip({ title: title.value.trim() || t.title, origin, destination: destinationLabel(places), destinations: places, description: desc.value, currency: cur.value, budget: Number(budget.value) || null, color, cover, members: members.map((m) => ({ ...m, name: m.name.trim() || 'Traveller' })) }, { label: 'trip settings' });
+            await this.store.patchTrip({ title: title.value.trim() || t.title, origin, destination: destinationLabel(places), destinations: places, description: desc.value, currency: cur.value, units: dist.value, budget: Number(budget.value) || null, color, cover, members: members.map((m) => ({ ...m, name: m.name.trim() || 'Traveller' })) }, { label: 'trip settings' });
           } catch (err) { toastError(err); }
         } }],
     });

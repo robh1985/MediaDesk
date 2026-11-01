@@ -115,6 +115,7 @@ function createTrips({ dataDir, mock = false, log = console.log }) {
     if ('archived' in t) out.archived = Boolean(t.archived);
     if ('members' in t && Array.isArray(t.members)) out.members = t.members.slice(0, 50).map((m) => ({ id: String(m.id || newId()).slice(0, 40), name: String(m.name || 'Traveller').slice(0, 60), color: String(m.color || '#3b82f6').slice(0, 20), email: m.email ? String(m.email).slice(0, 200) : undefined }));
     if ('dayModes' in t) out.dayModes = Object.fromEntries(Object.entries(t.dayModes && typeof t.dayModes === 'object' ? t.dayModes : {}).filter(([d, m]) => isDate(d) && ['foot', 'bike', 'car', 'transit'].includes(m)).slice(0, 400));
+    if ('units' in t) out.units = t.units === 'km' ? 'km' : 'mi';
     if ('origin' in t) out.origin = cleanPlace(t.origin);
     // Driving routes worked out for journeys between destinations (kept so they're there next time).
     if ('legRoutes' in t) {

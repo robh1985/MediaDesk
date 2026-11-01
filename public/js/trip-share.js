@@ -1,7 +1,7 @@
 // A trip shared with a read-only link (/trip/<token>): the plan on a map, day by day, and whatever
 // else the link was set to show (bookings, packing, costs, notes).
 
-import { tripDays, fmtDay, DAY_COLORS, catOf, esc } from './apps/trips/util.js';
+import { tripDays, fmtDay, DAY_COLORS, catOf, esc, setUnits } from './apps/trips/util.js';
 import { itineraryHtml } from './apps/trips/print.js';
 import { loadLeaflet, placeIcon, fitTo, tileLayer } from './apps/trips/map.js';
 
@@ -16,6 +16,7 @@ async function start() {
     if (!r.ok) throw new Error(d.error || 'This trip can’t be shown');
   } catch (err) { main.innerHTML = `<div class="ts-gone"><h1>🧭</h1><p>${esc(err.message)}</p></div>`; return; }
   const t = d.trip;
+  setUnits(t.units);
   document.title = t.title;
   document.documentElement.style.setProperty('--c', t.color || '#1c7ed6');
   const days = tripDays(t);
