@@ -1,6 +1,10 @@
 services:
   mediadesk:
-    build: .
+    build:
+      context: .
+      # args:
+      #   WITH_OFFICE: "true"      # LibreOffice, for Office documents in Preview (large)
+      #   WITH_CALIBRE: "false"    # leave out Calibre (eBook Reader: AZW3, Word, RTF, ODT, LIT books)
     container_name: mediadesk
     restart: unless-stopped
     ports:
