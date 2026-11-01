@@ -147,6 +147,7 @@ export class TripStore {
 
 export const geo = {
   search: (q, near) => api(`geo/search?${new URLSearchParams({ q, ...(near ? { near } : {}) })}`).then((r) => r.places),
+  suggest: (q) => api(`geo/suggest?${new URLSearchParams({ q })}`).then((r) => r.places),
   reverse: (lat, lon) => api(`geo/reverse?lat=${lat}&lon=${lon}`).then((r) => r.place),
   wiki: (p) => api(`geo/wiki?${new URLSearchParams({ ...(p.wiki ? { title: p.wiki } : {}), lat: p.lat, lon: p.lon, name: p.name })}`).then((r) => r.wiki),
   nearby: (lat, lon, cat, radius = 1500) => api(`geo/nearby?lat=${lat}&lon=${lon}&cat=${cat}&radius=${radius}`).then((r) => r.places),

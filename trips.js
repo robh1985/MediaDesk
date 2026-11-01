@@ -89,7 +89,8 @@ function createTrips({ dataDir, mock = false, log = console.log }) {
       id: d.id, rev: d.rev, title: t.title, destination: t.destination || '', start: t.start || null, end: t.end || null, archived: Boolean(t.archived),
       cover: t.cover || null, color: t.color || null, members: t.members, currency: t.currency || 'EUR', updated: d.updated,
       counts: { places: places.length, bookings: Object.keys(d.bookings).length, expenses: Object.keys(d.expenses).length },
-      countries: [...new Set(places.map((p) => p.country).filter(Boolean))],
+      countries: [...new Set([...places.map((p) => p.country), ...(t.destinations || []).map((x) => x.country)].filter(Boolean))],
+      destinations: (t.destinations || []).map((x) => x.name),
       center: places.length ? { lat: places.reduce((a, p) => a + (p.lat || 0), 0) / places.length, lon: places.reduce((a, p) => a + (p.lon || 0), 0) / places.length } : null,
     };
   }
@@ -114,6 +115,13 @@ function createTrips({ dataDir, mock = false, log = console.log }) {
     if ('archived' in t) out.archived = Boolean(t.archived);
     if ('members' in t && Array.isArray(t.members)) out.members = t.members.slice(0, 50).map((m) => ({ id: String(m.id || newId()).slice(0, 40), name: String(m.name || 'Traveller').slice(0, 60), color: String(m.color || '#3b82f6').slice(0, 20), email: m.email ? String(m.email).slice(0, 200) : undefined }));
     if ('dayModes' in t) out.dayModes = Object.fromEntries(Object.entries(t.dayModes && typeof t.dayModes === 'object' ? t.dayModes : {}).filter(([d, m]) => isDate(d) && ['foot', 'bike', 'car', 'transit'].includes(m)).slice(0, 400));
+    if ('destinations' in t) {
+      out.destinations = (Array.isArray(t.destinations) ? t.destinations : []).slice(0, 40).map((x) => ({
+        id: String(x.id || newId()).replace(/[^\w-]/g, '').slice(0, 40) || newId(), name: String(x.name || 'Destination').slice(0, 120), address: x.address ? String(x.address).slice(0, 300) : '',
+        lat: Number.isFinite(Number(x.lat)) && x.lat !== null ? Number(x.lat) : null, lon: Number.isFinite(Number(x.lon)) && x.lon !== null ? Number(x.lon) : null,
+        country: /^[A-Za-z]{2}$/.test(x.country || '') ? x.country.toUpperCase() : null, arrive: isDate(x.arrive) ? x.arrive : null, depart: isDate(x.depart) ? x.depart : null,
+      }));
+    }
     if ('budget' in t) out.budget = Number(t.budget) || null;
     if ('home' in t) out.home = t.home && Number.isFinite(t.home.lat) ? { lat: t.home.lat, lon: t.home.lon, name: String(t.home.name || '').slice(0, 200) } : null;
     out.members ||= [];
@@ -171,10 +179,12 @@ function createTrips({ dataDir, mock = false, log = console.log }) {
         if (Array.isArray(b.legs)) for (const l of b.legs) { l.depart = shiftDateTime(l.depart, n); l.arrive = shiftDateTime(l.arrive, n); }
       }
       for (const e of Object.values(d.entries)) if (isDate(e.due)) e.due = addDays(e.due, n);
+      for (const x of d.trip.destinations || []) { if (isDate(x.arrive)) x.arrive = addDays(x.arrive, n); if (isDate(x.depart)) x.depart = addDays(x.depart, n); }
       if (d.trip.dayModes) d.trip.dayModes = Object.fromEntries(Object.entries(d.trip.dayModes).map(([k, v]) => [addDays(k, n), v]));
     }
     d.trip.start = start;
     d.trip.end = newEnd < start ? start : newEnd;
+    for (const x of d.trip.destinations || []) { for (const k of ['arrive', 'depart']) if (isDate(x[k])) x[k] = x[k] < d.trip.start ? d.trip.start : x[k] > d.trip.end ? d.trip.end : x[k]; }
     // Days that fall outside the trip now: their plans go back to the unplanned list.
     for (const it of Object.values(d.items)) if (isDate(it.date) && (it.date < d.trip.start || it.date > d.trip.end)) it.date = null;
     d.rev++;
@@ -257,7 +267,7 @@ function createTrips({ dataDir, mock = false, log = console.log }) {
   // What a read-only share link shows: the parts its options allow.
   function shared(d) {
     const o = d.trip.shareOptions || {};
-    const out = { trip: { title: d.trip.title, description: d.trip.description, destination: d.trip.destination, start: d.trip.start, end: d.trip.end, cover: d.trip.cover, color: d.trip.color, currency: d.trip.currency, members: d.trip.members.map((m) => ({ id: m.id, name: m.name, color: m.color })) }, options: o };
+    const out = { trip: { title: d.trip.title, description: d.trip.description, destination: d.trip.destination, destinations: d.trip.destinations || [], start: d.trip.start, end: d.trip.end, cover: d.trip.cover, color: d.trip.color, currency: d.trip.currency, members: d.trip.members.map((m) => ({ id: m.id, name: m.name, color: m.color })) }, options: o };
     out.places = d.places;
     out.items = Object.fromEntries(Object.entries(d.items).filter(([, it]) => it.kind !== 'booking' || o.bookings));
     out.files = Object.fromEntries(Object.entries(d.files).filter(([, f]) => !f.deleted && /^image\//.test(f.type) && (f.id === d.trip.cover || f.placeId)));
@@ -341,6 +351,23 @@ function createTrips({ dataDir, mock = false, log = console.log }) {
       const params = new URLSearchParams({ q, format: 'jsonv2', limit: '10', addressdetails: '1', extratags: '1', namedetails: '1' });
       if (near) { const [lat, lon] = near.split(',').map(Number); if (Number.isFinite(lat)) params.set('viewbox', `${lon - 2},${lat + 2},${lon + 2},${lat - 2}`); }
       return (await nominatim(`search?${params}`)).map(placeFromNominatim);
+    },
+    // Towns, cities, regions and countries as you type (Photon is made for that; Nominatim's
+    // rules don't allow it).
+    async suggest(q) {
+      q = String(q || '').trim().slice(0, 100);
+      if (q.length < 2) return [];
+      if (mock) { const s = q.toLowerCase(); return DEMO_CITIES.filter((c) => c[0].toLowerCase().startsWith(s) || c[1].toLowerCase().startsWith(s)).slice(0, 8).map(([name, country, code, lat, lon, kind]) => ({ name, lat, lon, country: code, address: kind === 'country' ? name : [name, country].join(', '), kind })); }
+      const params = new URLSearchParams({ q, limit: '8', lang: 'en' });
+      for (const t of ['place:city', 'place:town', 'place:village', 'place:island', 'place:state', 'place:region', 'place:county', 'place:country', 'place:archipelago', 'boundary:administrative']) params.append('osm_tag', t);
+      const data = await fetchJson(`https://photon.komoot.io/api/?${params}`, { ttl: 7 * 864e5 });
+      const seen = new Set();
+      return (data.features || []).map((f) => {
+        const pr = f.properties || {};
+        const [lon, lat] = f.geometry?.coordinates || [];
+        const kind = pr.type || pr.osm_value || 'place';
+        return { name: pr.name || q, lat, lon, country: (pr.countrycode || '').toUpperCase() || null, address: [pr.name, kind === 'country' ? null : pr.state, kind === 'country' ? null : pr.country].filter(Boolean).filter((x, i, a) => a.indexOf(x) === i).join(', '), kind };
+      }).filter((p) => Number.isFinite(p.lat) && !seen.has(p.address) && seen.add(p.address));
     },
     async reverse(lat, lon) {
       if (mock) return { name: 'Dropped pin', lat, lon, address: `${lat.toFixed(4)}, ${lon.toFixed(4)}`, category: 'other', country: 'PT' };
@@ -427,6 +454,7 @@ function createTrips({ dataDir, mock = false, log = console.log }) {
       if (p.startsWith('/geo/')) {
         const num = (k) => Number(q.get(k));
         if (p === '/geo/search') return sendJson(res, 200, { places: await geo.search(String(q.get('q') || '').slice(0, 200), q.get('near')) });
+        if (p === '/geo/suggest') return sendJson(res, 200, { places: await geo.suggest(q.get('q')) });
         if (p === '/geo/reverse') return sendJson(res, 200, { place: await geo.reverse(num('lat'), num('lon')) });
         if (p === '/geo/wiki') return sendJson(res, 200, { wiki: await geo.wiki({ title: q.get('title'), lat: num('lat'), lon: num('lon'), name: q.get('name') }) });
         if (p === '/geo/nearby') return sendJson(res, 200, { places: await geo.nearby(num('lat'), num('lon'), q.get('cat') || 'sights', q.get('radius')) });
@@ -527,6 +555,7 @@ function createTrips({ dataDir, mock = false, log = console.log }) {
 
   // --- Demo mode: a trip to Portugal, and a small built-in world -----------------------------------
 
+  const DEMO_CITIES = [['Lisbon', 'Portugal', 'PT', 38.7223, -9.1393, 'city'], ['Porto', 'Portugal', 'PT', 41.1579, -8.6291, 'city'], ['Portugal', 'Portugal', 'PT', 39.6, -8.0, 'country'], ['Sintra', 'Portugal', 'PT', 38.8029, -9.3817, 'town'], ['Lagos', 'Portugal', 'PT', 37.1028, -8.6730, 'town'], ['Paris', 'France', 'FR', 48.8566, 2.3522, 'city'], ['Rome', 'Italy', 'IT', 41.9028, 12.4964, 'city'], ['Florence', 'Italy', 'IT', 43.7696, 11.2558, 'city'], ['Venice', 'Italy', 'IT', 45.4408, 12.3155, 'city'], ['Barcelona', 'Spain', 'ES', 41.3874, 2.1686, 'city'], ['Madrid', 'Spain', 'ES', 40.4168, -3.7038, 'city'], ['London', 'United Kingdom', 'GB', 51.5072, -0.1276, 'city'], ['Tokyo', 'Japan', 'JP', 35.6762, 139.6503, 'city'], ['Kyoto', 'Japan', 'JP', 35.0116, 135.7681, 'city'], ['New York', 'United States', 'US', 40.7128, -74.006, 'city'], ['San Francisco', 'United States', 'US', 37.7749, -122.4194, 'city'], ['Amsterdam', 'Netherlands', 'NL', 52.3676, 4.9041, 'city'], ['Berlin', 'Germany', 'DE', 52.52, 13.405, 'city']];
   const DEMO_PLACES = [
     ['Belém Tower', 38.6916, -9.2160, 'sights', 'Av. Brasília, 1400-038 Lisboa', 'PT'], ['Jerónimos Monastery', 38.6979, -9.2068, 'sights', 'Praça do Império, 1400-206 Lisboa', 'PT'],
     ['Pastéis de Belém', 38.6975, -9.2032, 'cafe', 'R. de Belém 84-92, Lisboa', 'PT'], ['LX Factory', 38.7036, -9.1786, 'shopping', 'R. Rodrigues de Faria 103, Lisboa', 'PT'],
@@ -589,7 +618,7 @@ function createTrips({ dataDir, mock = false, log = console.log }) {
     const today = new Date().toISOString().slice(0, 10);
     const start = addDays(today, 12);
     const members = [{ id: 'm-rob', name: 'Rob', color: '#3b82f6' }, { id: 'm-sam', name: 'Sam', color: '#e8590c' }, { id: 'm-alex', name: 'Alex', color: '#2f9e44' }];
-    const d = normalise({ id: 'demo-portugal', rev: 1, created: Date.now(), updated: Date.now(), trip: { title: 'Portugal road trip', destination: 'Lisbon, Sintra & Porto', description: 'Pastéis, palaces and port wine.', start, end: addDays(start, 6), currency: 'EUR', color: '#e8590c', members } });
+    const d = normalise({ id: 'demo-portugal', rev: 1, created: Date.now(), updated: Date.now(), trip: { title: 'Portugal road trip', destination: 'Lisbon & Porto', destinations: [{ id: 'd-lisbon', name: 'Lisbon', address: 'Lisbon, Portugal', lat: 38.7223, lon: -9.1393, country: 'PT', arrive: start, depart: addDays(start, 4) }, { id: 'd-porto', name: 'Porto', address: 'Porto, Portugal', lat: 41.1579, lon: -8.6291, country: 'PT', arrive: addDays(start, 4), depart: addDays(start, 6) }], description: 'Pastéis, palaces and port wine.', start, end: addDays(start, 6), currency: 'EUR', color: '#e8590c', members } });
     const pid = {};
     for (const p of DEMO_PLACES.slice(0, 19)) { const id = `p-${p[0].toLowerCase().replace(/[^a-z]+/g, '-')}`; pid[p[0]] = id; d.places[id] = { id, ...demoPlace(p), created: Date.now() }; }
     d.places[pid['Pastéis de Belém']].rating = 5;

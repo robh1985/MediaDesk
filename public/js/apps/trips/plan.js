@@ -7,6 +7,7 @@
 import { h, clear, toast, toastError } from '../../ui.js';
 import { geo, newId } from './store.js';
 import { makeMap, placeIcon, fitTo, STYLES } from './map.js';
+import { dayDestinations, nearestDestination } from './destinations.js';
 import {
   tripDays, fmtDay, fmtTime, fmtMins, fmtKm, CATEGORIES, catOf, DAY_COLORS, bookingType, BOOKING_TYPES, STAYS, haversine, optimiseOrder, weatherIcon,
   navLinks, googleDirections, sheet, field, input, select, textarea, emptyState, esc,
@@ -29,6 +30,15 @@ export class PlanView {
   get trip() { return this.store.trip; }
   dayList() { return tripDays(this.trip); }
   itemsOn(date) { return this.store.all('items').filter((it) => (it.date || null) === date).sort((a, b) => (a.order ?? 0) - (b.order ?? 0)); }
+  dests() { return this.trip.destinations || []; }
+  dest(id) { return this.dests().find((x) => x.id === id) || null; }
+  // The destination a place not on a day belongs to: where it was put, or the nearest.
+  poolDest(it) {
+    if (it.dest && this.dest(it.dest)) return it.dest;
+    return nearestDestination(this.trip, it.kind === 'place' ? this.store.get('places', it.placeId) : null);
+  }
+  // A day's items, or the places to visit (for one destination).
+  itemsIn(date, destId) { const list = this.itemsOn(date); return date || !destId ? list : list.filter((it) => this.poolDest(it) === destId); }
   dayColor(date) { const i = this.dayList().indexOf(date); return i < 0 ? '#868e96' : DAY_COLORS[i % DAY_COLORS.length]; }
   modeOf(date) { return (this.trip.dayModes || {})[date] || 'foot'; }
   // The located stops of a day, in order (places, and bookings with a place).
@@ -64,7 +74,7 @@ export class PlanView {
     this.panel = h('div', { class: 'tp-panel', hidden: true });
     const styleSel = select(Object.entries(STYLES).map(([k, v]) => [k, v[0]]), '', { class: 'input tp-mapstyle', 'aria-label': 'Map style', onchange: (e) => { this.mapStyle = e.target.value; this.map?.setStyle(e.target.value); } });
     styleSel.prepend(h('option', { value: '', selected: true, disabled: true }, 'Map style'));
-    const overview = h('button', { class: 'btn btn-sm tp-overview', onclick: () => { this.day = null; this.render(this.el); } }, '🗺️ Whole trip');
+    const overview = h('button', { class: 'btn btn-sm tp-overview', onclick: () => { this.day = null; this.lastDay = null; this.render(this.el); this.fitAll(); } }, '🗺️ Whole trip');
     this.layout = h('div', { class: 'tp-plan' },
       h('div', { class: 'tp-plan-side' }, tools, this.side),
       h('div', { class: 'tp-plan-mapwrap' }, this.mapEl, h('div', { class: 'tp-map-tools' }, overview, styleSel), this.panel));
@@ -82,22 +92,55 @@ export class PlanView {
   // --- The days -----------------------------------------------------------------------------
 
   drawSide() {
-    const days = this.dayList();
     this.undoBtn.disabled = !this.store.canUndo();
-    const pool = this.itemsOn(null);
-    const sections = [
-      this.daySection(null, pool),
-      ...days.map((d, i) => this.daySection(d, this.itemsOn(d), i)),
-    ];
-    if (!days.length) sections.push(h('p', { class: 'muted small tp-pad' }, 'Give the trip dates (⚙ Trip settings) to plan it day by day.'));
-    const keep = this.side.scrollTop;
-    clear(this.side, sections);
-    this.side.scrollTop = keep;
+    this.drawSideOnly();
     this.loadWeather();
     this.loadRoutes();
   }
 
-  daySection(date, items, index) {
+  // Without destinations: the places to visit, then the days. With them: each destination folds
+  // open to its own places to visit and its days.
+  sideSections() {
+    const days = this.dayList();
+    const dests = this.dests();
+    const sections = [];
+    if (!dests.length) sections.push(this.daySection(null, this.itemsOn(null)), ...days.map((d, i) => this.daySection(d, this.itemsOn(d), i)));
+    else {
+      const byDay = dayDestinations(this.trip);
+      dests.forEach((x, k) => {
+        const mine = days.filter((d) => byDay.get(d) === x.id);
+        const pool = this.itemsIn(null, x.id);
+        const open = !this.collapsed().has(x.id);
+        const span = mine.length ? `${fmtDay(mine[0])}${mine.length > 1 ? ` – ${fmtDay(mine.at(-1))}` : ''} · ${mine.length} day${mine.length === 1 ? '' : 's'}` : 'No days';
+        const places = new Set([...pool, ...mine.flatMap((d) => this.itemsOn(d))].filter((it) => it.kind === 'place').map((it) => it.placeId)).size;
+        sections.push(h('section', { class: `tp-dest ${open ? 'open' : ''}`, dataset: { dest: x.id } },
+          h('button', { class: 'tp-dest-head', 'aria-expanded': String(open), onclick: () => this.toggleDest(x) },
+            h('span', { class: 'tp-dest-chev', 'aria-hidden': 'true' }, '▸'),
+            h('span', { class: 'tp-dest-pin' }, k + 1),
+            h('span', { class: 'tp-dest-title' }, h('b', {}, x.name), h('small', {}, `${span} · ${places} place${places === 1 ? '' : 's'}`))),
+          open ? h('div', { class: 'tp-dest-body' }, this.daySection(null, pool, undefined, x), mine.map((d) => this.daySection(d, this.itemsOn(d), days.indexOf(d)))) : null));
+      });
+      const other = days.filter((d) => !byDay.has(d));
+      if (other.length) sections.push(h('section', { class: 'tp-dest open other' }, h('div', { class: 'tp-dest-head static' }, h('span', { class: 'tp-dest-title' }, h('b', {}, 'Other days'), h('small', {}, 'Not at any destination'))), h('div', { class: 'tp-dest-body' }, other.map((d) => this.daySection(d, this.itemsOn(d), days.indexOf(d))))));
+    }
+    if (!days.length) sections.push(h('p', { class: 'muted small tp-pad' }, 'Give the trip dates (⚙ Trip settings) to plan it day by day.'));
+    return sections;
+  }
+  drawSideOnly() { const keep = this.side.scrollTop; clear(this.side, this.sideSections()); this.side.scrollTop = keep; }
+
+  // Which destinations are folded away (kept for each trip on this device).
+  collapsed() {
+    if (!this._collapsed) { let v = []; try { v = JSON.parse(localStorage.getItem(`mediadesk.trips.folded.${this.store.id}`) || '[]'); } catch { /* none */ } this._collapsed = new Set(v); }
+    return this._collapsed;
+  }
+  toggleDest(x) {
+    const c = this.collapsed();
+    if (c.has(x.id)) { c.delete(x.id); this.focusDest(x); } else c.add(x.id);
+    try { localStorage.setItem(`mediadesk.trips.folded.${this.store.id}`, JSON.stringify([...c])); } catch { /* not kept */ }
+    this.drawSideOnly();
+  }
+
+  daySection(date, items, index, dest = null) {
     const color = date ? this.dayColor(date) : '#868e96';
     const on = this.day === date && date;
     const stops = date ? this.stopsOf(date) : [];
@@ -118,7 +161,7 @@ export class PlanView {
           h('button', { class: 'tp-icon-btn', title: 'Shortest order', 'aria-label': 'Put in the shortest order', disabled: stops.length < 3, onclick: () => this.optimise(date) }, '⇄'),
           h('button', { class: 'tp-icon-btn', title: 'Open in Google Maps', 'aria-label': 'Open the day in Google Maps', disabled: stops.length < 1, onclick: () => window.open(googleDirections(stops, mode), '_blank', 'noopener') }, '↗'),
           h('button', { class: 'tp-icon-btn', title: 'Add a note', 'aria-label': 'Add a note', onclick: () => this.editNote(null, date) }, '✎')))
-      : h('div', { class: 'tp-day-head pool' }, h('span', { class: 'tp-day-dot', style: { background: color } }, '★'), h('div', { class: 'tp-day-title' }, h('b', {}, 'Places to visit'), h('span', {}, 'Not on a day yet — drag them onto one')));
+      : h('div', { class: 'tp-day-head pool' }, h('span', { class: 'tp-day-dot', style: { background: color } }, '★'), h('div', { class: 'tp-day-title' }, h('b', {}, dest ? `Places to visit in ${dest.name}` : 'Places to visit'), h('span', {}, 'Not on a day yet — drag them onto one')));
     const list = h('div', { class: 'tp-day-items', dataset: { date: date || '' } });
     let n = 0;
     const legs = route?.legs || [];
@@ -134,7 +177,7 @@ export class PlanView {
     });
     if (!items.length) list.append(h('div', { class: 'tp-day-empty' }, date ? 'Drop places here, or search above' : 'Search for places, or explore what’s nearby'));
     if (date && mode === 'transit' && stops.length > 1) list.append(h('a', { class: 'tp-leg link', href: googleDirections(stops, 'transit'), target: '_blank', rel: 'noopener' }, '🚆 See public transport in Google Maps ↗'));
-    this.dropTarget(list, date);
+    this.dropTarget(list, date, dest?.id || null);
     return h('section', { class: `tp-day ${on ? 'on' : ''}`, style: { '--c': color } }, head, list);
   }
 
@@ -168,7 +211,7 @@ export class PlanView {
   }
 
   // Drop a dragged item into a day, before or after the row it's over.
-  dropTarget(list, date) {
+  dropTarget(list, date, destId = null) {
     const target = (e) => { const row = e.target.closest('.tp-item'); if (!row || row.dataset.id === this.dragId) return null; const r = row.getBoundingClientRect(); return { row, after: e.clientY > r.top + r.height / 2 }; };
     list.addEventListener('dragover', (e) => {
       if (!this.dragId) return;
@@ -184,23 +227,25 @@ export class PlanView {
       list.classList.remove('drop-on');
       const id = e.dataTransfer.getData('text/plain') || this.dragId;
       const t = target(e);
-      this.moveItem(id, date, t ? { id: t.row.dataset.id, after: t.after } : null);
+      this.moveItem(id, date, t ? { id: t.row.dataset.id, after: t.after } : null, destId);
     });
   }
-  moveItem(id, date, at) {
+  moveItem(id, date, at, destId = null) {
     const it = this.store.get('items', id);
     if (!it) return;
-    const rest = this.itemsOn(date).filter((x) => x.id !== id);
+    const rest = this.itemsIn(date, destId).filter((x) => x.id !== id);
     let idx = rest.length;
     if (at) { const k = rest.findIndex((x) => x.id === at.id); if (k >= 0) idx = k + (at.after ? 1 : 0); }
     rest.splice(idx, 0, it);
-    const ops = rest.map((x, i) => ({ op: 'put', col: 'items', item: { ...x, date, order: i } })).filter((o) => o.item.id === id || o.item.order !== this.store.get('items', o.item.id).order);
+    const ops = rest.map((x, i) => ({ op: 'put', col: 'items', item: { ...x, date, order: i, ...(x.id === id && !date && destId ? { dest: destId } : {}) } })).filter((o) => o.item.id === id || o.item.order !== this.store.get('items', o.item.id).order);
     this.store.batch(ops, { label: `move ${it.kind}` }).catch((err) => toastError(err));
   }
 
   itemMenu(anchor, it) {
     const days = this.dayList();
-    const opts = [['', 'Move to…'], ['__pool', 'Places to visit'], ...days.map((d, i) => [d, `Day ${i + 1} · ${fmtDay(d)}`])];
+    const byDay = dayDestinations(this.trip);
+    const pools = this.dests().length ? this.dests().map((x) => [`__pool:${x.id}`, `Places to visit in ${x.name}`]) : [['__pool', 'Places to visit']];
+    const opts = [['', 'Move to…'], ...pools, ...days.map((d, i) => [d, `Day ${i + 1} · ${fmtDay(d)}${byDay.has(d) ? ` · ${this.dest(byDay.get(d))?.name}` : ''}`])];
     const sel = select(opts, '', { class: 'input' });
     const time = input({ type: 'time', value: it.time || '' });
     const dur = input({ type: 'number', min: 0, max: 1440, step: 15, value: it.duration || '', placeholder: 'minutes' });
@@ -212,7 +257,7 @@ export class PlanView {
         { label: 'Save', primary: true, submit: true, onClick: (close) => {
           close();
           const patch = { ...it, time: time.value || null, duration: Number(dur.value) || null };
-          if (sel.value) { patch.date = sel.value === '__pool' ? null : sel.value; patch.order = 999; }
+          if (sel.value) { const pool = sel.value.startsWith('__pool'); patch.date = pool ? null : sel.value; patch.order = 999; if (pool && sel.value.includes(':')) patch.dest = sel.value.split(':')[1]; }
           this.store.put('items', patch, { label: 'change' }).catch(toastError);
         } }],
     });
@@ -248,15 +293,16 @@ export class PlanView {
 
   async loadWeather() {
     const days = this.dayList();
-    if (!days.length || this.weatherFor === `${days[0]}|${days.at(-1)}|${this.store.all('places').length}`) return;
-    this.weatherFor = `${days[0]}|${days.at(-1)}|${this.store.all('places').length}`;
+    const key = `${days[0]}|${days.at(-1)}|${this.store.all('places').length}|${this.dests().map((x) => `${x.lat},${x.arrive},${x.depart}`).join(';')}`;
+    if (!days.length || this.weatherFor === key) return;
+    this.weatherFor = key;
     // One forecast per area (each day's first place, or the trip's middle).
     const groups = new Map();
     const all = this.store.all('places').filter((p) => Number.isFinite(p.lat));
     const center = all.length ? { lat: all.reduce((a, p) => a + p.lat, 0) / all.length, lon: all.reduce((a, p) => a + p.lon, 0) / all.length } : null;
     for (const d of days) {
-      const p = this.stopsOf(d)[0] || center;
-      if (!p) continue;
+      const p = this.stopsOf(d)[0] || this.dest(dayDestinations(this.trip).get(d)) || center;
+      if (!p || !Number.isFinite(p.lat)) continue;
       const key = `${Math.round(p.lat * 2) / 2},${Math.round(p.lon * 2) / 2}`;
       if (!groups.has(key)) groups.set(key, { p, days: [] });
       groups.get(key).days.push(d);
@@ -269,7 +315,6 @@ export class PlanView {
     }
     if (this.layout?.isConnected) this.drawSideOnly();
   }
-  drawSideOnly() { const keep = this.side.scrollTop; this.weatherFor = this.weatherFor || 'x'; const days = this.dayList(); clear(this.side, this.daySection(null, this.itemsOn(null)), ...days.map((d, i) => this.daySection(d, this.itemsOn(d), i))); this.side.scrollTop = keep; }
   routeKey(date) { const pts = this.stopsOf(date); return `${this.modeOf(date)}|${pts.map((p) => `${p.lat.toFixed(5)},${p.lon.toFixed(5)}`).join(';')}`; }
   async loadRoutes() {
     let changed = false;
@@ -317,10 +362,25 @@ export class PlanView {
     }
     this.drawRoutes();
     if (!this.fitted || this.lastDay !== this.day) {
+      const first = !this.fitted;
       this.fitted = true;
       this.lastDay = this.day;
-      fitTo(this.map, this.day ? this.stopsOf(this.day) : shown.length ? shown : this.store.all('places'));
+      // A trip opens on its first destination.
+      if (first && !this.day && this.dests().length) this.focusDest(this.dests()[0]);
+      else if (this.day) fitTo(this.map, this.stopsOf(this.day));
+      else this.fitAll();
     }
+  }
+  // The whole trip: every place and destination.
+  fitAll() { fitTo(this.map, [...this.store.all('places'), ...this.dests()], 13); }
+  // One destination: its places (or the town itself, before it has any).
+  focusDest(x) {
+    if (!this.map) return;
+    const byDay = dayDestinations(this.trip);
+    const items = [...this.itemsIn(null, x.id), ...this.dayList().filter((d) => byDay.get(d) === x.id).flatMap((d) => this.itemsOn(d))];
+    const pts = items.filter((it) => it.kind === 'place').map((it) => this.store.get('places', it.placeId)).filter((p) => p && Number.isFinite(p.lat));
+    if (pts.length) fitTo(this.map, pts);
+    else if (Number.isFinite(x.lat)) this.map.setView([x.lat, x.lon], 12);
   }
   drawRoutes() {
     if (!this.lines) return;

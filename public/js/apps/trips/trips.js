@@ -4,7 +4,7 @@
 
 import { h, clear, toast, toastError, confirmDialog } from '../../ui.js';
 import { appIcon } from '../../icons.js';
-import { api, TripStore } from './store.js';
+import { api, TripStore, newId } from './store.js';
 import { PlanView } from './plan.js';
 import { BookingsView } from './bookings.js';
 import { CostsView } from './costs.js';
@@ -13,8 +13,9 @@ import { FilesView } from './files.js';
 import { NotesView } from './notes.js';
 import { AtlasView } from './atlas.js';
 import { printTrip } from './print.js';
+import { placeInput, destinationsEditor, destinationLabel } from './destinations.js';
 import {
-  today, addDays, fmtRange, countdown, CURRENCIES, DAY_COLORS, avatar, sheet, field, input, select, textarea, emptyState,
+  today, addDays, dayDiff, fmtRange, countdown, CURRENCIES, DAY_COLORS, avatar, sheet, field, input, select, textarea, emptyState,
 } from './util.js';
 
 let cssAdded = false;
@@ -118,20 +119,21 @@ class TripPlanner {
 
   async newTrip() {
     const title = input({ placeholder: 'Summer in Italy', autofocus: true, required: true });
-    const dest = input({ placeholder: 'Rome, Florence & Venice' });
     const start = input({ type: 'date', value: addDays(today(), 30) });
     const end = input({ type: 'date', value: addDays(today(), 36) });
-    start.addEventListener('change', () => { if (end.value < start.value) end.value = start.value; });
-    const cur = select(CURRENCIES.map((c) => [c, c]), 'EUR');
+    const where = whereTo({ start: start.value, end: end.value });
+    const dates = linkDates(start, end, (a, b) => where.setRange(a, b));
+    const cur = select(CURRENCIES.map((c) => [c, c]), 'USD');
     const r = await sheet(this.root, {
-      title: 'New trip',
-      body: h('div', { class: 'tp-form' }, field('Name', title), field('Where to', dest), h('div', { class: 'tp-row' }, field('From', start), field('To', end)), field('Money in', cur, 'Costs are added up in this currency')),
+      title: 'New trip', wide: true,
+      body: h('div', { class: 'tp-form' }, field('Name', title), where.multi, h('div', { class: 'tp-row' }, field('From', start), field('To', end)), where.el, field('Money in', cur, 'Costs are added up in this currency')),
       actions: [{ label: 'Cancel' }, { label: 'Create', primary: true, submit: true, value: true }],
     });
     if (!r) return;
     try {
       const me = window.mediadesk?.user?.name || 'Me';
-      const { trip } = await api('create', { method: 'POST', body: { title: title.value.trim() || 'New trip', destination: dest.value.trim(), start: start.value || null, end: end.value || null, currency: cur.value, color: COLORS[Math.floor(Math.random() * COLORS.length)], cover: COVERS[Math.floor(Math.random() * COVERS.length)], members: [{ name: me, color: '#3b82f6' }] } });
+      const places = await where.value();
+      const { trip } = await api('create', { method: 'POST', body: { title: title.value.trim() || (places[0] ? `${places[0].name} trip` : 'New trip'), destination: destinationLabel(places), destinations: places, start: start.value || null, end: end.value || null, currency: cur.value, color: COLORS[Math.floor(Math.random() * COLORS.length)], cover: COVERS[Math.floor(Math.random() * COVERS.length)], members: [{ name: me, color: '#3b82f6' }] } });
       this.openTrip(trip.id);
     } catch (err) { toastError(err); }
   }
@@ -252,10 +254,11 @@ class TripPlanner {
   settingsDialog() {
     const t = this.store.trip;
     const title = input({ value: t.title, required: true });
-    const dest = input({ value: t.destination || '' });
     const desc = textarea(t.description || '', { rows: 2 });
     const start = input({ type: 'date', value: t.start || '' });
     const end = input({ type: 'date', value: t.end || '' });
+    const where = whereTo({ start: t.start, end: t.end, list: t.destinations || [], text: t.destination || '' });
+    const dates = linkDates(start, end, (a, b) => where.setRange(a, b));
     const cur = select(CURRENCIES.map((c) => [c, c]), t.currency || 'EUR');
     const budget = input({ type: 'number', min: 0, step: 1, value: t.budget || '', placeholder: 'None' });
     let color = t.color || COLORS[0];
@@ -277,9 +280,10 @@ class TripPlanner {
     sheet(this.root, {
       title: 'Trip settings', wide: true,
       body: h('div', { class: 'tp-form tp-settings' },
-        field('Name', title), field('Where to', dest), field('About', desc),
+        field('Name', title), field('About', desc), where.multi,
         h('div', { class: 'tp-row' }, field('From', start), field('To', end)),
         h('p', { class: 'muted small' }, 'Changing the start date moves the whole plan (and bookings) with it.'),
+        where.el,
         h('div', { class: 'tp-row' }, field('Money in', cur), field(`Budget (${t.currency || 'EUR'})`, budget)),
         field('Colour', colors), field('Picture', covers),
         field('Travellers', memberBox, 'Everyone on the trip: for splitting costs, packing and to-dos.')),
@@ -293,11 +297,13 @@ class TripPlanner {
             const used = new Set([...this.store.all('expenses').flatMap((e) => [...Object.keys(e.paidBy || {}), ...Object.keys(e.shares || {})])]);
             const gone = t.members.filter((m) => !members.some((x) => x.id === m.id) && used.has(m.id));
             if (gone.length) { toast(`${gone.map((m) => m.name).join(', ')} can’t be removed: they’re in the costs`, { type: 'error', timeout: 4000 }); members.push(...gone); }
-            await this.store.patchTrip({ title: title.value.trim() || t.title, destination: dest.value.trim(), description: desc.value, currency: cur.value, budget: Number(budget.value) || null, color, cover, members: members.map((m) => ({ ...m, name: m.name.trim() || 'Traveller' })) }, { label: 'trip settings' });
+            const places = await where.value();
+            // New dates first (they move the plan), then the destinations as chosen for them.
             if ((start.value || null) !== (t.start || null) || (end.value || null) !== (t.end || null)) {
               if (start.value) await this.store.redate(start.value, end.value || start.value);
               else await this.store.patchTrip({ start: null, end: null });
             }
+            await this.store.patchTrip({ title: title.value.trim() || t.title, destination: destinationLabel(places), destinations: places, description: desc.value, currency: cur.value, budget: Number(budget.value) || null, color, cover, members: members.map((m) => ({ ...m, name: m.name.trim() || 'Traveller' })) }, { label: 'trip settings' });
           } catch (err) { toastError(err); }
         } }],
     });
@@ -305,3 +311,52 @@ class TripPlanner {
 }
 
 
+
+// "Where to": one place found as you type, or (with "Several destinations" ticked) a list of them,
+// each with its arrival and departure day.
+function whereTo({ start, end, list = [], text = '' }) {
+  let range = { start, end };
+  const one = placeInput({ placeholder: 'Type a city, region or country', value: list[0]?.name || text });
+  if (list[0]) one.set(list[0]);
+  const many = destinationsEditor({ list, start, end });
+  const check = h('input', { type: 'checkbox', checked: list.length > 1 });
+  const oneField = field('Where to', one);
+  const manyField = field('Destinations', many, 'The From and To dates are the whole trip; choose the days you’re in each place.');
+  const show = () => { oneField.hidden = check.checked; manyField.hidden = !check.checked; };
+  check.addEventListener('change', async () => {
+    if (check.checked) {
+      // The place typed so far becomes the first on the list.
+      const p = many.value().length ? null : await one.resolve();
+      if (p) many.set([{ ...(list[0]?.name === p.name ? list[0] : {}), ...p, id: list[0]?.name === p.name ? list[0].id : newId(), arrive: range.start, depart: range.end }]);
+      many.entry.input.focus();
+    } else {
+      const first = many.value()[0];
+      if (first) one.set(first);
+    }
+    show();
+  });
+  show();
+  return {
+    multi: h('label', { class: 'tp-check' }, check, 'Several destinations'),
+    el: h('div', {}, oneField, manyField),
+    setRange(s, e) { range = { start: s || null, end: e || s || null }; many.setRange(s, e); },
+    async value() {
+      if (check.checked) return many.value();
+      const p = await one.resolve();
+      const keep = list.length === 1 && p && list[0].name === p.name ? list[0] : {};
+      return p ? [{ ...keep, ...p, id: keep.id || newId(), arrive: range.start || null, depart: range.end || null }] : [];
+    },
+  };
+}
+
+// From and To: moving From moves To with it (the trip keeps its length); To can't be before From.
+function linkDates(start, end, onChange) {
+  let prev = start.value;
+  start.addEventListener('change', () => {
+    if (prev && start.value && end.value) { const e = addDays(end.value, dayDiff(prev, start.value)); end.value = e; }
+    if (end.value && end.value < start.value) end.value = start.value;
+    prev = start.value;
+    onChange(start.value, end.value);
+  });
+  end.addEventListener('change', () => { if (end.value && start.value && end.value < start.value) end.value = start.value; onChange(start.value, end.value); });
+}
