@@ -179,6 +179,7 @@ async function alongRoute(view, x, cat) {
     h('div', { class: 'tp-catchips' }, h('small', { class: 'muted' }, 'Within'), (units() === 'km' ? [1000, 3000, 5000, 10000] : [805, 3219, 4828, 9656]).map((r) => h('button', { class: `tp-catchip ${r === radius ? 'on' : ''}`, onclick: () => { view.alongRadius = r; alongRoute(view, x, cat); } }, fmtKm(r))), h('small', { class: 'muted' }, 'of the road')),
     results);
   const ask = view.alongAsk = (view.alongAsk || 0) + 1;
+  setTimeout(() => { if (ask === view.alongAsk && results.textContent === 'Looking along the route…') clear(results, h('p', { class: 'muted small' }, 'Still looking… OpenStreetMap’s servers are slow right now.')); }, 6000);
   try {
     const list = await geo.along(cat, pts, radius);
     if (ask !== view.alongAsk) return;

@@ -138,6 +138,7 @@ You can configure MediaDesk in three ways. Environment variables override the co
 | `EBOOKS_DIR` | Optional. The eBook Reader's books folder (also settable in *Settings → eBook Reader*) |
 | `EBOOK_CONVERT_PATH` | Optional. Calibre's `ebook-convert`, for AZW3, Word, RTF, ODT and LIT books in the eBook Reader (found automatically when Calibre is installed) |
 | `OVERPASS_URLS` | Optional. The Trip Planner's Overpass servers (for exploring nearby and along a route), comma-separated, tried in turn when one is busy. Defaults to the public ones |
+| `PHOTON_URL` | Optional. A Photon server for the Trip Planner's destination suggestions and nearby / along-the-route searches (default `https://photon.komoot.io`) |
 | `NOMINATIM_URL` | Optional. A Nominatim server for the Trip Planner's place search (default `https://nominatim.openstreetmap.org`) |
 | `JELLYFIN_USER_ID` | Optional. Which user's view to browse (defaults to the first admin) |
 | `*_PUBLIC_URL` | Optional. The browser-facing URL used for "Open in…" links and Web UI windows, if it differs from the server-side URL |
@@ -207,9 +208,9 @@ so the server needs internet access for them (the browser only talks to MediaDes
 
 | Service | Used for |
 |---|---|
-| [Photon](https://photon.komoot.io) (OpenStreetMap) | Suggesting destinations as you type |
+| [Photon](https://photon.komoot.io) (OpenStreetMap) | Suggesting destinations as you type, and finding places of a kind nearby and along a road trip's route (quickly; set `PHOTON_URL` to use your own) |
 | [Nominatim](https://nominatim.org) (OpenStreetMap) | Searching for places and addresses, and what's at a point on the map (at most one request a second, as its rules ask) |
-| [Overpass API](https://overpass-api.de) | Exploring what's nearby, and what's along a road trip's route. Overpass is often busy, so searches go one at a time and several public servers are tried in turn (set `OVERPASS_URLS` to use your own); when none answers, Explore falls back to Nominatim |
+| [Overpass API](https://overpass-api.de) | A fuller search when Photon finds nothing nearby or along the route. Overpass is often busy, so searches go one at a time, several public servers are tried in turn within a time limit (set `OVERPASS_URLS` to use your own), and Explore falls back to Nominatim when none answers |
 | [Wikipedia](https://www.wikipedia.org) | A place's description and picture |
 | [FOSSGIS OSRM](https://routing.openstreetmap.de) | Routes on foot, by bike and by car, and driving directions between destinations and to the airport |
 | [Open-Meteo](https://open-meteo.com) | Weather forecasts, and last year's weather for days further ahead |

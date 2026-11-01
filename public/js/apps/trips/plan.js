@@ -469,6 +469,7 @@ export class PlanView {
       clear(results, h('p', { class: 'muted small' }, 'Looking around…'));
       // Only the last kind chosen counts (an earlier search may still be on its way).
       const ask = this.exploreAsk = (this.exploreAsk || 0) + 1;
+      setTimeout(() => { if (ask === this.exploreAsk && results.textContent === 'Looking around…') clear(results, h('p', { class: 'muted small' }, 'Still looking… OpenStreetMap’s servers are slow right now.')); }, 6000);
       try {
         const list = await geo.nearby(center.lat, center.lon, cat);
         if (ask !== this.exploreAsk) return;

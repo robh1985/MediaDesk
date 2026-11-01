@@ -348,11 +348,11 @@ function createTrips({ dataDir, mock = false, log = console.log }) {
   // --- Places, routes, weather, money (open services; built-in answers in demo mode) ------------
 
   const cache = new Map();
-  async function fetchJson(url, { ttl = 3600e3, headers = {}, method = 'GET', body } = {}) {
+  async function fetchJson(url, { ttl = 3600e3, headers = {}, method = 'GET', body, timeout = 20e3 } = {}) {
     const key = `${method} ${url} ${body || ''}`;
     const hit = cache.get(key);
     if (hit && hit.at > Date.now() - ttl) return hit.data;
-    const res = await fetch(url, { method, body, headers: { 'User-Agent': UA, Accept: 'application/json', ...headers }, signal: AbortSignal.timeout(20e3) });
+    const res = await fetch(url, { method, body, headers: { 'User-Agent': UA, Accept: 'application/json', ...headers }, signal: AbortSignal.timeout(timeout) });
     if (!res.ok) throw new TripError(502, `${new URL(url).hostname} answered ${res.status}`);
     const data = await res.json();
     cache.set(key, { at: Date.now(), data });
@@ -374,17 +374,18 @@ function createTrips({ dataDir, mock = false, log = console.log }) {
   let overpassFirst = 0;
   let overpassQueue = Promise.resolve();
   const overpassAsked = new Map();
-  function overpass(query) {
+  function overpass(query, budget = 25e3) {
     const hit = cache.get(`overpass ${query}`);
     if (hit && hit.at > Date.now() - 6 * 3600e3) return Promise.resolve(hit.data);
     if (overpassAsked.has(query)) return overpassAsked.get(query);
     const run = overpassQueue.then(async () => {
       let last = null;
-      for (let k = 0; k < OVERPASS.length; k++) {
+      const until = Date.now() + budget;
+      for (let k = 0; k < OVERPASS.length && until - Date.now() > 3e3; k++) {
         const i = (overpassFirst + k) % OVERPASS.length;
         const url = OVERPASS[i];
         try {
-          const res = await fetch(url, { method: 'POST', body: `data=${encodeURIComponent(query)}`, headers: { 'User-Agent': UA, Accept: 'application/json', 'Content-Type': 'application/x-www-form-urlencoded' }, signal: AbortSignal.timeout(30e3) });
+          const res = await fetch(url, { method: 'POST', body: `data=${encodeURIComponent(query)}`, headers: { 'User-Agent': UA, Accept: 'application/json', 'Content-Type': 'application/x-www-form-urlencoded' }, signal: AbortSignal.timeout(Math.min(15e3, until - Date.now())) });
           if (!res.ok) { last = `${new URL(url).hostname} answered ${res.status}`; continue; }
           const data = await res.json();
           // A server that ran out of time says so inside an answer that looks fine.
@@ -402,6 +403,41 @@ function createTrips({ dataDir, mock = false, log = console.log }) {
     run.finally(() => overpassAsked.delete(query)).catch(() => {});
     return run;
   }
+  // Photon finds places of a kind around a point quickly (OpenStreetMap data, searched by tag).
+  // Each answer is checked against the kinds and the distance asked for. PHOTON_URL can name your own.
+  const PHOTON = (process.env.PHOTON_URL || 'https://photon.komoot.io').replace(/\/$/, '');
+  async function photonAround(lat, lon, tags, radius, limit = 40) {
+    const params = new URLSearchParams({ lat: lat.toFixed(5), lon: lon.toFixed(5), radius: (radius / 1000).toFixed(2), limit: String(limit), lang: 'en' });
+    for (const t of tags) params.append('osm_tag', t.replace('=', ':'));
+    const data = await fetchJson(`${PHOTON}/reverse?${params}`, { ttl: 6 * 3600e3, timeout: 8e3 });
+    const wanted = (k, v) => tags.some((t) => { const [tk, tv] = t.split('='); return tk === k && (!tv || tv === v); });
+    return (data.features || []).map((f) => {
+      const pr = f.properties || {};
+      const [plon, plat] = f.geometry?.coordinates || [];
+      return { pr, p: {
+        name: pr.name, lat: plat, lon: plon, osm: pr.osm_type && pr.osm_id ? `${pr.osm_type[0].toLowerCase()}${pr.osm_id}` : null,
+        address: [pr.street && `${pr.street} ${pr.housenumber || ''}`.trim(), pr.city || pr.town || pr.village].filter(Boolean).join(', '), url: null, phone: null, hours: null, wiki: null,
+      } };
+    }).filter(({ pr, p }) => p.name && Number.isFinite(p.lat) && wanted(pr.osm_key, pr.osm_value) && hav([lat, lon], [p.lat, p.lon]) <= radius * 1.15).map(({ p }) => p);
+  }
+  // Run jobs a few at a time.
+  async function inBatches(jobs, n = 4) {
+    const out = [];
+    for (let i = 0; i < jobs.length; i += n) out.push(...await Promise.all(jobs.slice(i, i + n).map((j) => j().catch(() => null))));
+    return out;
+  }
+  // Points along a route, about every `gap` metres (at most `max` of them).
+  function spaced(points, gap, max = 14) {
+    let total = 0;
+    for (let i = 1; i < points.length; i++) total += hav(points[i - 1], points[i]);
+    const step = Math.max(gap, total / max);
+    const out = [points[0]];
+    let since = 0;
+    for (let i = 1; i < points.length; i++) { since += hav(points[i - 1], points[i]); if (since >= step) { out.push(points[i]); since = 0; } }
+    if (out.at(-1) !== points.at(-1)) out.push(points.at(-1));
+    return out.slice(0, max + 1);
+  }
+
   // When Overpass can't answer, Nominatim finds the main kinds of place in an area by name.
   const NOMINATIM_WORDS = { sights: 'tourist attraction', museum: 'museum', viewpoint: 'viewpoint', park: 'park', food: 'restaurant', cafe: 'cafe', nightlife: 'bar', shopping: 'shopping centre', hotel: 'hotel', transport: 'railway station' };
   async function nearbyByName(lat, lon, cat, radius) {
@@ -432,7 +468,7 @@ function createTrips({ dataDir, mock = false, log = console.log }) {
       if (mock) { const s = q.toLowerCase(); return DEMO_CITIES.filter((c) => c[0].toLowerCase().startsWith(s) || c[1].toLowerCase().startsWith(s)).slice(0, 8).map(([name, country, code, lat, lon, kind]) => ({ name, lat, lon, country: code, address: kind === 'country' ? name : [name, country].join(', '), kind })); }
       const params = new URLSearchParams({ q, limit: '8', lang: 'en' });
       for (const t of ['place:city', 'place:town', 'place:village', 'place:island', 'place:state', 'place:region', 'place:county', 'place:country', 'place:archipelago', 'boundary:administrative']) params.append('osm_tag', t);
-      const data = await fetchJson(`https://photon.komoot.io/api/?${params}`, { ttl: 7 * 864e5 });
+      const data = await fetchJson(`${PHOTON}/api/?${params}`, { ttl: 7 * 864e5 });
       const seen = new Set();
       return (data.features || []).map((f) => {
         const pr = f.properties || {};
@@ -465,9 +501,12 @@ function createTrips({ dataDir, mock = false, log = console.log }) {
       if (mock) return demoNearby(lat, lon, cat);
       const tags = NEARBY[cat] || NEARBY.sights;
       const r = Math.min(5000, Math.max(200, Number(radius) || 1500));
-      const q = `[out:json][timeout:25];(${tags.map((t) => `nwr[${t}][name](around:${r},${lat.toFixed(5)},${lon.toFixed(5)});`).join('')});out center 60;`;
+      // Photon first (fast); Overpass (fuller, often busy) if Photon finds nothing.
+      const quick = await photonAround(lat, lon, tags, r).catch(() => null);
+      if (quick?.length) return quick.map((p) => ({ ...p, category: cat })).slice(0, 60);
+      const q = `[out:json][timeout:15];(${tags.map((t) => `nwr[${t}][name](around:${r},${lat.toFixed(5)},${lon.toFixed(5)});`).join('')});out center 60;`;
       let data;
-      try { data = await overpass(q); } catch (err) {
+      try { data = await overpass(q, 20e3); } catch (err) {
         const found = await nearbyByName(lat, lon, cat, r).catch(() => null);
         if (found?.length) return found;
         throw err;
@@ -484,9 +523,17 @@ function createTrips({ dataDir, mock = false, log = console.log }) {
       if (mock) return demoAlong(points, cat);
       const tags = ALONG[cat] || NEARBY[cat] || ALONG.hotel;
       const r = Math.min(10000, Math.max(500, Number(radius) || 3000));
-      const line = points.map(([la, lo]) => `${la.toFixed(4)},${lo.toFixed(4)}`).join(',');
-      const q = `[out:json][timeout:30];(${tags.map((t) => `nwr[${t}][name](around:${r},${line});`).join('')});out center 80;`;
-      const data = await overpass(q);
+      // Photon around points spread along the road, a few at a time.
+      const stops = spaced(points, r * 1.6);
+      const found = new Map();
+      for (const list of await inBatches(stops.map(([la, lo]) => () => photonAround(la, lo, tags, r, 15)))) {
+        for (const p of list || []) found.set(p.osm || `${p.name}|${p.lat.toFixed(4)}`, { ...p, category: ALONG_CATEGORY[cat] || cat });
+      }
+      if (found.size) return [...found.values()].slice(0, 80);
+      // Otherwise Overpass, along a simpler line, within a time limit.
+      const line = spaced(points, r, 25).map(([la, lo]) => `${la.toFixed(4)},${lo.toFixed(4)}`).join(',');
+      const q = `[out:json][timeout:20];(${tags.map((t) => `nw[${t}][name](around:${r},${line});`).join('')});out center 80;`;
+      const data = await overpass(q, 25e3);
       return (data.elements || []).map((e) => ({
         name: e.tags.name, lat: e.lat ?? e.center?.lat, lon: e.lon ?? e.center?.lon, category: ALONG_CATEGORY[cat] || cat, osm: `${e.type[0]}${e.id}`,
         address: [e.tags['addr:street'] && `${e.tags['addr:street']} ${e.tags['addr:housenumber'] || ''}`.trim(), e.tags['addr:city']].filter(Boolean).join(', '),
