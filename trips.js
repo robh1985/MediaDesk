@@ -116,6 +116,18 @@ function createTrips({ dataDir, mock = false, log = console.log }) {
     if ('members' in t && Array.isArray(t.members)) out.members = t.members.slice(0, 50).map((m) => ({ id: String(m.id || newId()).slice(0, 40), name: String(m.name || 'Traveller').slice(0, 60), color: String(m.color || '#3b82f6').slice(0, 20), email: m.email ? String(m.email).slice(0, 200) : undefined }));
     if ('dayModes' in t) out.dayModes = Object.fromEntries(Object.entries(t.dayModes && typeof t.dayModes === 'object' ? t.dayModes : {}).filter(([d, m]) => isDate(d) && ['foot', 'bike', 'car', 'transit'].includes(m)).slice(0, 400));
     if ('origin' in t) out.origin = cleanPlace(t.origin);
+    // Driving routes worked out for journeys between destinations (kept so they're there next time).
+    if ('legRoutes' in t) {
+      const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : null);
+      out.legRoutes = Object.fromEntries(Object.entries(t.legRoutes && typeof t.legRoutes === 'object' ? t.legRoutes : {}).slice(0, 60).map(([k, r]) => {
+        if (!r || typeof r !== 'object' || !Array.isArray(r.line)) return null;
+        const line = r.line.slice(0, 1200).map((pt) => [num(pt?.[0]), num(pt?.[1])]).filter(([a, b]) => a !== null && b !== null && Math.abs(a) <= 90 && Math.abs(b) <= 180).map(([a, b]) => [Math.round(a * 1e5) / 1e5, Math.round(b * 1e5) / 1e5]);
+        if (line.length < 2) return null;
+        const to = cleanPlace(r.to) || { name: 'Destination', lat: line.at(-1)[0], lon: line.at(-1)[1] };
+        if (r.to?.iata) to.iata = String(r.to.iata).slice(0, 4);
+        return [String(k).replace(/[^\w-]/g, '').slice(0, 40), { fromKey: String(r.fromKey || '').slice(0, 60), toKey: String(r.toKey || '').slice(0, 60), to, distance: num(r.distance) || 0, duration: num(r.duration) || 0, line, at: Date.now() }];
+      }).filter(Boolean));
+    }
     if ('destinations' in t) {
       out.destinations = (Array.isArray(t.destinations) ? t.destinations : []).slice(0, 40).map((x) => ({
         id: String(x.id || newId()).replace(/[^\w-]/g, '').slice(0, 40) || newId(), name: String(x.name || 'Destination').slice(0, 120), address: x.address ? String(x.address).slice(0, 300) : '',
@@ -283,7 +295,7 @@ function createTrips({ dataDir, mock = false, log = console.log }) {
   // What a read-only share link shows: the parts its options allow.
   function shared(d) {
     const o = d.trip.shareOptions || {};
-    const out = { trip: { title: d.trip.title, description: d.trip.description, destination: d.trip.destination, origin: d.trip.origin || null, destinations: d.trip.destinations || [], start: d.trip.start, end: d.trip.end, cover: d.trip.cover, color: d.trip.color, currency: d.trip.currency, members: d.trip.members.map((m) => ({ id: m.id, name: m.name, color: m.color })) }, options: o };
+    const out = { trip: { title: d.trip.title, description: d.trip.description, destination: d.trip.destination, origin: d.trip.origin || null, destinations: d.trip.destinations || [], legRoutes: d.trip.legRoutes || {}, start: d.trip.start, end: d.trip.end, cover: d.trip.cover, color: d.trip.color, currency: d.trip.currency, members: d.trip.members.map((m) => ({ id: m.id, name: m.name, color: m.color })) }, options: o };
     out.places = d.places;
     out.items = Object.fromEntries(Object.entries(d.items).filter(([, it]) => it.kind !== 'booking' || o.bookings));
     out.files = Object.fromEntries(Object.entries(d.files).filter(([, f]) => !f.deleted && /^image\//.test(f.type) && (f.id === d.trip.cover || f.placeId)));

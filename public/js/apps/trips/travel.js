@@ -41,6 +41,43 @@ async function departingAirport(view, x, from) {
   return out;
 }
 
+// Where a route starts and ends, to tell whether a saved one still fits the journey.
+const placeKey = (p) => (Number.isFinite(p?.lat) ? `${p.lat.toFixed(4)},${p.lon.toFixed(4)}` : '');
+
+// A route line with fewer points (Douglas–Peucker), so it's small enough to keep with the trip.
+function simplify(line, tolerance = 0.0004, max = 1000) {
+  if (line.length <= 2) return line;
+  const keep = new Uint8Array(line.length);
+  keep[0] = keep[line.length - 1] = 1;
+  const stack = [[0, line.length - 1]];
+  while (stack.length) {
+    const [a, b] = stack.pop();
+    const [ax, ay] = line[a];
+    const [bx, by] = line[b];
+    const dx = bx - ax;
+    const dy = by - ay;
+    const len = Math.hypot(dx, dy) || 1e-12;
+    let far = -1;
+    let fd = tolerance;
+    for (let i = a + 1; i < b; i++) { const d = Math.abs(dy * (line[i][0] - ax) - dx * (line[i][1] - ay)) / len; if (d > fd) { fd = d; far = i; } }
+    if (far > 0) { keep[far] = 1; stack.push([a, far], [far, b]); }
+  }
+  const out = line.filter((_, i) => keep[i]);
+  return out.length > max ? simplify(line, tolerance * 2, max) : out;
+}
+
+// A journey's route: one being worked out now, or the one kept with the trip if it still goes
+// from and to the same places.
+function legState(view, x, from, to) {
+  view.legs ||= new Map();
+  const live = view.legs.get(x.id);
+  if (live) return live;
+  const saved = view.trip.legRoutes?.[x.id];
+  if (!saved || saved.fromKey !== placeKey(from)) return {};
+  if (to && saved.toKey !== placeKey(to)) return {};
+  return { route: saved, to: saved.to, saved: true };
+}
+
 export function legCard(view, x, i) {
   const from = legFrom(view, i);
   const t = x.travel;
@@ -51,14 +88,15 @@ export function legCard(view, x, i) {
       h('button', { class: 'btn btn-sm', onclick: () => view.app.settingsDialog() }, 'How are you getting there?'));
   }
   const [label, emoji] = TRAVEL[t.mode];
-  view.legs ||= new Map();
-  const st = view.legs.get(x.id) || {};
+  // Where the route goes: the airport (once it's known) or the destination.
+  const airport = t.mode === 'flight' ? view.airports?.get(`${t.fromAirport || ''}|${from?.lat},${from?.lon}`) : null;
+  const st = legState(view, x, from, t.mode === 'car' ? x : airport || null);
   const body = [];
   const located = (p) => p && Number.isFinite(p.lat);
   const routeLine = (what) => (st.route
     ? h('div', { class: 'tp-legcard-result' }, h('b', {}, `🚗 ${fmtMins(st.route.duration)} · ${fmtKm(st.route.distance)}`), h('span', { class: 'muted small' }, ` ${what}`),
       h('a', { class: 'tp-legcard-link', href: directionsLink(from, st.to, 'driving', t), target: '_blank', rel: 'noopener' }, 'Open in Google Maps ↗'),
-      h('button', { class: 'tp-icon-btn', title: 'Clear the route', 'aria-label': 'Clear the route', onclick: () => { view.legs.delete(x.id); view.drawTravel(); view.drawSideOnly(); view.closePanel(); } }, '✕'))
+      h('button', { class: 'tp-icon-btn', title: 'Clear the route', 'aria-label': 'Clear the route', onclick: () => clearRoute(view, x) }, '✕'))
     : st.loading ? h('div', { class: 'muted small' }, 'Working out the route…') : st.error ? h('div', { class: 'tp-error small' }, st.error) : null);
 
   if (t.mode === 'flight') {
@@ -95,16 +133,30 @@ async function directions(view, x, from, to) {
   view.drawSideOnly();
   try {
     const route = await geo.route('car', [from, to]);
-    view.legs.set(x.id, { route, to });
+    const keep = { fromKey: placeKey(from), toKey: placeKey(to), to: { name: to.name, lat: to.lat, lon: to.lon, ...(to.iata ? { iata: to.iata } : {}) }, distance: route.distance, duration: route.duration, line: simplify(route.line) };
+    view.legs.delete(x.id);
+    await view.store.patchTrip({ legRoutes: { ...(view.trip.legRoutes || {}), [x.id]: keep } }, { undoable: false });
     view.drawTravel();
     if (route?.line?.length) view.map?.fitBounds(route.line, { padding: [40, 40] });
   } catch (err) { view.legs.set(x.id, { error: `No route: ${err.message}` }); }
+  if (view.legs.get(x.id)?.loading) view.legs.delete(x.id);
+  view.drawSideOnly();
+}
+
+// Forget a journey's route.
+async function clearRoute(view, x) {
+  view.legs?.delete(x.id);
+  const rest = { ...(view.trip.legRoutes || {}) };
+  delete rest[x.id];
+  if (view.alongDest === x.id) { view.alongCat = null; view.closePanel(); }
+  await view.store.patchTrip({ legRoutes: rest }, { label: 'clear the route' }).catch(() => {});
+  view.drawTravel();
   view.drawSideOnly();
 }
 
 // Places along a road trip's route, listed beside the map.
 async function alongRoute(view, x, cat) {
-  const st = view.legs.get(x.id);
+  const st = legState(view, x, legFrom(view, view.dests().indexOf(x)), x);
   if (!st?.route) return;
   view.alongCat = cat;
   view.alongDest = x.id;
@@ -151,7 +203,7 @@ export function drawTravel(view) {
   dests.forEach((x, i) => {
     if (Number.isFinite(x.lat)) pin(x, String(i + 1), '', x.name);
     const from = legFrom(view, i);
-    const st = view.legs?.get(x.id);
+    const st = legState(view, x, from, x.travel?.mode === 'car' ? x : null);
     if (st?.route?.line) L.polyline(st.route.line, { color: '#1c7ed6', weight: 5, opacity: 0.8 }).addTo(view.travelLayer);
     if (from && Number.isFinite(from.lat) && Number.isFinite(x.lat)) {
       const flight = x.travel?.mode === 'flight';

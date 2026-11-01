@@ -50,6 +50,8 @@ async function start() {
       L.marker([x.lat, x.lon], { icon: L.divIcon({ className: `tp-destpin ${x.home ? 'home' : ''}`, html: x.home ? '🏠' : String((t.destinations || []).indexOf(x) + 1), iconSize: [28, 28], iconAnchor: [14, 14] }), zIndexOffset: -500 }).bindTooltip(esc(x.home ? `Starting from ${x.name}` : x.name)).addTo(route);
       if (i) L.polyline([[stops[i - 1].lat, stops[i - 1].lon], [x.lat, x.lon]], { color: x.travel?.mode === 'flight' ? '#7048e8' : '#495057', weight: 2, opacity: 0.6, dashArray: x.travel?.mode === 'flight' ? '2 8' : '6 8' }).addTo(route);
     });
+    // Driving routes worked out in the planner.
+    for (const r of Object.values(t.legRoutes || {})) if (Array.isArray(r.line) && r.line.length > 1) L.polyline(r.line, { color: '#1c7ed6', weight: 4, opacity: 0.75 }).addTo(route);
     draw(null);
     main.querySelector('#ts-days').addEventListener('click', (e) => {
       const b = e.target.closest('button');
