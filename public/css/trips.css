@@ -348,6 +348,37 @@ a.tp-leg.link { border: 0; margin-top: 4px; color: var(--accent); text-decoratio
 .tp-dest-body { padding: 2px 0 6px 10px; margin-left: 12px; border-left: 2px solid color-mix(in srgb, var(--c) 35%, transparent); }
 .tp-dest-body .tp-day { margin: 6px 0 6px 4px; }
 
+/* Getting there: the travel editor, the start and journey cards, and the map's destination pins */
+.tp-dest-item { border-bottom: 1px solid var(--border); padding-bottom: 8px; }
+.tp-dest-item:last-child { border-bottom: 0; }
+.tp-dest-item .tp-dest-row { border-bottom: 0; }
+.tp-travel { display: flex; flex-direction: column; gap: 8px; padding: 8px 10px; margin-left: 34px; border-radius: 8px; background: var(--surface); border: 1px dashed var(--border-strong); }
+.tp-where-one { display: flex; flex-direction: column; gap: 8px; }
+.tp-where-one .tp-travel { margin-left: 0; }
+.tp-travel-head { display: flex; align-items: center; gap: 10px; justify-content: space-between; flex-wrap: wrap; }
+.tp-travel-mode { height: 30px; min-width: 170px; }
+.tp-travel-fields { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px 10px; align-items: end; }
+.tp-travel-fields .tp-check { min-height: 32px; }
+.tp-travel-fields .tp-field > small { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tp-origin { display: flex; align-items: center; gap: 10px; margin: 6px 8px; padding: 9px 10px; border-radius: 12px; background: var(--surface-2); }
+.tp-origin-icon, .tp-legcard-icon { flex: none; display: grid; place-items: center; width: 26px; height: 26px; font-size: 16px; }
+.tp-origin .tp-dest-title small { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; font-weight: 700; }
+.tp-legcard { position: relative; margin: 2px 8px 2px 21px; padding: 8px 10px 8px 14px; border-left: 2px dashed var(--border-strong); display: flex; flex-direction: column; gap: 6px; }
+.tp-legcard.flight { border-left-color: #7048e8; }
+.tp-legcard.car { border-left-color: #1c7ed6; }
+.tp-legcard.empty { flex-direction: row; align-items: center; justify-content: space-between; gap: 8px; color: var(--text-muted); font-size: 12.5px; }
+.tp-legcard-head { display: flex; align-items: center; gap: 8px; }
+.tp-legcard-head .tp-dest-title b { font-size: 13.5px; }
+.tp-legcard-body { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; padding-left: 34px; }
+.tp-legcard-line { font-size: 12.5px; }
+.tp-legcard-result { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 12.5px; }
+.tp-legcard-link { font-size: 12px; color: var(--accent); text-decoration: none; }
+.tp-along { display: flex; flex-direction: column; gap: 4px; }
+.tp-along .tp-catchips { padding: 0; }
+.tp-panel .tp-catchips small { align-self: center; }
+.tp-destpin { display: grid !important; place-items: center; width: 28px; height: 28px; border-radius: 8px; background: var(--surface); color: var(--text); font: 700 13px/1 var(--font); box-shadow: 0 0 0 2px var(--c, #1c7ed6), 0 2px 6px rgba(0,0,0,.3); }
+.tp-destpin.home { font-size: 15px; }
+
 /* Narrow windows: the plan stacks the map above the days. */
 @container (max-width: 760px) {
   .tp-plan { grid-template-columns: 1fr; grid-template-rows: 42% 58%; }

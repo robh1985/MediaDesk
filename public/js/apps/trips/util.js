@@ -52,6 +52,28 @@ export const STAYS = new Set(['hotel', 'apartment', 'camping', 'hostel']);
 export const bookingType = (t) => BOOKING_TYPES[t] || BOOKING_TYPES.other;
 export const STATUS = { confirmed: ['Confirmed', '#2f9e44'], pending: ['Pending', '#f08c00'], cancelled: ['Cancelled', '#868e96'] };
 
+// --- Getting from one destination to the next ----------------------------------------------------
+export const TRAVEL = {
+  car: ['Road trip', '🚗'], flight: ['Flight', '✈️'], train: ['Train ride', '🚆'], bus: ['Bus ride', '🚌'], ferry: ['Ferry ride', '⛴️'], boat: ['Boat ride', '🛥️'], other: ['Something else', '🧭'],
+};
+// A line about a journey: "LHR → LIS · TP1351 · 07:10".
+export function travelSummary(t) {
+  if (!t?.mode) return '';
+  const parts = [];
+  if (t.mode === 'flight') parts.push(t.fromAirport && t.toAirport ? `${t.fromAirport} → ${t.toAirport}` : t.fromAirport ? `from ${t.fromAirport}` : t.toAirport ? `to ${t.toAirport}` : null, t.number);
+  else if (t.mode === 'car') parts.push(t.rental ? 'Rental car' : null, t.avoidTolls ? 'avoiding tolls' : null, t.avoidHighways ? 'avoiding motorways' : null);
+  else if (t.mode === 'other') parts.push(t.note);
+  else parts.push(t.from && t.to ? `${t.from} → ${t.to}` : t.from ? `from ${t.from}` : t.to ? `to ${t.to}` : null, t.number || t.operator, t.withCar ? 'with the car' : null);
+  if (t.departs) parts.push(t.mode === 'car' ? `setting off ${t.departs}` : `departs ${t.departs}`);
+  return parts.filter(Boolean).join(' · ');
+}
+// Google Maps directions between two places (a place, or a name Google looks up).
+export function directionsLink(a, b, mode = 'driving', { avoidTolls, avoidHighways } = {}) {
+  const at = (p) => (typeof p === 'string' ? p : Number.isFinite(p?.lat) ? `${p.lat},${p.lon}` : p?.name || '');
+  if (avoidTolls || avoidHighways) return `https://maps.google.com/maps?${new URLSearchParams({ saddr: at(a), daddr: at(b), dirflg: `${avoidHighways ? 'h' : ''}${avoidTolls ? 't' : ''}` })}`;
+  return `https://www.google.com/maps/dir/?${new URLSearchParams({ api: '1', origin: at(a), destination: at(b), travelmode: mode })}`;
+}
+
 // --- Money: whole cents, so shares always add up -------------------------------------------------
 export const CURRENCIES = ['EUR', 'USD', 'GBP', 'CHF', 'JPY', 'CAD', 'AUD', 'NZD', 'SEK', 'NOK', 'DKK', 'PLN', 'CZK', 'HUF', 'RON', 'BGN', 'TRY', 'MXN', 'BRL', 'CNY', 'HKD', 'SGD', 'THB', 'KRW', 'INR', 'IDR', 'MYR', 'PHP', 'ZAR', 'ILS', 'ISK'];
 const NO_DECIMALS = new Set(['JPY', 'KRW', 'HUF', 'ISK', 'IDR']);

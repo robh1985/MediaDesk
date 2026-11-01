@@ -115,16 +115,32 @@ function createTrips({ dataDir, mock = false, log = console.log }) {
     if ('archived' in t) out.archived = Boolean(t.archived);
     if ('members' in t && Array.isArray(t.members)) out.members = t.members.slice(0, 50).map((m) => ({ id: String(m.id || newId()).slice(0, 40), name: String(m.name || 'Traveller').slice(0, 60), color: String(m.color || '#3b82f6').slice(0, 20), email: m.email ? String(m.email).slice(0, 200) : undefined }));
     if ('dayModes' in t) out.dayModes = Object.fromEntries(Object.entries(t.dayModes && typeof t.dayModes === 'object' ? t.dayModes : {}).filter(([d, m]) => isDate(d) && ['foot', 'bike', 'car', 'transit'].includes(m)).slice(0, 400));
+    if ('origin' in t) out.origin = cleanPlace(t.origin);
     if ('destinations' in t) {
       out.destinations = (Array.isArray(t.destinations) ? t.destinations : []).slice(0, 40).map((x) => ({
         id: String(x.id || newId()).replace(/[^\w-]/g, '').slice(0, 40) || newId(), name: String(x.name || 'Destination').slice(0, 120), address: x.address ? String(x.address).slice(0, 300) : '',
         lat: Number.isFinite(Number(x.lat)) && x.lat !== null ? Number(x.lat) : null, lon: Number.isFinite(Number(x.lon)) && x.lon !== null ? Number(x.lon) : null,
         country: /^[A-Za-z]{2}$/.test(x.country || '') ? x.country.toUpperCase() : null, arrive: isDate(x.arrive) ? x.arrive : null, depart: isDate(x.depart) ? x.depart : null,
+        travel: cleanTravel(x.travel),
       }));
     }
     if ('budget' in t) out.budget = Number(t.budget) || null;
     if ('home' in t) out.home = t.home && Number.isFinite(t.home.lat) ? { lat: t.home.lat, lon: t.home.lon, name: String(t.home.name || '').slice(0, 200) } : null;
     out.members ||= [];
+    return out;
+  }
+
+  function cleanPlace(x) {
+    if (!x || typeof x !== 'object' || !x.name) return null;
+    const num = (v) => (v !== null && v !== '' && Number.isFinite(Number(v)) ? Number(v) : null);
+    return { name: String(x.name).slice(0, 120), address: x.address ? String(x.address).slice(0, 300) : '', lat: num(x.lat), lon: num(x.lon), country: /^[A-Za-z]{2}$/.test(x.country || '') ? x.country.toUpperCase() : null };
+  }
+  // How a destination is reached: the kind of travel and what goes with it.
+  function cleanTravel(x) {
+    if (!x || typeof x !== 'object' || !TRAVEL_MODES.includes(x.mode)) return null;
+    const out = { mode: x.mode };
+    for (const k of ['fromAirport', 'toAirport', 'number', 'departs', 'airportBy', 'from', 'to', 'operator', 'note']) if (x[k]) out[k] = String(x[k]).slice(0, 200);
+    for (const k of ['avoidTolls', 'avoidHighways', 'rental', 'withCar']) if (x[k]) out[k] = true;
     return out;
   }
 
@@ -267,7 +283,7 @@ function createTrips({ dataDir, mock = false, log = console.log }) {
   // What a read-only share link shows: the parts its options allow.
   function shared(d) {
     const o = d.trip.shareOptions || {};
-    const out = { trip: { title: d.trip.title, description: d.trip.description, destination: d.trip.destination, destinations: d.trip.destinations || [], start: d.trip.start, end: d.trip.end, cover: d.trip.cover, color: d.trip.color, currency: d.trip.currency, members: d.trip.members.map((m) => ({ id: m.id, name: m.name, color: m.color })) }, options: o };
+    const out = { trip: { title: d.trip.title, description: d.trip.description, destination: d.trip.destination, origin: d.trip.origin || null, destinations: d.trip.destinations || [], start: d.trip.start, end: d.trip.end, cover: d.trip.cover, color: d.trip.color, currency: d.trip.currency, members: d.trip.members.map((m) => ({ id: m.id, name: m.name, color: m.color })) }, options: o };
     out.places = d.places;
     out.items = Object.fromEntries(Object.entries(d.items).filter(([, it]) => it.kind !== 'booking' || o.bookings));
     out.files = Object.fromEntries(Object.entries(d.files).filter(([, f]) => !f.deleted && /^image\//.test(f.type) && (f.id === d.trip.cover || f.placeId)));
@@ -401,6 +417,21 @@ function createTrips({ dataDir, mock = false, log = console.log }) {
         url: e.tags.website || null, phone: e.tags.phone || null, hours: e.tags.opening_hours || null, wiki: e.tags.wikipedia || null, cuisine: e.tags.cuisine || null,
       })).filter((p) => Number.isFinite(p.lat)).slice(0, 60);
     },
+    // Places of a kind along a route (a line of points), within a distance of it.
+    async along(points, cat, radius = 3000) {
+      if (points.length < 2) return [];
+      if (mock) return demoAlong(points, cat);
+      const tags = ALONG[cat] || NEARBY[cat] || ALONG.hotel;
+      const r = Math.min(10000, Math.max(500, Number(radius) || 3000));
+      const line = points.map(([la, lo]) => `${la.toFixed(4)},${lo.toFixed(4)}`).join(',');
+      const q = `[out:json][timeout:25];(${tags.map((t) => `nwr[${t}][name](around:${r},${line});`).join('')});out center 80;`;
+      const data = await fetchJson('https://overpass-api.de/api/interpreter', { method: 'POST', body: `data=${encodeURIComponent(q)}`, headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, ttl: 6 * 3600e3 });
+      return (data.elements || []).map((e) => ({
+        name: e.tags.name, lat: e.lat ?? e.center?.lat, lon: e.lon ?? e.center?.lon, category: ALONG_CATEGORY[cat] || cat, osm: `${e.type[0]}${e.id}`,
+        address: [e.tags['addr:street'] && `${e.tags['addr:street']} ${e.tags['addr:housenumber'] || ''}`.trim(), e.tags['addr:city']].filter(Boolean).join(', '),
+        url: e.tags.website || null, phone: e.tags.phone || null, hours: e.tags.opening_hours || null, wiki: e.tags.wikipedia || null, stars: e.tags.stars || null, brand: e.tags.brand || null,
+      })).filter((p) => Number.isFinite(p.lat)).slice(0, 80);
+    },
     // A route through points (car, bike or on foot), with its line, distance and time per leg.
     async route(mode, coords) {
       if (coords.length < 2) return null;
@@ -461,6 +492,10 @@ function createTrips({ dataDir, mock = false, log = console.log }) {
         if (p === '/geo/route') {
           const coords = String(q.get('points') || '').split(';').map((s) => s.split(',').map(Number)).filter((c) => c.length === 2 && c.every(Number.isFinite)).slice(0, 60);
           return sendJson(res, 200, { route: await geo.route(q.get('mode'), coords) });
+        }
+        if (p === '/geo/along') {
+          const pts = String(q.get('points') || '').split(';').map((x) => x.split(',').map(Number)).filter((c) => c.length === 2 && c.every(Number.isFinite)).slice(0, 80);
+          return sendJson(res, 200, { places: await geo.along(pts, q.get('cat') || 'hotel', q.get('radius')) });
         }
         if (p === '/geo/weather') return sendJson(res, 200, { days: await geo.weather(num('lat'), num('lon'), q.get('start'), q.get('end') || q.get('start')) });
         if (p === '/geo/fx') return sendJson(res, 200, { rate: await geo.fx(q.get('from'), q.get('to'), q.get('date')) });
@@ -584,6 +619,10 @@ function createTrips({ dataDir, mock = false, log = console.log }) {
     const image = `data:image/svg+xml,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360"><defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="hsl(${hue},55%,70%)"/><stop offset="1" stop-color="hsl(${(hue + 40) % 360},45%,35%)"/></linearGradient></defs><rect width="640" height="360" fill="url(#g)"/><path d="M0 300 Q160 240 320 290 T640 270 V360 H0 Z" fill="rgba(0,0,0,.25)"/><text x="30" y="330" font-family="sans-serif" font-size="30" fill="#fff">${name.replace(/&/g, '&amp;')}</text></svg>`)}`;
     return { title: name, extract: `${name} is one of the best-known sights of ${p[4].split(',').pop().trim()}. (A demo description: with MediaDesk connected to the internet, descriptions and photos come from Wikipedia.)`, image, url: null };
   }
+  function demoAlong(points, cat) {
+    const names = { hotel: ['Roadside Inn', 'Estalagem do Caminho', 'Motel Central', 'Quinta da Estrada'], fuel: ['Galp', 'Repsol', 'BP'], charging: ['Ionity Charging', 'Tesla Supercharger'], rest: ['Rest Area North', 'Service Area'], food: ['Churrasqueira do Viajante', 'Tasca da Ponte'], cafe: ['Café da Estrada'], sights: ['Old Castle', 'Roman Bridge', 'Village Church'], viewpoint: ['Valley Viewpoint'], park: ['River Beach', 'Nature Park'], museum: ['Village Museum'], camping: ['Camping do Rio'] }[cat] || ['Place along the way'];
+    return names.map((n, i) => { const pt = points[Math.min(points.length - 1, Math.round(((i + 1) / (names.length + 1)) * (points.length - 1)))]; return { name: n, lat: pt[0] + 0.01 * Math.sin(i * 1.7), lon: pt[1] + 0.012 * Math.cos(i * 1.7), category: ALONG_CATEGORY[cat] || cat, address: 'Demo road', osm: null, url: null, phone: null, hours: null }; });
+  }
   function demoNearby(lat, lon, cat) {
     const names = { food: ['Taberna do Bairro', 'Casa da Esquina', 'O Pescador', 'Cantinho Verde'], cafe: ['Café Central', 'Pastelaria Doce', 'Grão de Café'], sights: ['Old Church', 'Town Fountain', 'Little Chapel', 'Stone Arch'], museum: ['City Museum', 'Tile Museum'], viewpoint: ['Sunset Viewpoint', 'Hilltop Terrace'], park: ['Garden of Roses', 'Riverside Park'], shopping: ['Market Hall', 'Book Corner'], nightlife: ['Fado House', 'Rooftop Bar'], transport: ['Metro Station', 'Bus Stop'], hotel: ['Hotel Avenida', 'Casa Azul Guesthouse'] }[cat] || ['Interesting place'];
     return names.map((n, i) => ({ name: n, lat: lat + Math.sin(i * 2.1) * 0.006, lon: lon + Math.cos(i * 2.1) * 0.008, category: cat, address: 'Demo street', osm: null, url: null, phone: null, hours: 'Mo-Su 09:00-22:00' }));
@@ -618,7 +657,7 @@ function createTrips({ dataDir, mock = false, log = console.log }) {
     const today = new Date().toISOString().slice(0, 10);
     const start = addDays(today, 12);
     const members = [{ id: 'm-rob', name: 'Rob', color: '#3b82f6' }, { id: 'm-sam', name: 'Sam', color: '#e8590c' }, { id: 'm-alex', name: 'Alex', color: '#2f9e44' }];
-    const d = normalise({ id: 'demo-portugal', rev: 1, created: Date.now(), updated: Date.now(), trip: { title: 'Portugal road trip', destination: 'Lisbon & Porto', destinations: [{ id: 'd-lisbon', name: 'Lisbon', address: 'Lisbon, Portugal', lat: 38.7223, lon: -9.1393, country: 'PT', arrive: start, depart: addDays(start, 4) }, { id: 'd-porto', name: 'Porto', address: 'Porto, Portugal', lat: 41.1579, lon: -8.6291, country: 'PT', arrive: addDays(start, 4), depart: addDays(start, 6) }], description: 'Pastéis, palaces and port wine.', start, end: addDays(start, 6), currency: 'EUR', color: '#e8590c', members } });
+    const d = normalise({ id: 'demo-portugal', rev: 1, created: Date.now(), updated: Date.now(), trip: { title: 'Portugal road trip', destination: 'Lisbon & Porto', origin: { name: 'London', address: 'London, United Kingdom', lat: 51.5072, lon: -0.1276, country: 'GB' }, destinations: [{ id: 'd-lisbon', name: 'Lisbon', address: 'Lisbon, Portugal', lat: 38.7223, lon: -9.1393, country: 'PT', arrive: start, depart: addDays(start, 4), travel: { mode: 'flight', fromAirport: 'LHR', toAirport: 'LIS', number: 'TP1351', departs: '07:10', airportBy: 'car' } }, { id: 'd-porto', name: 'Porto', address: 'Porto, Portugal', lat: 41.1579, lon: -8.6291, country: 'PT', arrive: addDays(start, 4), depart: addDays(start, 6), travel: { mode: 'car', departs: '10:00', rental: true } }], description: 'Pastéis, palaces and port wine.', start, end: addDays(start, 6), currency: 'EUR', color: '#e8590c', members } });
     const pid = {};
     for (const p of DEMO_PLACES.slice(0, 19)) { const id = `p-${p[0].toLowerCase().replace(/[^a-z]+/g, '-')}`; pid[p[0]] = id; d.places[id] = { id, ...demoPlace(p), created: Date.now() }; }
     d.places[pid['Pastéis de Belém']].rating = 5;
@@ -672,6 +711,14 @@ function categoryOf(cls, type) {
   if (/tourism|historic|attraction|monument|castle|church|place_of_worship|memorial|ruins/.test(t)) return 'sights';
   return 'other';
 }
+const TRAVEL_MODES = ['car', 'flight', 'train', 'bus', 'ferry', 'boat', 'other'];
+// Along a road trip: what to look for, and the kind of place it becomes.
+const ALONG = {
+  hotel: ['tourism=hotel', 'tourism=motel', 'tourism=guest_house'], camping: ['tourism=camp_site', 'tourism=caravan_site'], fuel: ['amenity=fuel'], charging: ['amenity=charging_station'],
+  rest: ['highway=rest_area', 'highway=services'], food: ['amenity=restaurant', 'amenity=fast_food'], cafe: ['amenity=cafe'], sights: ['tourism=attraction', 'historic=castle', 'historic=monument'],
+  viewpoint: ['tourism=viewpoint'], park: ['leisure=nature_reserve', 'boundary=national_park', 'natural=beach'], museum: ['tourism=museum'],
+};
+const ALONG_CATEGORY = { hotel: 'hotel', camping: 'hotel', fuel: 'transport', charging: 'transport', rest: 'transport' };
 const NEARBY = {
   food: ['amenity=restaurant', 'amenity=fast_food'], cafe: ['amenity=cafe', 'shop=bakery'], sights: ['tourism=attraction', 'historic', 'tourism=artwork'], museum: ['tourism=museum', 'tourism=gallery'],
   viewpoint: ['tourism=viewpoint'], park: ['leisure=park', 'leisure=garden', 'natural=beach'], shopping: ['shop=mall', 'amenity=marketplace', 'shop=books', 'shop=gift'],

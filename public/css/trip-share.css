@@ -33,3 +33,16 @@ footer { margin-top: 30px; font-size: 12px; }
 @media (max-width: 800px) { .ts-layout { grid-template-columns: 1fr; grid-template-rows: 45vh auto; height: auto; } .ts-map { height: 45vh; } .ts-body { border-left: 0; padding: 0 16px 16px; } }
 
 .tp-dark-tiles .leaflet-tile-pane { filter: invert(1) hue-rotate(180deg) brightness(.92) contrast(.88) saturate(.7); }
+
+.route-list { list-style: none; padding: 0 !important; margin: 0; position: relative; }
+.route-list li { display: flex; gap: 12px; align-items: flex-start; margin: 0 !important; padding: 7px 0; }
+.route-list .r-travel { color: var(--muted); font-size: 14px; }
+.route-list .r-travel b { font-weight: 600; }
+.route-list small { color: var(--muted); }
+.r-origin small { display: block; }
+.r-icon { flex: none; width: 26px; text-align: center; }
+.r-num { display: inline-grid; place-items: center; width: 26px; height: 26px; border-radius: 50%; background: var(--c); color: #fff; font-weight: 700; font-size: 13px; }
+.tp-destpin { background: none; border: 0; }
+.tp-destpin > * , .tp-destpin { display: grid; place-items: center; }
+.tp-destpin { width: 28px; height: 28px; border-radius: 8px; background: #fff; color: #111; font: 700 13px/28px system-ui, sans-serif; text-align: center; box-shadow: 0 0 0 2px var(--c), 0 2px 6px rgba(0,0,0,.3); }
+.tp-destpin.home { font-size: 15px; }

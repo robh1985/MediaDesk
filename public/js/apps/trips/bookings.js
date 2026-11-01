@@ -5,7 +5,7 @@
 import { h, clear, toast, toastError } from '../../ui.js';
 import { geo } from './store.js';
 import {
-  tripDays, fmtDay, fmtTime, BOOKING_TYPES, bookingType, STATUS, STAYS, CURRENCIES, money, avatar,
+  tripDays, fmtDay, fmtTime, haversine, BOOKING_TYPES, bookingType, STATUS, STAYS, CURRENCIES, money, avatar,
   sheet, field, input, select, textarea, peoplePicker, emptyState,
 } from './util.js';
 
@@ -23,7 +23,21 @@ export async function findAirports(q) {
   const rest = list.filter((a) => !exact.includes(a)).map((a) => [score(a), a]).filter(([sc]) => sc < 9).sort((a, b) => a[0] - b[0]).map(([, a]) => a);
   return [...exact, ...rest].slice(0, 8);
 }
-const airportByCode = async (code) => (await loadAirports()).find((a) => a.iata === String(code || '').toUpperCase()) || null;
+export const airportByCode = async (code) => (await loadAirports()).find((a) => a.iata === String(code || '').toUpperCase()) || null;
+
+// The airport most people would fly from near a place: the nearest large one within 200 km, or a
+// medium one with scheduled flights within 120 km, or else the nearest.
+export async function nearestAirport(p) {
+  if (!Number.isFinite(p?.lat)) return null;
+  const best = { L: null, M: null, any: null };
+  for (const a of await loadAirports()) {
+    const m = haversine(p, a);
+    if (!best.any || m < best.any[0]) best.any = [m, a];
+    if (a.size === 'L' && m < 200000 && (!best.L || m < best.L[0])) best.L = [m, a];
+    if (a.size === 'M' && m < 120000 && (!best.M || m < best.M[0])) best.M = [m, a];
+  }
+  return (best.L || best.M || best.any)?.[1] || null;
+}
 
 // "2026-05-04T07:10" in the airport's own time → shown as it is (times are local where they happen).
 const localTime = (s) => (s ? fmtTime(s) : '');
@@ -186,7 +200,7 @@ function defaultTitle(t, legs) {
 }
 
 // An airport, found by its code, city or name.
-function airportField(leg, key, label) {
+export function airportField(leg, key, label) {
   const box = input({ value: leg[key] || '', placeholder: 'LHR or London', autocomplete: 'off' });
   const list = h('div', { class: 'tp-results', hidden: true });
   const info = h('small', { class: 'muted' });

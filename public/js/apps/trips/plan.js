@@ -8,6 +8,7 @@ import { h, clear, toast, toastError } from '../../ui.js';
 import { geo, newId } from './store.js';
 import { makeMap, placeIcon, fitTo, STYLES } from './map.js';
 import { dayDestinations, nearestDestination } from './destinations.js';
+import { originCard, legCard, drawTravel } from './travel.js';
 import {
   tripDays, fmtDay, fmtTime, fmtMins, fmtKm, CATEGORIES, catOf, DAY_COLORS, bookingType, BOOKING_TYPES, STAYS, haversine, optimiseOrder, weatherIcon,
   navLinks, googleDirections, sheet, field, input, select, textarea, emptyState, esc,
@@ -104,6 +105,8 @@ export class PlanView {
     const days = this.dayList();
     const dests = this.dests();
     const sections = [];
+    const origin = originCard(this);
+    if (origin) sections.push(origin);
     if (!dests.length) sections.push(this.daySection(null, this.itemsOn(null)), ...days.map((d, i) => this.daySection(d, this.itemsOn(d), i)));
     else {
       const byDay = dayDestinations(this.trip);
@@ -113,6 +116,8 @@ export class PlanView {
         const open = !this.collapsed().has(x.id);
         const span = mine.length ? `${fmtDay(mine[0])}${mine.length > 1 ? ` – ${fmtDay(mine.at(-1))}` : ''} · ${mine.length} day${mine.length === 1 ? '' : 's'}` : 'No days';
         const places = new Set([...pool, ...mine.flatMap((d) => this.itemsOn(d))].filter((it) => it.kind === 'place').map((it) => it.placeId)).size;
+        const leg = legCard(this, x, k);
+        if (leg) sections.push(leg);
         sections.push(h('section', { class: `tp-dest ${open ? 'open' : ''}`, dataset: { dest: x.id } },
           h('button', { class: 'tp-dest-head', 'aria-expanded': String(open), onclick: () => this.toggleDest(x) },
             h('span', { class: 'tp-dest-chev', 'aria-hidden': 'true' }, '▸'),
@@ -339,6 +344,7 @@ export class PlanView {
         this.map.on('click', (e) => this.mapClick(e.latlng));
         this.markers = window.L.markerClusterGroup({ maxClusterRadius: 38, showCoverageOnHover: false, spiderfyOnMaxZoom: true, disableClusteringAtZoom: 14 });
         this.map.addLayer(this.markers);
+        this.travelLayer = window.L.layerGroup().addTo(this.map);
         this.lines = window.L.layerGroup().addTo(this.map);
         this.extra = window.L.layerGroup().addTo(this.map);
         this.fitted = false;
@@ -361,6 +367,7 @@ export class PlanView {
       if (!faded) shown.push(p);
     }
     this.drawRoutes();
+    this.drawTravel();
     if (!this.fitted || this.lastDay !== this.day) {
       const first = !this.fitted;
       this.fitted = true;
@@ -372,7 +379,8 @@ export class PlanView {
     }
   }
   // The whole trip: every place and destination.
-  fitAll() { fitTo(this.map, [...this.store.all('places'), ...this.dests()], 13); }
+  fitAll() { fitTo(this.map, [...this.store.all('places'), ...this.dests(), ...(this.trip.origin ? [this.trip.origin] : [])], 13); }
+  drawTravel() { drawTravel(this); }
   // One destination: its places (or the town itself, before it has any).
   focusDest(x) {
     if (!this.map) return;
@@ -433,13 +441,13 @@ export class PlanView {
     for (const p of list) L.circleMarker([p.lat, p.lon], { radius: 9, color: '#111', weight: 2, fillColor: '#ffd43b', fillOpacity: 0.95 }).bindTooltip(esc(p.name)).addTo(this.extra);
   }
 
-  async addPlace(p, date = null, { open = true, quiet = false } = {}) {
+  async addPlace(p, date = null, { open = true, quiet = false, dest = null } = {}) {
     // The same place twice: put the existing one on the day instead.
     const same = this.store.all('places').find((x) => (p.osm && x.osm === p.osm) || (x.name === p.name && Math.abs(x.lat - p.lat) < 1e-4 && Math.abs(x.lon - p.lon) < 1e-4));
     const placeId = same?.id || newId();
     const ops = [];
     if (!same) ops.push({ op: 'put', col: 'places', item: { id: placeId, name: p.name, lat: p.lat, lon: p.lon, address: p.address || '', category: p.category || 'other', country: p.country || null, osm: p.osm || null, url: p.url || null, phone: p.phone || null, hours: p.hours || null, wiki: p.wiki || null, notes: p.notes || '' } });
-    if (!same || !this.store.all('items').some((it) => it.placeId === placeId && (it.date || null) === date)) ops.push({ op: 'put', col: 'items', item: { kind: 'place', placeId, date, order: this.itemsOn(date).length } });
+    if (!same || !this.store.all('items').some((it) => it.placeId === placeId && (it.date || null) === date)) ops.push({ op: 'put', col: 'items', item: { kind: 'place', placeId, date, order: this.itemsOn(date).length, ...(dest && !date ? { dest } : {}) } });
     if (!ops.length) { if (!quiet) toast(`${p.name} is already there`, { timeout: 1500 }); return placeId; }
     await this.store.batch(ops, { label: `add ${p.name}` }).catch(toastError);
     this.extra?.clearLayers();
