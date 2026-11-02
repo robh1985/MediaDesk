@@ -291,4 +291,6 @@
 .ebk-kbtn { font-size: 17px; }
 @media (max-width: 560px) { .ebk-krow { grid-template-columns: 1fr auto; } .ebk-krow small { display: none; } }
 
-.ebk-mine { position: absolute; left: 6px; top: 6px; z-index: 2; padding: 1px 6px; border-radius: 6px; background: rgba(15,17,21,.75); color: #fff; font-size: 10.5px; font-weight: 700; letter-spacing: .02em; }
+.ebk-mine { position: absolute; left: 6px; top: 6px; z-index: 2; width: 22px; height: 22px; display: grid; place-items: center; border-radius: 50%; background: rgba(255,255,255,.92); color: #e03131; font-size: 13px; box-shadow: 0 1px 4px rgba(0,0,0,.3); }
+.ebk-minebtn { font-size: 17px; color: inherit; opacity: .7; }
+.ebk-minebtn.on { color: #e03131; opacity: 1; }

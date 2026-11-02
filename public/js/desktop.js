@@ -1,5 +1,6 @@
 // The desktop shell: wallpaper, menu bar, dock, desktop icons, widgets and the launcher.
 
+import { personHtml } from './people.js';
 import { h, clear, formatSpeed, formatBytes, timeOf, debounce, toast, toastError, contextMenu, timeAgo } from './ui.js';
 import { icon, appIcon } from './icons.js';
 import { radarr, sonarr, nzbget, jellyfin, plex, plexGet, plexImage, isConfigured, serviceLink, portal, state, appPref } from './api.js';
@@ -152,7 +153,7 @@ function buildMenuBar() {
     const r = logo.getBoundingClientRect();
     const me = state.me && !state.me.open ? state.me : null;
     contextMenu(r.left, r.bottom + 4, [
-      ...(me ? [{ label: `${me.name} (${me.role === 'admin' ? 'admin' : me.username})`, icon: icon.user, action: () => openApp('settings', { tab: 'account' }) }, '-'] : []),
+      ...(me ? [{ label: `${me.name} (${me.role === 'admin' ? 'admin' : me.username})`, icon: me.avatar ? personHtml(me, 18) : icon.user, action: () => openApp('settings', { tab: 'account' }) }, '-'] : []),
       { label: 'Search & apps', icon: icon.search, action: openLauncher },
       !me || me.allowed.includes('dashboard') ? { label: 'Overview', icon: icon.grid, action: () => openApp('dashboard') } : null,
       { label: 'Settings', icon: icon.sliders, action: () => openApp('settings') },

@@ -292,6 +292,14 @@ function createEbooks({ dataDir, getFolder, mock = false, sample = null, getSeve
   const idFor = (rel) => crypto.createHash('sha1').update(`${idSalt}${rel}`).digest('hex').slice(0, 16);
   // Reading places of the person asking: the first admin's are the ones from before accounts.
   const readingOf = (s) => { const k = readerKey(); if (!k) return s.books; s.byUser ||= {}; return (s.byUser[k] ||= {}); };
+  // "Mine": the books each person likes and wants close at hand (ids of library books).
+  const mineOf = (s) => { const k = readerKey(); if (!k) return (s.mine ||= []); s.mineBy ||= {}; return (s.mineBy[k] ||= []); };
+  async function addMine(ids) {
+    const list = mineOf(load());
+    for (const id of ids) if (id && !list.includes(id)) list.unshift(id);
+    await save();
+    return list;
+  }
 
   async function walk(root, rel = '', depth = 0, out = [], dirs = []) {
     if (depth > 8 || out.length > 20000) return out;
@@ -547,7 +555,7 @@ function createEbooks({ dataDir, getFolder, mock = false, sample = null, getSeve
       if (p === '/library' && req.method === 'GET') {
         const lib = await library(url.searchParams.get('refresh') === '1');
         const k = getKindle();
-        return sendJson(res, 200, { ...lib, mock, reading: readingOf(load()), sendToKindle: k.email && k.smtp?.host ? k.email : null });
+        return sendJson(res, 200, { ...lib, mock, reading: readingOf(load()), mine: mineOf(load()), sendToKindle: k.email && k.smtp?.host ? k.email : null });
       }
       let m = /^\/file\/([0-9a-f]{16})$/.exec(p);
       if (m && (req.method === 'GET' || req.method === 'HEAD')) {
@@ -642,7 +650,9 @@ function createEbooks({ dataDir, getFolder, mock = false, sample = null, getSeve
           if (st.size === size) {
             req.resume();
             const lib = await library(true);
-            return sendJson(res, 200, { book: lib.books.find((b) => b.path === path.relative(dir, dest).split(path.sep).join('/')), existed: true });
+            const book = lib.books.find((b) => b.path === path.relative(dir, dest).split(path.sep).join('/'));
+            if (book && url.searchParams.get('mine') !== '0') await addMine([book.id]);
+            return sendJson(res, 200, { book, existed: true });
           }
           const stem = name.replace(/\.[^.]+$/, '');
           const ext = name.slice(stem.length);
@@ -652,7 +662,10 @@ function createEbooks({ dataDir, getFolder, mock = false, sample = null, getSeve
         await fsp.rename(part, dest);
         const lib = await library(true);
         const rel = path.relative(dir, dest).split(path.sep).join('/');
-        return sendJson(res, 200, { book: lib.books.find((b) => b.path === rel) || null });
+        const book = lib.books.find((b) => b.path === rel) || null;
+        // A book you add is on your Mine list too.
+        if (book && url.searchParams.get('mine') !== '0') await addMine([book.id]);
+        return sendJson(res, 200, { book });
       }
       m = /^\/cover\/([0-9a-f]{16})$/.exec(p);
       if (m && req.method === 'GET') {
@@ -681,6 +694,18 @@ function createEbooks({ dataDir, getFolder, mock = false, sample = null, getSeve
         return sendJson(res, 200, { ok: true });
       }
       if (p === '/state' && req.method === 'GET') return sendJson(res, 200, { books: readingOf(load()) });
+      // Add a book to Mine, or take it off.
+      if (p === '/mine' && req.method === 'POST') {
+        const body = await readJson(req);
+        const id = String(body.id || '');
+        if (!/^[0-9a-f]{16}$/.test(id)) throw new BookError(400, 'Which book?');
+        const list = mineOf(load());
+        const at = list.indexOf(id);
+        if (body.on && at < 0) list.unshift(id);
+        if (!body.on && at >= 0) list.splice(at, 1);
+        await save();
+        return sendJson(res, 200, { mine: list });
+      }
       if (p === '/state' && req.method === 'POST') {
         const body = await readJson(req);
         const key = cleanKey(body.key);
@@ -704,7 +729,13 @@ function createEbooks({ dataDir, getFolder, mock = false, sample = null, getSeve
     }
   }
 
-  return { handle, invalidate: () => { cache.at = 0; }, library, detectCalibre };
+  // Books moved into the library from somewhere else (rel paths), onto the current person's Mine.
+  async function adopt(rels) {
+    const lib = await library(true);
+    return addMine(rels.map((r) => lib.books.find((b) => b.path === r)?.id).filter(Boolean));
+  }
+
+  return { handle, invalidate: () => { cache.at = 0; }, library, detectCalibre, adopt };
 }
 
 module.exports = { createEbooks, zipEntries, zipRead, epubMeta, cbzMeta, mobiMeta, fb2Meta, writeStoredZip, FORMATS };

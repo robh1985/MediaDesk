@@ -112,25 +112,24 @@ export function kindleDialog(app, b) {
 // how a file is uploaded.
 function libraryTarget(app) {
   const lib = app.lib || {};
+  const folders = lib.folders || [];
   const suggested = FIRE ? 'Kindle Fire' : 'From my device';
-  const places = destinations(lib);
-  // A new folder: in your own library if you have one (and can't add to the shared one), else the shared one.
-  const newIn = lib.personal && !lib.sharedWritable ? 'mine:' : '';
-  const sel = h('select', { class: 'input' }, h('option', { value: '__new' }, lib.personal ? `A new folder in ${newIn ? 'my library' : 'the shared library'}…` : 'A new folder…'), places.map(([v, l]) => h('option', { value: v }, l)));
-  sel.value = places.some(([v]) => v === `${newIn}${suggested}`) ? `${newIn}${suggested}` : '__new';
+  const sel = h('select', { class: 'input' }, h('option', { value: '__new' }, 'A new folder…'), h('option', { value: '' }, 'The books folder itself'), folders.map((f) => h('option', { value: f }, f)));
+  sel.value = folders.includes(suggested) ? suggested : '__new';
   const newName = h('input', { class: 'input', value: suggested, 'aria-label': 'New folder name' });
   const showNew = () => { newName.hidden = sel.value !== '__new'; };
   sel.addEventListener('change', showNew);
   showNew();
+  const toMine = h('input', { type: 'checkbox', checked: true });
   return {
     problem: !lib.configured ? 'Choose a books folder first (Settings → eBook Reader)' : !lib.writable ? 'MediaDesk can’t write to the books folder' : null,
-    intro: lib.personal ? 'Choose books on this device to copy to the MediaDesk server, into your own library or the shared one, so you can read them in the eBook Reader on any device.' : 'Choose books on this device to copy to the MediaDesk server. They’re added to your library, so you can read them in the eBook Reader on any device.',
-    picker: h('div', { class: 'ebk-krowfields' }, h('label', { class: 'field' }, h('span', {}, 'Put them in'), sel), newName),
-    // Books already anywhere in the libraries (same file name and size).
+    intro: 'Choose books on this device to copy to the MediaDesk server. They’re added to the library everyone shares, so you (and others) can read them in the eBook Reader on any device.',
+    picker: h('div', {}, h('div', { class: 'ebk-krowfields' }, h('label', { class: 'field' }, h('span', {}, 'Put them in'), sel), newName), h('label', { class: 'check small' }, toMine, ' Add them to my ♥ Mine list')),
+    // Books already in the library (same file name and size).
     async begin() {
-      const dest = sel.value === '__new' ? `${newIn}${newName.value.trim().replace(/[\\/]+/g, ' ') || suggested}` : sel.value;
+      const dest = sel.value === '__new' ? newName.value.trim().replace(/[\\/]+/g, ' ') || suggested : sel.value;
       const have = new Set(app.lib.books.map((x) => `${x.path.split('/').pop().toLowerCase()}|${x.size}`));
-      return { has: (f) => have.has(`${f.name.toLowerCase()}|${f.size}`), upload: (f, onProgress) => upload(uploadUrl(dest, f.name), f, onProgress) };
+      return { has: (f) => have.has(`${f.name.toLowerCase()}|${f.size}`), upload: (f, onProgress) => upload(`${uploadUrl(dest, f.name)}${toMine.checked ? '' : '&mine=0'}`, f, onProgress) };
     },
     async end(counts) { app.lib = await loadLibrary(call, true).catch(() => app.lib); if (counts.added && !app.book) app.showLibrary(); },
   };

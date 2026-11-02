@@ -71,7 +71,7 @@ async function boot() {
 // everything (music included) running underneath. Logging in again unlocks.
 function showLocked() {
   state.locked = true;
-  signInScreen({ user: state.me && !state.me.open ? state.me : null, onDone: () => { state.locked = false; refreshNotifications(); } });
+  signInScreen({ user: state.me && !state.me.open ? state.me : null, canPasskey: Boolean(state.me?.passkeys), onDone: () => { state.locked = false; refreshNotifications(); } });
 }
 addEventListener('mediadesk:logout', async () => {
   if (state.locked) return showLocked();

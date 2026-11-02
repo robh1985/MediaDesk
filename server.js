@@ -22,6 +22,7 @@ const { createFamily } = require('./family');
 const { createEbooks } = require('./ebooks');
 const { createTrips } = require('./trips');
 const { createUsers } = require('./users');
+const { sendMail } = require('./smtp');
 
 const ROOT = __dirname;
 
@@ -180,7 +181,7 @@ function publicConfig(u = reqUser()) {
     media: { ...media.status(), ffmpegPath: config.ffmpegPath || '', libreOfficePath: config.libreOfficePath || '' },
     archive: { ...archive.status(), sevenZipPath: config.sevenZipPath || '' },
     games: { folder: MOCK ? '(demo games)' : config.gamesFolder || '' },
-    ebooks: { folder: MOCK ? '(demo books)' : config.ebooksFolder || '', kindle: u.role === 'admin' ? { ...kindlePublic(), email: kindleFor(u).email } : { email: kindleFor(u).email, smtp: { ready: Boolean(config.kindle?.smtp?.host) } }, personal: personalOn(u) },
+    ebooks: { folder: MOCK ? '(demo books)' : config.ebooksFolder || '', mineList: true, kindle: u.role === 'admin' ? { ...kindlePublic(), email: kindleFor(u).email } : { email: kindleFor(u).email, smtp: { ready: Boolean(config.kindle?.smtp?.host) } }, personal: personalOn(u) },
   };
 }
 
@@ -633,7 +634,18 @@ async function plexSignIn(req, res, p) {
 
 const mock = MOCK ? require('./mock') : null;
 const DATA_DIR = MOCK ? path.join(require('node:os').tmpdir(), 'mediadesk-demo-data') : path.dirname(CONFIG_PATH);
-const users = createUsers({ dataDir: DATA_DIR, mock: MOCK, legacyPassword: () => config.portalPassword || '' });
+const users = createUsers({
+  dataDir: DATA_DIR, mock: MOCK, legacyPassword: () => config.portalPassword || '',
+  publicUrl: () => process.env.PUBLIC_URL || config.publicUrl || '',
+  // Invites and password resets go out through the email server (Settings → Users → Email).
+  canEmail: () => Boolean(config.kindle?.smtp?.host),
+  sendEmail: (to, subject, text) => {
+    const smtp = config.kindle?.smtp;
+    if (!smtp?.host) throw new Error('No email server is set up');
+    if (MOCK) return Promise.resolve();
+    return sendMail(smtp, { from: smtp.from || smtp.user, to, subject, text });
+  },
+});
 // Who a request is from, for the apps (set for each request in handle()).
 const requestContext = new AsyncLocalStorage();
 const reqUser = () => requestContext.getStore()?.user || users.OWNER;
@@ -663,9 +675,8 @@ function filesConfigFor(u) {
   if (!personalOn(u)) return config;
   const allowed = (r) => u.role === 'admin' || !Array.isArray(u.folders) || u.folders.includes(path.resolve(r));
   const shared = (config.fileRoots || []).filter((r) => typeof r === 'string' && r.trim() && allowed(r.trim()));
-  // "My files" is the person's whole folder: their Books and Games (the personal libraries) and Files.
+  // "My files" is the person's whole folder: their Games (their own Game Console library) and Files.
   const mine = path.resolve(path.dirname(personalDir(u, 'Files')));
-  personalDir(u, 'Books');
   personalDir(u, 'Games');
   return { ...config, fileRoots: [...shared, mine], fileRootInfo: { ...(config.fileRootInfo || {}), [mine]: { alias: 'My files', tags: [] } } };
 }
@@ -700,18 +711,33 @@ const ebooks = createEbooks({
   // Reading places and bookmarks are each person's own (the first admin keeps the ones from before accounts).
   readerKey: () => { const u = reqUser(); return personalOn(u) && u.id !== users.ownerId() ? u.id : null; },
 });
-// Personal libraries: an eBook Reader and a Game Console of each person's own folder.
-const personalEbooks = new Map();
-function ebooksFor(u) {
-  if (!personalEbooks.has(u.id)) {
-    personalEbooks.set(u.id, createEbooks({
-      dataDir: userDataDir(u), getFolder: () => personalDir(users.byId(u.id) || u, 'Books'), idSalt: `mine:${u.id}`,
-      getSevenZip: () => archive.status().path, getConvertPath: () => config.ebookConvertPath || '',
-      getKindle: () => kindleFor(reqUser()),
-      resolveShared: (root, rel) => files.resolveInShared(filesConfigFor(reqUser()), Number(root), rel), filesEnabled: () => filesStatus(reqUser()).enabled,
-    }));
-  }
-  return personalEbooks.get(u.id);
+// Books people had in a personal Books folder (before Mine became a list) move into the shared
+// library, onto their Mine list. The eBook Reader has one library everyone shares.
+async function adoptPersonalBooks(u) {
+  const from = path.join(personalBase(), safeDirName(u.username), 'Books');
+  const shared = config.ebooksFolder;
+  if (!shared || !fs.existsSync(from)) return;
+  const moved = [];
+  const walk = async (dir, rel) => {
+    for (const e of await fs.promises.readdir(dir, { withFileTypes: true }).catch(() => [])) {
+      const abs = path.join(dir, e.name);
+      const r = rel ? `${rel}/${e.name}` : e.name;
+      if (e.isDirectory()) { await walk(abs, r); continue; }
+      if (!/\.(epub|pdf|cbz|cbr|cb7|cbt|mobi|azw3?|prc|fb2|txt|rtf|docx|odt|lit)$/i.test(e.name)) continue;
+      let dest = path.join(shared, ...r.split('/'));
+      const stem = dest.replace(/\.[^.]+$/, '');
+      const ext = dest.slice(stem.length);
+      for (let n = 2; fs.existsSync(dest); n++) dest = `${stem} (${n})${ext}`;
+      try {
+        await fs.promises.mkdir(path.dirname(dest), { recursive: true });
+        await fs.promises.rename(abs, dest).catch(async (err) => { if (err.code !== 'EXDEV') throw err; await fs.promises.copyFile(abs, dest); await fs.promises.unlink(abs); });
+        moved.push(path.relative(shared, dest).split(path.sep).join('/'));
+      } catch (err) { console.error(`eBook Reader: couldn’t move ${abs} into the library: ${err.message}`); }
+    }
+  };
+  await walk(from, '');
+  if (moved.length) { console.log(`eBook Reader: ${moved.length} book(s) of ${u.username} moved into the shared library (on their Mine list)`); await ebooks.adopt(moved); }
+  await fs.promises.rm(from, { recursive: true }).catch(() => {});
 }
 const personalGames = new Map();
 function gamesFor(u) {
@@ -784,10 +810,11 @@ async function handle(req, res) {
   }
 
   // Signing in, your own account, and (for admins) everyone's.
-  if (p === '/portal/login' || p === '/portal/login/code' || p === '/portal/users/setup' || p === '/portal/me' || p.startsWith('/portal/me/') || p === '/portal/users' || p.startsWith('/portal/users/')) {
+  if (p === '/portal/login' || p.startsWith('/portal/login/') || p.startsWith('/portal/avatar/') || p.startsWith('/portal/passkey/') || p.startsWith('/portal/invite') || p.startsWith('/portal/reset') || p === '/portal/users/setup' || p === '/portal/me' || p.startsWith('/portal/me/') || p === '/portal/users' || p.startsWith('/portal/users/')) {
     const me = currentUser(req);
     const done = await users.handle(req, res, p, {
-      user: me, ip: req.socket.remoteAddress || '', cookie: sessionCookie(req), sendJson, readJson,
+      user: me, ip: req.socket.remoteAddress || '', cookie: sessionCookie(req), sendJson, readJson, readBody,
+      origin: `${req.headers['x-forwarded-proto'] === 'https' ? 'https' : 'http'}://${req.headers['x-forwarded-host'] || req.headers.host}`,
       onRename: (from, to) => renamePersonal(from, to),
       onFirstAdmin: (u) => adoptOwnerData(u),
     });
@@ -799,7 +826,7 @@ async function handle(req, res) {
   if (p === '/portal/session') {
     const me = currentUser(req);
     const only = users.enabled() && users.all().length === 1 ? users.all()[0] : null;
-    return sendJson(res, 200, { authed: Boolean(me), locked: isLocked(req) && isAuthed(req, { ignoreLock: true }), auth: users.enabled(), user: me ? { ...users.publicUser(me), owner: me.id === users.ownerId() || Boolean(me.open) } : null, lockedUser: !me && isLocked(req) ? users.publicUser(currentUser(req, { ignoreLock: true })) : null, usernameHint: only?.migrated ? only.username : null, build: BUILD_ID });
+    return sendJson(res, 200, { authed: Boolean(me), locked: isLocked(req) && isAuthed(req, { ignoreLock: true }), auth: users.enabled(), user: me ? { ...users.publicUser(me), owner: me.id === users.ownerId() || Boolean(me.open) } : null, lockedUser: !me && isLocked(req) ? users.publicUser(currentUser(req, { ignoreLock: true })) : null, usernameHint: only?.migrated ? only.username : null, resetByEmail: users.enabled() && users.emailReady(), passkeys: users.enabled() && users.hasPasskeys(), build: BUILD_ID });
   }
   if (p === '/portal/lock' && req.method === 'POST') {
     if (!users.enabled()) return sendJson(res, 400, { error: 'Turn on sign-in (Settings → Users) to lock MediaDesk' });
@@ -838,8 +865,6 @@ async function handle(req, res) {
   const need = appsFor(p);
   if (need && !need.some((a) => users.can(me, a))) return sendJson(res, 403, { error: `You don’t have access to ${users.APPS[need[0]] || 'that'}. Ask an admin.`, noAccess: need[0] });
   if (ADMIN_ROUTES.some((r) => p === r || p.startsWith(`${r}/`)) && me.role !== 'admin') return sendJson(res, 403, { error: 'Only admins can do that' });
-  // People with a custom role add books to their own library, not the shared one.
-  if (p === '/portal/ebooks/upload' && me.role === 'custom' && personalOn(me)) return sendJson(res, 403, { error: 'Add books to your own library (an admin can let you add to the shared one)' });
   // Apps that only open files (Music, eBook Reader, Preview, Log Viewer) can read shared folders, not change them.
   if (p.startsWith('/portal/files/') && !['GET', 'HEAD'].includes(req.method) && !FILE_WRITERS.some((a) => users.can(me, a))) return sendJson(res, 403, { error: 'You can open files, but not change them. Ask an admin for Files.' });
 
@@ -912,12 +937,13 @@ async function handle(req, res) {
 
   if (p.startsWith('/portal/plex/')) return plexSignIn(req, res, p);
   // Personal libraries: /portal/<app>/mine/… is the same app, on the person's own folder.
-  if (p.startsWith('/portal/games/mine/') || p.startsWith('/portal/ebooks/mine/')) {
+  if (p.startsWith('/portal/games/mine/')) {
     if (!personalOn(me)) return sendJson(res, 404, { error: 'Personal libraries come with user accounts (Settings → Users)' });
     const u2 = new URL(url);
     u2.pathname = p.replace('/mine/', '/');
-    return p.startsWith('/portal/games/') ? gamesFor(me).handle(req, res, u2, { sendJson, readJson }) : ebooksFor(me).handle(req, res, u2, { sendJson, readJson, readBody });
+    return gamesFor(me).handle(req, res, u2, { sendJson, readJson });
   }
+  if (p === '/portal/ebooks/library' && personalOn(me)) await adoptPersonalBooks(me).catch((err) => console.error(`eBook Reader: ${err.message}`));
   if (p.startsWith('/portal/games/')) return games.handle(req, res, url, { sendJson, readJson });
   if (p.startsWith('/portal/trips/')) return tripPlanner.handle(req, res, url, { sendJson, readJson });
   if (p.startsWith('/portal/ebooks/')) return ebooks.handle(req, res, url, { sendJson, readJson, readBody });

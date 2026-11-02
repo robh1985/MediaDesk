@@ -12,6 +12,7 @@ const fs = require('node:fs');
 const fsp = require('node:fs/promises');
 const path = require('node:path');
 const crypto = require('node:crypto');
+const passkeys = require('./passkeys');
 
 const SESSION_DAYS = 30;
 const USERNAME = /^[a-z0-9][a-z0-9._-]{1,31}$/;
@@ -72,7 +73,8 @@ function totpStep(secret, code, now = Date.now()) {
   return -1;
 }
 
-function createUsers({ dataDir, mock = false, legacyPassword = () => '', log = console.log, onChange = () => {} }) {
+// sendEmail(to, subject, text) sends through MediaDesk's email server (null when there isn't one).
+function createUsers({ dataDir, mock = false, legacyPassword = () => '', log = console.log, onChange = () => {}, sendEmail = null, canEmail = () => false, publicUrl = () => '' }) {
   const file = path.join(dataDir, 'users.json');
   let db = null;
   // In the demo, accounts are kept in memory only (until the demo restarts).
@@ -165,9 +167,10 @@ function createUsers({ dataDir, mock = false, legacyPassword = () => '', log = c
   const can = (u, app) => appsOf(u).includes(app);
 
   const publicUser = (u, { full = false } = {}) => u && ({
-    id: u.id, username: u.username, name: u.name || u.username, color: u.color || '#3b82f6', role: u.role, apps: u.role === 'custom' ? u.apps || [] : (u.apps || []).filter((a) => ADMIN_ONLY.has(a)),
-    allowed: appsOf(u), twoFactor: Boolean(u.totp?.enabled), disabled: Boolean(u.disabled), created: u.created || null, lastLogin: u.lastLogin || null,
+    id: u.id, username: u.username, name: u.name || u.username, color: u.color || '#3b82f6', avatar: u.avatar || null, email: u.email || '', role: u.role, apps: u.role === 'custom' ? u.apps || [] : (u.apps || []).filter((a) => ADMIN_ONLY.has(a)),
+    allowed: appsOf(u), twoFactor: Boolean(u.totp?.enabled), invited: Boolean(u.invite && !u.hash), disabled: Boolean(u.disabled), created: u.created || null, lastLogin: u.lastLogin || null,
     family: u.family || null, folders: u.folders ?? null, open: Boolean(u.open),
+    passkeys: (u.passkeys || []).length,
     ...(full ? { recoveryLeft: (u.recovery || []).length, migrated: Boolean(u.migrated) } : {}),
   });
 
@@ -185,11 +188,15 @@ function createUsers({ dataDir, mock = false, legacyPassword = () => '', log = c
     if ('folders' in body) folders = body.folders === null ? null : (Array.isArray(body.folders) ? body.folders.map((f) => clean(f, 1000)).filter(Boolean).slice(0, 200) : null);
     let family = u.family || null;
     if ('family' in body) family = body.family && ['parent', 'kid', 'none'].includes(body.family.role) ? { role: body.family.role, profile: body.family.role !== 'none' && body.family.profile ? clean(body.family.profile, 60) : null } : null;
-    return { username, name: clean(body.name ?? u.name ?? username, 60) || username, role, apps, color, folders, family };
+    const email = body.email !== undefined ? clean(body.email, 200).toLowerCase() : u.email || '';
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new UserError(400, 'That email address doesn’t look right');
+    if (email && all().some((x) => x.id !== u.id && x.email === email)) throw new UserError(409, 'Someone else has that email address');
+    return { username, name: clean(body.name ?? u.name ?? username, 60) || username, role, apps, color, folders, family, email };
   }
   async function create(body, opts = {}) {
     const u = { id: crypto.randomBytes(8).toString('hex'), created: Date.now(), ...fields(body) };
-    await setPassword(u, body.password, opts);
+    // Invited: no password yet; they choose one from the invite link.
+    if (body.invite) u.ver = 1; else await setPassword(u, body.password, opts);
     load().users[u.id] = u;
     await save();
     return u;
@@ -206,6 +213,72 @@ function createUsers({ dataDir, mock = false, legacyPassword = () => '', log = c
     if (body.password) await setPassword(u, body.password);
     await save();
     return { user: u, renamed: oldName !== u.username ? oldName : null };
+  }
+
+  // --- Profile pictures (PNG, JPEG or WebP, made square and small in the browser) ---
+  const avatarDir = path.join(dataDir, mock ? 'demo-avatars' : 'avatars');
+  const AVATAR_TYPES = { png: 'image/png', jpg: 'image/jpeg', webp: 'image/webp' };
+  const sniff = (b) => (b[0] === 0x89 && b[1] === 0x50 ? 'png' : b[0] === 0xff && b[1] === 0xd8 ? 'jpg' : b.slice(0, 4).toString() === 'RIFF' && b.slice(8, 12).toString() === 'WEBP' ? 'webp' : null);
+  async function setAvatar(u, buf) {
+    const type = buf && sniff(buf);
+    if (!type) throw new UserError(415, 'Use a PNG, JPEG or WebP picture');
+    await fsp.mkdir(avatarDir, { recursive: true });
+    for (const t of Object.keys(AVATAR_TYPES)) await fsp.rm(path.join(avatarDir, `${u.id}.${t}`), { force: true });
+    await fsp.writeFile(path.join(avatarDir, `${u.id}.${type}`), buf);
+    u.avatar = Date.now();
+    await save();
+  }
+  async function dropAvatar(u) {
+    for (const t of Object.keys(AVATAR_TYPES)) await fsp.rm(path.join(avatarDir, `${u.id}.${t}`), { force: true });
+    delete u.avatar;
+    await save();
+  }
+  async function sendAvatar(res, id) {
+    for (const [t, type] of Object.entries(AVATAR_TYPES)) {
+      const buf = await fsp.readFile(path.join(avatarDir, `${id}.${t}`)).catch(() => null);
+      if (buf) { res.writeHead(200, { 'Content-Type': type, 'Content-Length': buf.length, 'Cache-Control': 'public, max-age=31536000, immutable', 'X-Content-Type-Options': 'nosniff', 'Content-Security-Policy': "default-src 'none'" }); return res.end(buf); }
+    }
+    res.writeHead(404, { 'Content-Type': 'text/plain' });
+    return res.end('No picture');
+  }
+
+  // --- Invites and password resets: a secret link (kept only as a hash) ------------------------
+  const INVITE_DAYS = 7;
+  const RESET_MINUTES = 60;
+  function newLink(u, kind) {
+    const tok = crypto.randomBytes(24).toString('base64url');
+    u[kind] = { hash: sha(tok), expires: Date.now() + (kind === 'invite' ? INVITE_DAYS * 864e5 : RESET_MINUTES * 60e3) };
+    return tok;
+  }
+  const byLink = (kind, tok) => {
+    if (!tok || String(tok).length < 20) return null;
+    const h = sha(tok);
+    const u = all().find((x) => x[kind]?.hash && x[kind].hash.length === h.length && crypto.timingSafeEqual(Buffer.from(x[kind].hash), Buffer.from(h)));
+    return u && u[kind].expires > Date.now() && !u.disabled ? u : null;
+  };
+  // Where links point: MediaDesk's address as set (PUBLIC_URL), or as an admin last used it. Never
+  // the address in a request from someone not signed in (it could be forged to point elsewhere).
+  const linkBase = () => (publicUrl() || load().settings.origin || '').replace(/\/+$/, '');
+  const emailReady = () => Boolean(sendEmail && canEmail() && linkBase());
+  async function sendInvite(u, by) {
+    const link = `${linkBase()}/?invite=${newLink(u, 'invite')}`;
+    await save();
+    if (!u.email || !sendEmail || !canEmail()) return { link, emailed: false };
+    try {
+      await sendEmail(u.email, 'You’re invited to MediaDesk', `${by ? `${by} has` : 'You’ve been'} invited you to MediaDesk.\n\nYour user name is: ${u.username}\n\nChoose your password here (the link works for ${INVITE_DAYS} days):\n${link}\n`);
+      return { link, emailed: true };
+    } catch (err) { return { link, emailed: false, emailError: err.message }; }
+  }
+  async function sendReset(u, { email = true } = {}) {
+    const link = `${linkBase()}/?reset=${newLink(u, 'reset')}`;
+    await save();
+    if (email && u.email && sendEmail && canEmail()) {
+      try {
+        await sendEmail(u.email, 'Reset your MediaDesk password', `Someone (hopefully you) asked to reset the password of the MediaDesk account ${u.username}.\n\nChoose a new password here (the link works for ${RESET_MINUTES} minutes):\n${link}\n\nIf it wasn’t you, ignore this email: your password stays as it is.\n`);
+        return { link, emailed: true };
+      } catch (err) { return { link, emailed: false, emailError: err.message }; }
+    }
+    return { link, emailed: false };
   }
 
   // --- Two-step sign-in ---
@@ -226,6 +299,29 @@ function createUsers({ dataDir, mock = false, legacyPassword = () => '', log = c
   }
 
   // Too many wrong passwords or codes from one place, or for one account.
+  // --- Passkeys: a one-time challenge for each sign-in or new passkey (good for 3 minutes) ---
+  const challenges = new Map();
+  function newChallenge(info) {
+    const now = Date.now();
+    for (const [k, v] of challenges) if (v.exp < now) challenges.delete(k);
+    if (challenges.size > 2000) challenges.delete(challenges.keys().next().value);
+    const c = crypto.randomBytes(32).toString('base64url');
+    challenges.set(c, { ...info, exp: now + 3 * 60e3 });
+    return c;
+  }
+  // The challenge the browser signed (read from its answer), used once.
+  function takeChallenge(response, kind) {
+    let c = '';
+    try { c = JSON.parse(Buffer.from(String(response?.clientDataJSON || ''), 'base64url').toString('utf8')).challenge || ''; } catch { /* none */ }
+    const info = challenges.get(c);
+    challenges.delete(c);
+    if (!info || info.kind !== kind || info.exp < Date.now()) throw new UserError(400, 'That took too long — try again');
+    return { challenge: c, ...info };
+  }
+  const rpIdOf = (origin) => { try { return new URL(origin).hostname; } catch { return ''; } };
+  const passkeyList = (u) => (u.passkeys || []).map((k) => ({ id: k.id, name: k.name, created: k.created, lastUsed: k.lastUsed || null, site: k.rpId }));
+  const hasPasskeys = () => all().some((u) => !u.disabled && (u.passkeys || []).length);
+
   const attempts = new Map();
   function tooMany(key) {
     const now = Date.now();
@@ -263,6 +359,69 @@ function createUsers({ dataDir, mock = false, legacyPassword = () => '', log = c
         await save();
         return finishLogin(res, u, ok === 'recovery' ? { recoveryUsed: true, recoveryLeft: u.recovery.length } : {});
       }
+      // Signing in with a passkey: any passkey made on this site (the browser offers the person's own).
+      if (p === '/portal/passkey/start' && req.method === 'POST') {
+        if (!enabled()) return sendJson(res, 400, { error: 'Sign-in isn’t turned on' });
+        if (tooMany(`pk:${ctx.ip}`)) return sendJson(res, 429, { error: 'Too many attempts — try again in a few minutes' });
+        const rpId = rpIdOf(ctx.origin);
+        return sendJson(res, 200, { options: { challenge: newChallenge({ kind: 'get' }), rpId, timeout: 120000, userVerification: 'required' } });
+      }
+      if (p === '/portal/passkey/finish' && req.method === 'POST') {
+        if (tooMany(`ip:${ctx.ip}`)) return sendJson(res, 429, { error: 'Too many attempts — try again in a few minutes' });
+        const { response, id } = await readJson(req);
+        const { challenge } = takeChallenge(response, 'get');
+        const u = all().find((x) => (x.passkeys || []).some((k) => k.id === id));
+        const cred = u?.passkeys.find((k) => k.id === id);
+        if (!u || !cred) return sendJson(res, 401, { error: 'That passkey isn’t on any account here. Sign in with your password, then add it in My account.' });
+        if (u.disabled) return sendJson(res, 403, { error: 'That account is turned off' });
+        if (response.userHandle && Buffer.from(response.userHandle, 'base64url').toString() !== u.id) return sendJson(res, 401, { error: 'That passkey didn’t work' });
+        try { cred.counter = passkeys.verifyAssertion({ response, challenge, cred }); } catch (err) { if (err instanceof passkeys.PasskeyError) return sendJson(res, 401, { error: err.message }); throw err; }
+        cred.lastUsed = Date.now();
+        // A passkey is two steps in one (the device, and the face, finger or PIN that unlocks it).
+        return finishLogin(res, u, { passkey: true });
+      }
+      // An invite link: who it's for, then their password (which signs them in).
+      if (p === '/portal/invite' && req.method === 'GET') {
+        const u = byLink('invite', new URL(req.url, 'http://x').searchParams.get('token'));
+        if (!u || u.hash) return sendJson(res, 404, { error: 'This invite link has expired or been used. Ask for a new one.' });
+        return sendJson(res, 200, { name: u.name, username: u.username, color: u.color });
+      }
+      if (p === '/portal/invite' && req.method === 'POST') {
+        if (tooMany(`ip:${ctx.ip}`)) return sendJson(res, 429, { error: 'Too many attempts — try again in a few minutes' });
+        const body = await readJson(req);
+        const u = byLink('invite', body.token);
+        if (!u || u.hash) return sendJson(res, 404, { error: 'This invite link has expired or been used. Ask for a new one.' });
+        await setPassword(u, body.password);
+        delete u.invite;
+        return finishLogin(res, u, { welcome: true });
+      }
+      // Forgot password: an email with a link (to the account's email address, if it has one).
+      if (p === '/portal/reset/request' && req.method === 'POST') {
+        if (tooMany(`reset:${ctx.ip}`)) return sendJson(res, 429, { error: 'Too many attempts — try again in a few minutes' });
+        const body = await readJson(req);
+        const who = clean(body.who, 200).toLowerCase();
+        const u = all().find((x) => !x.disabled && (x.username === who || (x.email && x.email === who)));
+        // The same answer either way, so this can't be used to find out who has an account.
+        if (u?.email && emailReady() && u.hash) await sendReset(u).catch((err) => log(`Password reset email: ${err.message}`));
+        return sendJson(res, 200, { ok: true });
+      }
+      if (p === '/portal/reset' && req.method === 'GET') {
+        const u = byLink('reset', new URL(req.url, 'http://x').searchParams.get('token'));
+        if (!u) return sendJson(res, 404, { error: 'This link has expired or been used. Ask for a new one.' });
+        return sendJson(res, 200, { name: u.name, username: u.username, color: u.color, avatar: u.avatar || null, id: u.id, twoFactor: Boolean(u.totp?.enabled) });
+      }
+      if (p === '/portal/reset' && req.method === 'POST') {
+        if (tooMany(`ip:${ctx.ip}`)) return sendJson(res, 429, { error: 'Too many attempts — try again in a few minutes' });
+        const body = await readJson(req);
+        const u = byLink('reset', body.token);
+        if (!u) return sendJson(res, 404, { error: 'This link has expired or been used. Ask for a new one.' });
+        await setPassword(u, body.password); // ends their sessions everywhere
+        delete u.reset;
+        await save();
+        // With two-step sign-in, the code is still needed: sign in as usual.
+        if (u.totp?.enabled) return sendJson(res, 200, { ok: true, signIn: true, username: u.username });
+        return finishLogin(res, u, { reset: true });
+      }
       // No accounts yet: the first one (an admin) is made from this browser, which signs in as it.
       if (p === '/portal/users/setup' && req.method === 'POST') {
         if (all().length) return sendJson(res, 400, { error: 'There are accounts already' });
@@ -272,20 +431,32 @@ function createUsers({ dataDir, mock = false, legacyPassword = () => '', log = c
         return finishLogin(res, u);
       }
 
+      // Pictures are public (the sign-in screen shows them); their address is the account's random id.
+      const av = /^\/portal\/avatar\/([0-9a-f]{16})$/.exec(p);
+      if (av && req.method === 'GET') return sendAvatar(res, av[1]);
+
       if (!me) return sendJson(res, 401, { error: 'Not signed in' });
       if (p === '/portal/me' && req.method === 'GET') return sendJson(res, 200, { user: publicUser(me, { full: true }), signIn: enabled(), apps: APPS });
       if (p === '/portal/users/directory' && req.method === 'GET') {
         // Names and colours, for linking people in apps (trips, the family).
-        return sendJson(res, 200, { users: (enabled() ? all() : [OWNER]).filter((u) => !u.disabled).map((u) => ({ id: u.id, name: u.name, username: u.username, color: u.color })) });
+        return sendJson(res, 200, { users: (enabled() ? all() : [OWNER]).filter((u) => !u.disabled).map((u) => ({ id: u.id, name: u.name, username: u.username, color: u.color, avatar: u.avatar || null })) });
       }
       if (me.open && p.startsWith('/portal/me/')) return sendJson(res, 400, { error: 'Turn on sign-in first (Settings → Users)' });
       if (p === '/portal/me' && req.method === 'POST') {
         const body = await readJson(req);
         if (body.name !== undefined) me.name = clean(body.name, 60) || me.name;
         if (/^#[0-9a-f]{6}$/i.test(body.color || '')) me.color = body.color.toLowerCase();
+        if (body.email !== undefined) {
+          const email = clean(body.email, 200).toLowerCase();
+          if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new UserError(400, 'That email address doesn’t look right');
+          if (email && all().some((x) => x.id !== me.id && x.email === email)) throw new UserError(409, 'Someone else has that email address');
+          me.email = email;
+        }
         await save();
         return sendJson(res, 200, { user: publicUser(me, { full: true }) });
       }
+      if (p === '/portal/me/avatar' && req.method === 'POST') { await setAvatar(me, await ctx.readBody(req, 2 * 1024 * 1024)); return sendJson(res, 200, { user: publicUser(me, { full: true }) }); }
+      if (p === '/portal/me/avatar' && req.method === 'DELETE') { await dropAvatar(me); return sendJson(res, 200, { user: publicUser(me, { full: true }) }); }
       if (p === '/portal/me/password' && req.method === 'POST') {
         const body = await readJson(req);
         if (!(await checkPassword(me, body.current))) return sendJson(res, 401, { error: 'Your current password isn’t right' });
@@ -297,6 +468,38 @@ function createUsers({ dataDir, mock = false, legacyPassword = () => '', log = c
         me.ver = (me.ver || 0) + 1;
         await save();
         return finishLogin(res, me, { signedOut: true });
+      }
+      // Your passkeys.
+      if (p === '/portal/me/passkeys' && req.method === 'GET') return sendJson(res, 200, { passkeys: passkeyList(me) });
+      if (p === '/portal/me/passkeys/start' && req.method === 'POST') {
+        const rpId = rpIdOf(ctx.origin);
+        if (!rpId) return sendJson(res, 400, { error: 'MediaDesk’s address can’t be used for passkeys' });
+        const challenge = newChallenge({ kind: 'create', userId: me.id, rpId });
+        return sendJson(res, 200, { options: passkeys.registrationOptions({ rpId, user: me, challenge, exclude: (me.passkeys || []).filter((k) => k.rpId === rpId).map((k) => k.id) }) });
+      }
+      if (p === '/portal/me/passkeys/finish' && req.method === 'POST') {
+        const body = await readJson(req);
+        const info = takeChallenge(body.response, 'create');
+        if (info.userId !== me.id) return sendJson(res, 400, { error: 'That took too long — try again' });
+        let key;
+        try { key = passkeys.verifyRegistration({ response: body.response, challenge: info.challenge, rpId: info.rpId }); } catch (err) { if (err instanceof passkeys.PasskeyError) return sendJson(res, 400, { error: err.message }); throw err; }
+        if (all().some((x) => (x.passkeys || []).some((k) => k.id === key.id))) return sendJson(res, 409, { error: 'That passkey is on an account already' });
+        me.passkeys = [...(me.passkeys || []), { ...key, name: clean(body.name, 60) || 'Passkey', created: Date.now() }].slice(-20);
+        await save();
+        return sendJson(res, 200, { passkeys: passkeyList(me) });
+      }
+      const pk = /^\/portal\/me\/passkeys\/([\w-]{8,})$/.exec(p);
+      if (pk && req.method === 'DELETE') {
+        me.passkeys = (me.passkeys || []).filter((k) => k.id !== pk[1]);
+        await save();
+        return sendJson(res, 200, { passkeys: passkeyList(me) });
+      }
+      if (pk && req.method === 'PUT') {
+        const k = (me.passkeys || []).find((x) => x.id === pk[1]);
+        if (!k) return sendJson(res, 404, { error: 'That passkey isn’t on your account' });
+        k.name = clean((await readJson(req)).name, 60) || k.name;
+        await save();
+        return sendJson(res, 200, { passkeys: passkeyList(me) });
       }
       if (p === '/portal/me/2fa/start' && req.method === 'POST') {
         const secret = base32(crypto.randomBytes(20));
@@ -336,13 +539,18 @@ function createUsers({ dataDir, mock = false, legacyPassword = () => '', log = c
       // Everyone's accounts: admins only.
       if (p === '/portal/users' || p.startsWith('/portal/users/')) {
         if (me.role !== 'admin') return sendJson(res, 403, { error: 'Only admins can manage users' });
+        // MediaDesk's address as an admin uses it: for links in invites and reset emails.
+        if (ctx.origin && /^https?:\/\/[\w.:[\]-]+$/.test(ctx.origin) && load().settings.origin !== ctx.origin) { load().settings.origin = ctx.origin; await save(); }
         if (p === '/portal/users' && req.method === 'GET') return sendJson(res, 200, { users: all().sort((a, b) => (a.created || 0) - (b.created || 0)).map((u) => publicUser(u, { full: true })), apps: APPS, adminOnly: [...ADMIN_ONLY], signIn: enabled(), mock });
         if (p === '/portal/users' && req.method === 'POST') {
           if (!enabled()) return sendJson(res, 400, { error: 'Make your own admin account first' });
-          const u = await create(await readJson(req));
+          const body = await readJson(req);
+          const u = await create(body);
+          if (body.invite) return sendJson(res, 200, { user: publicUser(u, { full: true }), invite: await sendInvite(u, me.name) });
           return sendJson(res, 200, { user: publicUser(u, { full: true }) });
         }
-        const m = /^\/portal\/users\/([0-9a-f]{16})(\/2fa-reset|\/signout)?$/.exec(p);
+        if (p === '/portal/users/email' && req.method === 'GET') return sendJson(res, 200, { ready: emailReady(), server: canEmail(), base: linkBase() });
+        const m = /^\/portal\/users\/([0-9a-f]{16})(\/2fa-reset|\/signout|\/avatar|\/invite|\/reset|\/passkeys)?$/.exec(p);
         const u = m && byId(m[1]);
         if (!u) return sendJson(res, 404, { error: 'That account doesn’t exist' });
         if (!m[2] && req.method === 'PUT') {
@@ -358,6 +566,19 @@ function createUsers({ dataDir, mock = false, legacyPassword = () => '', log = c
           return sendJson(res, 200, { deleted: true });
         }
         if (m[2] === '/2fa-reset' && req.method === 'POST') { delete u.totp; delete u.recovery; delete u.totpPending; await save(); return sendJson(res, 200, { user: publicUser(u, { full: true }) }); }
+        if (m[2] === '/avatar' && req.method === 'POST') { await setAvatar(u, await ctx.readBody(req, 2 * 1024 * 1024)); return sendJson(res, 200, { user: publicUser(u, { full: true }) }); }
+        if (m[2] === '/avatar' && req.method === 'DELETE') { await dropAvatar(u); return sendJson(res, 200, { user: publicUser(u, { full: true }) }); }
+        // A new invite link (and email), or a password reset link (and email) for someone.
+        if (m[2] === '/invite' && req.method === 'POST') {
+          if (u.hash) return sendJson(res, 400, { error: `${u.name} has chosen a password already` });
+          return sendJson(res, 200, await sendInvite(u, me.name));
+        }
+        if (m[2] === '/reset' && req.method === 'POST') {
+          const body = await readJson(req);
+          return sendJson(res, 200, await sendReset(u, { email: body.email !== false }));
+        }
+        // Lost phone: take someone's passkeys off their account.
+        if (m[2] === '/passkeys' && req.method === 'DELETE') { delete u.passkeys; await save(); return sendJson(res, 200, { user: publicUser(u, { full: true }) }); }
         if (m[2] === '/signout' && req.method === 'POST') { u.ver = (u.ver || 0) + 1; await save(); return sendJson(res, 200, { ok: true }); }
       }
       return null;
@@ -386,7 +607,7 @@ function createUsers({ dataDir, mock = false, legacyPassword = () => '', log = c
   }
 
   load();
-  return { load, save, all, byId, byName, enabled, migrate, fromToken, appsOf, can, publicUser, ownerId, OWNER, handle, resetPassword, APPS, settings: () => load().settings };
+  return { emailReady, hasPasskeys, load, save, all, byId, byName, enabled, migrate, fromToken, appsOf, can, publicUser, ownerId, OWNER, handle, resetPassword, APPS, settings: () => load().settings };
 }
 
 module.exports = { createUsers, hotp, totpStep, base32, APPS, ALWAYS, ADMIN_ONLY };

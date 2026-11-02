@@ -6,6 +6,7 @@ import { h, clear, toast, toastError, confirmDialog } from '../../ui.js';
 import { appIcon } from '../../icons.js';
 import { api, TripStore, newId } from './store.js';
 import { state } from '../../api.js';
+import { warmPeople } from '../../people.js';
 import { PlanView } from './plan.js';
 import { BookingsView } from './bookings.js';
 import { CostsView } from './costs.js';
@@ -62,7 +63,7 @@ class TripPlanner {
     this.win.setTitle?.('Trip Planner');
     clear(this.root, h('div', { class: 'tp-loading' }, 'Loading trips…'));
     let data;
-    try { data = await api('list'); } catch (err) { clear(this.root, emptyState('⚠️', err.message, h('button', { class: 'btn', onclick: () => this.showDashboard() }, 'Try again'))); return; }
+    try { [data] = await Promise.all([api('list'), state.config?.auth ? warmPeople() : null]); } catch (err) { clear(this.root, emptyState('⚠️', err.message, h('button', { class: 'btn', onclick: () => this.showDashboard() }, 'Try again'))); return; }
     this.list = data;
     this.drawDashboard();
   }
@@ -166,7 +167,7 @@ class TripPlanner {
     this.leave();
     clear(this.root, h('div', { class: 'tp-loading' }, 'Opening the trip…'));
     const store = new TripStore(id);
-    try { await store.load(); } catch (err) { clear(this.root, emptyState('⚠️', err.message, h('button', { class: 'btn', onclick: () => this.showDashboard() }, 'Back to trips'))); return; }
+    try { await Promise.all([store.load(), state.config?.auth ? warmPeople() : null]); } catch (err) { clear(this.root, emptyState('⚠️', err.message, h('button', { class: 'btn', onclick: () => this.showDashboard() }, 'Back to trips'))); return; }
     this.store = store;
     setUnits(store.trip.units);
     this.views = {};

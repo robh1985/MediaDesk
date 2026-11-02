@@ -1,32 +1,25 @@
-// The eBook Reader's libraries. With user accounts there are two: the shared one (the books
-// folder) and each person's own ("Mine", at /portal/ebooks/mine/…). A book's `mine` says which.
+// The eBook Reader's library: one, shared by everyone. "Mine" is each person's own list of the
+// books they like and want close at hand (a book's `mine`); books you add go on it.
 
-import { state as appState } from '../../api.js';
+export const baseOf = () => '';
+// Where a new book goes: a folder of the library.
+export const uploadUrl = (dest, name) => `/portal/ebooks/upload?${new URLSearchParams({ name, folder: String(dest || '').replace(/^mine:/, '') })}`;
 
-export const baseOf = (b) => (b?.mine ? 'mine/' : '');
-// Where a new book goes: "folder" in the shared library, or "mine:folder" in your own.
-export const uploadUrl = (dest, name) => { const mine = String(dest || '').startsWith('mine:'); return `/portal/ebooks/${mine ? 'mine/' : ''}upload?${new URLSearchParams({ name, folder: mine ? dest.slice(5) : dest || '' })}`; };
-
-// Both libraries as one list. Admins and standard users can add to the shared library; people
-// with a custom role only to their own.
 export async function loadLibrary(api, refresh = false) {
-  const q = refresh ? '?refresh=1' : '';
-  const [shared, mine] = await Promise.all([api(`library${q}`), appState.config?.ebooks?.personal ? api(`mine/library${q}`).catch(() => null) : null]);
-  if (!mine?.configured) return shared;
-  const sharedWritable = Boolean(shared.configured && shared.writable && appState.me?.role !== 'custom');
-  return {
-    ...shared, configured: true, personal: true, sharedConfigured: shared.configured, sharedWritable, writable: true,
-    books: [...shared.books, ...mine.books.map((b) => ({ ...b, mine: true }))],
-    reading: { ...(shared.reading || {}), ...(mine.reading || {}) }, mineFolders: mine.folders || [],
-    tools: shared.tools || mine.tools, sendToKindle: shared.sendToKindle ?? mine.sendToKindle,
-  };
+  const lib = await api(`library${refresh ? '?refresh=1' : ''}`);
+  const mine = new Set(lib.mine || []);
+  return { ...lib, books: (lib.books || []).map((b) => ({ ...b, mine: mine.has(b.id) })) };
+}
+
+// Add a book to Mine, or take it off; returns the new list.
+export async function setMine(api, lib, book, on) {
+  const r = await api('mine', { method: 'POST', body: JSON.stringify({ id: book.id, on }) });
+  lib.mine = r.mine;
+  for (const b of lib.books) b.mine = r.mine.includes(b.id);
+  return r.mine;
 }
 
 // The places a book can be added to, as [value, label] for a <select>.
 export function destinations(lib) {
-  if (!lib?.personal) return ['', ...(lib?.folders || [])].map((f) => [f, f ? `in ${f}` : 'in the books folder']);
-  const out = [];
-  if (lib.sharedWritable) out.push(['', 'Shared library'], ...(lib.folders || []).map((f) => [f, `Shared › ${f}`]));
-  out.push(['mine:', 'My library'], ...(lib.mineFolders || []).map((f) => [`mine:${f}`, `Mine › ${f}`]));
-  return out;
+  return ['', ...(lib?.folders || [])].map((f) => [f, f ? `in ${f}` : 'in the books folder']);
 }

@@ -12,7 +12,7 @@ import { pickFile, fileUrl, filesEnabled } from '../../fileapi.js';
 import { Flipbook } from './flipbook.js';
 import { bookFor, formatOf, viewOf, ACCEPT, madeCover, markText } from './sources.js';
 import { kindleDialog, backupDialog } from './kindle.js';
-import { baseOf, uploadUrl, loadLibrary, destinations } from './library.js';
+import { baseOf, uploadUrl, loadLibrary, destinations, setMine } from './library.js';
 
 // Android's file picker greys out files it has no type for (.azw3, .mobi…): there, show them all.
 const PICK_ACCEPT = /Android/i.test(navigator.userAgent) ? undefined : ACCEPT;
@@ -150,7 +150,7 @@ class EbookReader {
     try { lib = await loadLibrary(api); } catch (err) { clear(body, this.empty('😕', `The library couldn’t be opened: ${err.message}`)); return; }
     this.lib = lib;
     const search = h('input', { class: 'input ebk-search', type: 'search', placeholder: 'Search titles and authors', value: this.q });
-    const seg = h('div', { class: 'ebk-seg' }, [['all', 'All'], ['epub', 'Books'], ['pdf', 'PDFs'], ['cbz', 'Comics'], ...(lib.personal ? [['mine', 'Mine']] : [])].map(([id, label]) => h('button', { class: this.filter === id ? 'on' : '', onclick: () => { this.filter = id; drawShelf(); for (const b of seg.children) b.classList.toggle('on', b.textContent === label); } }, label)));
+    const seg = h('div', { class: 'ebk-seg' }, [['all', 'All'], ['mine', '♥ Mine'], ['epub', 'Books'], ['pdf', 'PDFs'], ['cbz', 'Comics']].map(([id, label]) => h('button', { class: this.filter === id ? 'on' : '', onclick: () => { this.filter = id; drawShelf(); for (const b of seg.children) b.classList.toggle('on', b.textContent === label); } }, label)));
     const sort = h('select', { class: 'input ebk-sort', onchange: (e) => { this.sort = e.target.value; drawShelf(); } },
       [['title', 'Title'], ['author', 'Author'], ['recent', 'Recently read'], ['added', 'Recently added']].map(([v, l]) => h('option', { value: v, selected: this.sort === v }, l)));
     const openBtn = h('button', { class: 'btn', onclick: (e) => this.openMenu(e.currentTarget) }, h('span', { html: I.open }), 'Open a book');
@@ -212,7 +212,7 @@ class EbookReader {
     return h('button', { class: 'ebk-book', title: `${b.title}${b.author ? ` — ${b.author}` : ''}`, onclick: () => (this.pickKindle ? kindleDialog(this, b) : this.openFrom({ id: b.id })), oncontextmenu: (e) => { e.preventDefault(); this.bookMenu(b, e.clientX, e.clientY); } },
       h('div', { class: 'ebk-book-cover', dataset: { id: b.id } }, this.coverEl(b),
         h('span', { class: `ebk-badge ${KIND(b.format)} f-${b.format}` }, FORMAT_LABEL[b.format] || b.format.toUpperCase()),
-        b.mine ? h('span', { class: 'ebk-mine', title: 'In your own library' }, 'Mine') : null,
+        b.mine ? h('span', { class: 'ebk-mine', title: 'On your Mine list' }, '♥') : null,
         pct ? h('div', { class: 'ebk-book-progress' }, h('i', { style: { width: `${pct}%` } })) : null,
         s?.finished || pct >= 99 ? h('span', { class: 'ebk-done' }, '✓') : null),
       h('div', { class: 'ebk-book-label' }, h('b', {}, b.title), b.author ? h('span', {}, b.author) : null));
@@ -244,6 +244,14 @@ class EbookReader {
       ['📲', 'Send a book to Kindle…', () => this.setPick(true)],
     ]);
   }
+  async toggleMine(b) {
+    try {
+      await setMine(api, this.lib, b, !b.mine);
+      toast(b.mine ? 'Added to Mine' : 'Removed from Mine', { body: b.title, timeout: 1600 });
+      if (!this.book) this.showLibrary();
+      if (this.mineBtn) this.mineBtn.classList.toggle('on', b.mine);
+    } catch (err) { toastError(err); }
+  }
   setPick(on) {
     this.pickKindle = on;
     if (this.pickBanner) this.pickBanner.hidden = !on;
@@ -254,6 +262,7 @@ class EbookReader {
   bookMenu(b, x, y) {
     this.popMenu(Math.min(x, innerWidth - 250), Math.min(y, innerHeight - 160), [
       ['📖', 'Read', () => this.openFrom({ id: b.id })],
+      [b.mine ? '💔' : '♥', b.mine ? 'Remove from Mine' : 'Add to Mine', () => this.toggleMine(b)],
       ['📲', 'Send to Kindle…', () => kindleDialog(this, b)],
       ['⤓', 'Download', () => { const a = h('a', { href: `/portal/ebooks/${baseOf(b)}file/${b.id}`, download: b.path.split('/').pop() }); document.body.append(a); a.click(); a.remove(); }],
     ]);
@@ -284,17 +293,11 @@ class EbookReader {
         const input = h('input', { type: 'file', accept: PICK_ACCEPT, onchange: () => { const file = input.files[0]; if (file) this.openFrom({ file }); } });
         input.click();
       } }, h('span', { html: I.download }), 'From this computer…'),
-      ...(this.lib?.personal
-        ? [[true, 'Add books to my library…'], [false, 'Add books to the shared library…']].filter(([m]) => m || this.lib.sharedWritable).map(([m, label]) => h('button', { onclick: () => {
-          close();
-          const input = h('input', { type: 'file', accept: PICK_ACCEPT, multiple: true, onchange: () => this.addBooks([...input.files].filter((f) => formatOf(f.name)), { mine: m }) });
-          input.click();
-        } }, h('span', { html: I.plus }), label))
-        : [this.lib?.configured ? h('button', { disabled: !this.lib.writable, title: this.lib.writable ? '' : 'MediaDesk can’t write to the books folder', onclick: () => {
-          close();
-          const input = h('input', { type: 'file', accept: PICK_ACCEPT, multiple: true, onchange: () => this.addBooks([...input.files].filter((f) => formatOf(f.name))) });
-          input.click();
-        } }, h('span', { html: I.plus }), 'Add books to the library…') : null]));
+      this.lib?.configured ? h('button', { disabled: !this.lib.writable, title: this.lib.writable ? '' : 'MediaDesk can’t write to the books folder', onclick: () => {
+        close();
+        const input = h('input', { type: 'file', accept: PICK_ACCEPT, multiple: true, onchange: () => this.addBooks([...input.files].filter((f) => formatOf(f.name))) });
+        input.click();
+      } }, h('span', { html: I.plus }), 'Add books to the library…') : null);
     document.body.append(menu);
     setTimeout(() => document.addEventListener('pointerdown', away, true));
   }
@@ -356,14 +359,14 @@ class EbookReader {
   }
 
   // Add books to the library (uploaded into the books folder).
-  async addBooks(files, { open = false, folder = null, mine: toMine = null } = {}) {
+  async addBooks(files, { open = false, folder = null } = {}) {
     const lib = this.lib;
     if (!lib?.configured) { toast('Choose a books folder first', { body: 'In Settings → eBook Reader', type: 'error', action: { label: 'Settings', onClick: () => openApp('settings', { tab: 'ebooks' }) } }); return null; }
     let last = null;
     for (const file of files) {
       const format = formatOf(file.name);
       if (!format) { toast(`${file.name} isn’t a book the library takes`, { type: 'error' }); continue; }
-      const dest = folder ?? this.folderFor(format, { mine: toMine });
+      const dest = folder ?? this.folderFor(format);
       const t = toast(`Adding ${file.name}…`, { timeout: 0 });
       try {
         const r = await upload(uploadUrl(dest, file.name), file, (p) => t?.setBody?.(`${Math.round(p * 100)}%`));
@@ -378,12 +381,9 @@ class EbookReader {
     return last;
   }
   // Comics go in a "Comics" folder if there is one.
-  folderFor(format, { mine = null } = {}) {
-    const lib = this.lib || {};
-    const toMine = mine ?? Boolean(lib.personal && !lib.sharedWritable);
-    const folders = toMine ? lib.mineFolders || [] : lib.folders || [];
-    const comics = KIND(format) === 'comic' ? folders.find((f) => /^comics?$/i.test(f.split('/').pop())) || '' : '';
-    return toMine ? `mine:${comics}` : comics;
+  folderFor(format) {
+    if (KIND(format) !== 'comic') return '';
+    return (this.lib?.folders || []).find((f) => /^comics?$/i.test(f.split('/').pop())) || '';
   }
 
   // Reading a book from this device: offer to keep it in the library.
@@ -393,7 +393,7 @@ class EbookReader {
     if (!src?.local || !src.file) return null;
     if (!lib?.configured) return null;
     if (!lib.writable) return null;
-    const want = lib.personal && !lib.sharedWritable ? 'mine:' : this.folderFor(src.format);
+    const want = this.folderFor(src.format);
     const sel = h('select', { class: 'input ebk-keep-folder', 'aria-label': 'Folder' }, destinations(lib).map(([v, l]) => h('option', { value: v, selected: v === want }, l)));
     const msg = h('span', {}, 'This book is only on this device. Add it to your library to read it anywhere and keep your place.');
     const btn = h('button', { class: 'btn btn-primary btn-sm', onclick: async () => {
@@ -405,7 +405,7 @@ class EbookReader {
         // Carry the reading place over to the library copy.
         if (book) {
           const old = src.key;
-          const kept = sel.value.startsWith('mine:') ? 'mine/' : '';
+          const kept = '';
           Object.assign(src, { key: book.id, base: kept, url: `/portal/ebooks/${kept}file/${book.id}${book.as ? `?as=${book.as}` : ''}`, download: `/portal/ebooks/${kept}file/${book.id}`, local: false, file: null });
           this.saveState();
           api('state', { method: 'POST', body: JSON.stringify({ key: old, forget: true }) }).catch(() => {});
@@ -494,6 +494,7 @@ class EbookReader {
       this.playBtn, this.soundBtn, this.modeBtn,
       book.reflows ? tool(I.text, 'Text and page', (e) => this.textSettings(e.currentTarget)) : tool(I.settings, 'Background', (e) => this.textSettings(e.currentTarget)),
       tool(I.full, 'Full screen', () => this.fullscreen()),
+      this.lib?.books?.some((x) => x.id === src.key) ? (this.mineBtn = h('button', { class: `ebk-tbtn ebk-minebtn ${this.lib.books.find((x) => x.id === src.key).mine ? 'on' : ''}`, title: 'Mine: books you like, close at hand', 'aria-label': 'Add to Mine', onclick: () => this.toggleMine(this.lib.books.find((x) => x.id === src.key)) }, '♥')) : null,
       this.lib?.books?.some((x) => x.id === src.key) ? h('button', { class: 'ebk-tbtn ebk-kbtn', title: 'Send to Kindle', 'aria-label': 'Send to Kindle', onclick: () => kindleDialog(this, this.lib.books.find((x) => x.id === src.key)) }, '📲') : null,
       src.download ? h('a', { class: 'ebk-tbtn', title: 'Download', 'aria-label': 'Download', href: src.download, download: src.name || '', html: I.download }) : null);
     const bottom = h('div', { class: 'ebk-bottom' }, h('div', { class: 'ebk-slider-wrap' }, this.slider, this.sliderTip), tools);

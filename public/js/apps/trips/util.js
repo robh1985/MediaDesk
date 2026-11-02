@@ -2,6 +2,7 @@
 // route ordering, weather symbols, navigation links and dialogs.
 
 import { h, clear } from '../../ui.js';
+import { personById, personEl } from '../../people.js';
 
 // --- Dates -----------------------------------------------------------------------------------
 export const ymd = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -232,6 +233,9 @@ export function googleDirections(points, mode = 'car') {
 // --- Pieces of the interface --------------------------------------------------------------------
 export function avatar(m, size = 24) {
   if (!m) return null;
+  // A traveller linked to a MediaDesk account with a profile picture: their picture.
+  const who = m.userId ? personById(m.userId) : null;
+  if (who?.avatar) { const el = personEl({ ...who, color: m.color || who.color }, size, 'tp-avatar'); el.title = m.name; return el; }
   return h('span', { class: 'tp-avatar', title: m.name, style: { '--c': m.color || '#868e96', width: `${size}px`, height: `${size}px`, fontSize: `${Math.round(size * 0.46)}px` } }, (m.name || '?').slice(0, 1).toUpperCase());
 }
 // A dialog over the app; resolves to the value given to close() (null when dismissed).

@@ -2,7 +2,7 @@
 // as that person. Each person's things kept in this browser (desktop layout, appearance, app
 // preferences) are kept apart, so people sharing a computer don't see each other's.
 
-import { signInScreen } from './signin.js';
+import { signInScreen, linkScreen } from './signin.js';
 
 const session = async () => {
   const res = await fetch('/portal/session', { credentials: 'same-origin' });
@@ -17,7 +17,7 @@ function keepApart(user) {
   const proto = Storage.prototype;
   const { getItem, setItem, removeItem } = proto;
   const prefix = `mediadesk.u.${user.id}.`;
-  const shared = new Set(['mediadesk.lastUser']);
+  const shared = new Set(['mediadesk.lastUser', 'mediadesk.lastUserInfo']);
   const mapKey = (store, k) => (store === localStorage && typeof k === 'string' && k.startsWith('mediadesk.') && !shared.has(k) && !k.startsWith('mediadesk.u.') ? prefix + k.slice(10) : k);
   proto.getItem = function get(k) {
     const mk = mapKey(this, k);
@@ -40,11 +40,30 @@ async function start() {
     document.getElementById('desktop').append(Object.assign(document.createElement('div'), { className: 'boot-error', textContent: `Could not reach the MediaDesk server: ${err.message}` }));
     return;
   }
+  // An invite or password reset link: choose a password first.
+  const params = new URLSearchParams(location.search);
+  const kind = params.has('invite') ? 'invite' : params.has('reset') ? 'reset' : null;
+  let hint = s.usernameHint || '';
+  if (kind) {
+    document.body.classList.add('ready', 'locked');
+    const r = await linkScreen(kind, params.get(kind));
+    history.replaceState(null, '', location.pathname);
+    if (r.signIn) hint = r.signIn;
+    s = await session();
+    if (s.authed) document.body.classList.remove('locked');
+  }
   if (s.auth && !s.authed) {
     document.body.classList.add('ready', 'locked');
-    await new Promise((resolve) => signInScreen({ user: s.lockedUser, hint: s.usernameHint || '', onDone: resolve }));
+    await new Promise((resolve) => signInScreen({ user: s.lockedUser, hint, canReset: s.resetByEmail, canPasskey: s.passkeys, onDone: resolve }));
     document.body.classList.remove('locked');
     s = await session();
+  }
+  // Who's signed in here (their picture and name on the sign-in screen next time).
+  if (s.user && !s.user.open && s.user.username) {
+    try {
+      localStorage.setItem('mediadesk.lastUser', s.user.username);
+      localStorage.setItem('mediadesk.lastUserInfo', JSON.stringify({ id: s.user.id, username: s.user.username, name: s.user.name, color: s.user.color, avatar: s.user.avatar || null }));
+    } catch { /* fine */ }
   }
   keepApart(s.user);
   window.mediadeskSession = s;
