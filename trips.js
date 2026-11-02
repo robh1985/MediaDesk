@@ -327,6 +327,18 @@ function createTrips({ dataDir, mock = false, log = console.log }) {
       if (t.start) ev(`trip-${d.id}`, `✈ ${t.title}`, t.start, t.end || t.start, t.description, t.destination, true);
       for (const b of Object.values(d.bookings)) {
         if (!b.start) continue;
+        // A stay: the nights as an all-day event, and check-in and check-out at their times.
+        if (STAYS.has(b.type)) {
+          if (b.status === 'cancelled') continue;
+          const inDay = b.start.slice(0, 10);
+          const outDay = (b.end || b.start).slice(0, 10);
+          const info = [b.code ? `Booking code: ${b.code}` : null, b.platform ? `Booked through ${b.platform}` : b.provider, b.notes].filter(Boolean).join('\n');
+          const where = b.address || '';
+          ev(`stay-${b.id}`, `🛏 ${b.title || 'Stay'}`, inDay, outDay > inDay ? addDays(outDay, -1) : inDay, info, where, true);
+          if (b.start.length > 10) ev(`checkin-${b.id}`, `Check-in: ${b.title || 'Stay'}`, b.start, addMinutes(b.start, 30), info, where, false);
+          if (b.end && b.end.length > 10) ev(`checkout-${b.id}`, `Check-out: ${b.title || 'Stay'}`, addMinutes(b.end, -30), b.end, info, where, false);
+          continue;
+        }
         const allDay = b.start.length <= 10;
         ev(`booking-${b.id}`, `${b.title || b.type}${b.code ? ` (${b.code})` : ''}`, allDay ? b.start.slice(0, 10) : b.start, allDay ? (b.end || b.start).slice(0, 10) : b.end, [b.provider, b.notes].filter(Boolean).join('\n'), b.address || b.from || '', allDay);
       }
@@ -818,6 +830,13 @@ function categoryOf(cls, type) {
   if (/station|aerodrome|airport|bus_stop|ferry|railway|public_transport/.test(t)) return 'transport';
   if (/tourism|historic|attraction|monument|castle|church|place_of_worship|memorial|ruins/.test(t)) return 'sights';
   return 'other';
+}
+const STAYS = new Set(['hotel', 'rental', 'apartment', 'camping', 'hostel']);
+// "2026-05-04T15:00" plus some minutes, in the same form (a time where it happens, no time zone).
+function addMinutes(v, n) {
+  const d = new Date(`${v.slice(0, 16)}:00Z`);
+  d.setUTCMinutes(d.getUTCMinutes() + n);
+  return d.toISOString().slice(0, 16);
 }
 const TRAVEL_MODES = ['car', 'flight', 'train', 'bus', 'ferry', 'boat', 'other'];
 // Along a road trip: what to look for, and the kind of place it becomes.
