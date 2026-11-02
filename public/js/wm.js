@@ -91,7 +91,11 @@ function applyMaximized(w) {
 
 export function openApp(appId, opts = {}) {
   const app = apps.get(appId);
-  if (!app) throw new Error(`Unknown app ${appId}`);
+  // An app this person doesn't have (an admin chooses them): say so instead of failing.
+  if (!app) {
+    import('./ui.js').then(({ toast }) => toast('You don’t have this app', { type: 'error', body: 'Ask an admin to give you access (Settings → Users).' }));
+    return null;
+  }
   const key = opts.key ? `${appId}:${opts.key}` : appId;
   const existing = windows.get(key);
   if (existing) {

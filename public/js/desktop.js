@@ -150,15 +150,17 @@ function buildMenuBar() {
   logo.addEventListener('click', () => {
     if (menuWasOpen) return;
     const r = logo.getBoundingClientRect();
+    const me = state.me && !state.me.open ? state.me : null;
     contextMenu(r.left, r.bottom + 4, [
+      ...(me ? [{ label: `${me.name} (${me.role === 'admin' ? 'admin' : me.username})`, icon: icon.user, action: () => openApp('settings', { tab: 'account' }) }, '-'] : []),
       { label: 'Search & apps', icon: icon.search, action: openLauncher },
-      { label: 'Overview', icon: icon.grid, action: () => openApp('dashboard') },
+      !me || me.allowed.includes('dashboard') ? { label: 'Overview', icon: icon.grid, action: () => openApp('dashboard') } : null,
       { label: 'Settings', icon: icon.sliders, action: () => openApp('settings') },
       { label: 'Start screensaver', icon: icon.image, action: () => screensaver.start() },
       ...(state.config?.auth ? ['-',
         { label: 'Lock screen', icon: icon.lock, action: () => screensaver.lockNow() },
-        { label: 'Log out', icon: icon.power, action: logOut }] : []),
-    ]);
+        { label: me ? 'Sign out' : 'Log out', icon: icon.power, action: logOut }] : []),
+    ].filter(Boolean));
   });
   const speed = h('button', { class: 'tray-item', title: 'NZBGet', onclick: () => openApp('nzbget') });
   const nowPlaying = h('button', { class: 'tray-item tray-music', hidden: true, onclick: () => openApp('music') });
@@ -597,40 +599,4 @@ function setupShortcuts() {
   });
 }
 
-// ---------------------------------------------------------------------------
-// Lock screen (only when a portal password is configured)
-// ---------------------------------------------------------------------------
-
-export function showLockScreen(onUnlock) {
-  if (document.querySelector('.lock')) return;
-  const time = h('div', { class: 'lock-time' });
-  const date = h('div', { class: 'lock-date' });
-  const tick = () => { const d = new Date(); time.textContent = timeOf(d); date.textContent = d.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' }); };
-  tick();
-  const timer = setInterval(tick, 10e3);
-  const pw = h('input', { class: 'lock-input', type: 'password', placeholder: 'Password', autocomplete: 'current-password', autofocus: true });
-  const err = h('div', { class: 'lock-error' });
-  const form = h('form', { class: 'lock-form' },
-    h('div', { class: 'lock-avatar', html: appIcon.dashboard }),
-    h('div', { class: 'lock-name' }, 'MediaDesk'),
-    h('div', { class: 'lock-field' }, pw, h('button', { class: 'lock-go', type: 'submit', 'aria-label': 'Unlock', html: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>' })),
-    err);
-  const screen = h('div', { class: 'lock' }, h('div', { class: 'lock-clock' }, time, date), form);
-  form.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    err.textContent = '';
-    try {
-      await import('./api.js').then((m) => m.portal.login(pw.value));
-      clearInterval(timer);
-      screen.classList.add('leaving');
-      setTimeout(() => { screen.remove(); onUnlock(); }, 350);
-    } catch (ex) {
-      err.textContent = ex.message;
-      form.classList.remove('shake'); void form.offsetWidth; form.classList.add('shake');
-      pw.select();
-    }
-  });
-  document.body.append(screen);
-  setTimeout(() => pw.focus(), 50);
-}
 

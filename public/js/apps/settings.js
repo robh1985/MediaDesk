@@ -9,6 +9,7 @@ import { layout, updateDock, updateDesktop, resetLayout, PLACEABLE_EXCLUDE } fro
 import { getApps } from '../wm.js';
 import { SCREENSAVERS } from '../savers.js';
 import * as screensaver from '../screensaver.js';
+import { renderAccount, renderUsers } from './users-settings.js';
 
 const SERVICES = {
   radarr: { name: 'Radarr', port: 7878, hint: 'Radarr → Settings → General → Security → API Key' },
@@ -33,18 +34,24 @@ export const settingsApp = {
   open(win, opts = {}) {
     const page = (id, label, ic, render) => ({ id, label, icon: ic, render });
     const appIconSmall = (svc) => `<span class="settings-nav-app">${appIcon[svc]}</span>`;
+    // Admins set MediaDesk up; everyone has their own account, appearance and desktop.
+    const admin = !state.me || state.me.role === 'admin';
+    const has = (a) => !state.me || state.me.allowed.includes(a);
+    const signIn = Boolean(state.config?.auth);
     const layout = sidebarLayout([
-      page('general', 'General', icon.sliders, renderGeneral),
-      ...Object.keys(SERVICES).map((svc) => page(svc, SERVICES[svc].name, appIconSmall(svc), (c) => renderApp(c, svc))),
-      page('music', 'Music', appIconSmall('music'), renderMusic),
-      page('files', 'Files', appIconSmall('files'), renderFiles),
-      page('console', 'The Game Console', appIconSmall('console'), renderConsole),
-      page('ebooks', 'eBook Reader', appIconSmall('ebooks'), renderEbooks),
+      signIn ? page('account', 'My account', icon.user, renderAccount) : null,
+      admin ? page('users', 'Users', icon.users, renderUsers) : null,
+      admin ? page('general', 'General', icon.sliders, renderGeneral) : null,
+      ...(admin ? Object.keys(SERVICES).map((svc) => page(svc, SERVICES[svc].name, appIconSmall(svc), (c) => renderApp(c, svc))) : []),
+      admin ? page('music', 'Music', appIconSmall('music'), renderMusic) : null,
+      admin ? page('files', 'Files', appIconSmall('files'), renderFiles) : null,
+      admin ? page('console', 'The Game Console', appIconSmall('console'), renderConsole) : null,
+      admin ? page('ebooks', 'eBook Reader', appIconSmall('ebooks'), renderEbooks) : has('ebooks') ? page('ebooks', 'eBook Reader', appIconSmall('ebooks'), renderMyKindle) : null,
       page('appearance', 'Appearance', icon.image, renderAppearance),
       page('dock', 'Dock & Desktop', icon.grid, renderDockPage),
       page('screensaver', 'Screensaver', icon.moon, renderScreensaver),
       page('about', 'About', icon.heartPulse, renderAbout),
-    ], { initial: opts.tab });
+    ].filter(Boolean), { initial: opts.tab });
     win.body.append(h('div', { class: 'settings' }, layout.root));
     win.on('reopen', (o) => { if (o?.tab) layout.show(o.tab); });
   },
@@ -411,6 +418,21 @@ function renderConsole(container) {
       renderConsole(container);
     } catch (err) { toastError(err, 'Could not save the folder'); save.disabled = false; }
   };
+}
+
+// Not an admin: just your own Send to Kindle address (an admin sets up the email server).
+function renderMyKindle(container) {
+  const k = state.config.ebooks?.kindle || {};
+  const email = h('input', { class: 'input', type: 'email', value: k.email || '', placeholder: 'yourname_123@kindle.com', spellcheck: 'false' });
+  container.append(h('div', { class: 'pane-header' }, h('span', { class: 'settings-app-icon', html: appIcon.ebooks }), h('h2', {}, 'eBook Reader')),
+    section('Send to Kindle',
+      h('p', { class: 'muted small' }, 'Send books to your Kindle library (every device with the Kindle app). Your Send-to-Kindle address is at amazon.com → Manage Your Content and Devices → Preferences → Personal Document Settings.'),
+      k.smtp?.ready ? null : h('div', { class: 'notice' }, 'An admin still has to set up the email server MediaDesk sends through (Settings → eBook Reader).'),
+      h('label', { class: 'field' }, h('span', {}, 'Your Send-to-Kindle email'), email),
+      h('p', { class: 'muted small' }, 'On the same Amazon page, add the address MediaDesk sends from to the Approved Personal Document E-mail List (ask your admin which one).'),
+      h('div', { class: 'btn-row' }, h('button', { class: 'btn btn-primary', onclick: async () => {
+        try { state.config = await portal.saveConfig({ kindle: { email: email.value.trim() } }); toast('Saved', { type: 'success', timeout: 1500 }); } catch (err) { toastError(err, 'Not saved'); }
+      } }, 'Save'))));
 }
 
 // Send to Kindle: books emailed to the reader's Kindle address, through their own email account.

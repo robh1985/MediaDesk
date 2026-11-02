@@ -137,7 +137,7 @@ class FamilyOrganizer {
       h('button', { class: 'fam-btn primary', onclick: () => this.add() }, h('span', { html: ICONS.plus }), h('span', { class: 'fam-hide-sm' }, 'Add')),
       h('button', { class: `fam-icon-btn fam-theme-btn ${this.session?.user ? 'fam-hide-sm' : ''}`, title: 'Light or dark', 'aria-label': 'Switch between light and dark', onclick: () => this.toggleTheme() }, ...themeIcon(this.root.classList.contains('fam-dark'))),
       h('button', { class: 'fam-icon-btn fam-hide-sm', title: 'Full screen', html: ICONS.expand, onclick: () => this.fullscreen() }),
-      this.session?.user ? h('button', { class: 'fam-account-btn', title: `Signed in as ${this.session.user.first} ${this.session.user.last}`, onclick: () => this.accountMenu() },
+      this.session?.user && !this.session.user.viaMediaDesk ? h('button', { class: 'fam-account-btn', title: `Signed in as ${this.session.user.first} ${this.session.user.last}`, onclick: () => this.accountMenu() },
         `${this.session.user.first[0] || ''}${this.session.user.last[0] || ''}`.toUpperCase()) : null);
     this.main = h('main', { class: 'fam-main' });
     // A second menu beside the left one, for a section with parts of its own (Settings).

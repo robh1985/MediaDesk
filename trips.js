@@ -35,7 +35,24 @@ const dayDiff = (a, b) => Math.round((Date.parse(`${b}T12:00:00Z`) - Date.parse(
 // "2026-05-03T14:30" moved by n days (keeps the clock time).
 const shiftDateTime = (v, n) => (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}/.test(v) ? addDays(v.slice(0, 10), n) + v.slice(10) : v);
 
-function createTrips({ dataDir, mock = false, log = console.log }) {
+function createTrips({ dataDir, mock = false, log = console.log, getUser = () => ({ id: null, accounts: false, admin: true }) }) {
+  // With MediaDesk accounts a trip belongs to its travellers: the people linked to them (and its
+  // owner) see it, and so do admins; a trip set to "everyone" (and every trip from before
+  // accounts) is seen by everyone with the Trip Planner.
+  function canSee(d, u = getUser()) {
+    if (!u.accounts || u.admin) return true;
+    const t = d.trip;
+    if (t.visibility !== 'members') return true;
+    return t.owner === u.id || (t.members || []).some((m) => m.userId === u.id);
+  }
+  const visible = (u = getUser()) => [...trips.values()].filter((d) => canSee(d, u));
+  // Calendar feeds of all of someone's trips: a secret address each.
+  function feedToken(u = getUser()) {
+    if (!u.accounts || !u.id) return settings.icsToken;
+    settings.feeds ||= {};
+    if (!settings.feeds[u.id]) { settings.feeds[u.id] = token(); saveSettings().catch(() => {}); }
+    return settings.feeds[u.id];
+  }
   const dir = path.join(dataDir, 'trips');
   const fileDir = path.join(dir, 'files');
   const settingsFile = path.join(dir, 'settings.json');
@@ -98,8 +115,17 @@ function createTrips({ dataDir, mock = false, log = console.log }) {
   function createTrip(body) {
     loadAll();
     const id = newId();
-    const t = cleanTrip({ currency: 'EUR', ...body });
+    const u = getUser();
+    const t = cleanTrip({ currency: 'EUR', ...(u.accounts ? { visibility: 'members' } : {}), ...body });
     if (!t.title) t.title = 'New trip';
+    if (u.accounts && u.id) {
+      t.owner = u.id;
+      // You're the first traveller.
+      if (!t.members.some((m) => m.userId === u.id)) {
+        if (t.members.length === 1 && !t.members[0].userId) Object.assign(t.members[0], { name: u.name, color: u.color || t.members[0].color, userId: u.id });
+        else t.members.unshift({ id: newId(), name: u.name, color: u.color || '#3b82f6', userId: u.id });
+      }
+    }
     const d = normalise({ id, rev: 1, created: Date.now(), updated: Date.now(), trip: t });
     if (!t.members.length) t.members.push({ id: newId(), name: 'Me', color: '#3b82f6' });
     trips.set(id, d);
@@ -113,7 +139,8 @@ function createTrips({ dataDir, mock = false, log = console.log }) {
     if ('end' in t) out.end = isDate(t.end) ? t.end : null;
     if (out.start && out.end && out.end < out.start) out.end = out.start;
     if ('archived' in t) out.archived = Boolean(t.archived);
-    if ('members' in t && Array.isArray(t.members)) out.members = t.members.slice(0, 50).map((m) => ({ id: String(m.id || newId()).slice(0, 40), name: String(m.name || 'Traveller').slice(0, 60), color: String(m.color || '#3b82f6').slice(0, 20), email: m.email ? String(m.email).slice(0, 200) : undefined }));
+    if ('members' in t && Array.isArray(t.members)) out.members = t.members.slice(0, 50).map((m) => ({ id: String(m.id || newId()).slice(0, 40), name: String(m.name || 'Traveller').slice(0, 60), color: String(m.color || '#3b82f6').slice(0, 20), email: m.email ? String(m.email).slice(0, 200) : undefined, userId: /^[0-9a-f]{16}$/.test(m.userId || '') ? m.userId : undefined }));
+    if ('visibility' in t) out.visibility = t.visibility === 'members' ? 'members' : 'everyone';
     if ('dayModes' in t) out.dayModes = Object.fromEntries(Object.entries(t.dayModes && typeof t.dayModes === 'object' ? t.dayModes : {}).filter(([d, m]) => isDate(d) && ['foot', 'bike', 'car', 'transit'].includes(m)).slice(0, 400));
     if ('units' in t) out.units = t.units === 'km' ? 'km' : 'mi';
     if ('origin' in t) out.origin = cleanPlace(t.origin);
@@ -600,7 +627,7 @@ function createTrips({ dataDir, mock = false, log = console.log }) {
     const q = url.searchParams;
     try {
       loadAll();
-      if (p === '/list' && req.method === 'GET') return sendJson(res, 200, { trips: [...trips.values()].map(summary).sort((a, b) => (a.start || '9') < (b.start || '9') ? -1 : 1), icsToken: settings.icsToken, mock });
+      if (p === '/list' && req.method === 'GET') { const u = getUser(); return sendJson(res, 200, { trips: visible(u).map((d) => ({ ...summary(d), visibility: d.trip.visibility || 'everyone', mine: Boolean(u.id) && (d.trip.owner === u.id || d.trip.members.some((x) => x.userId === u.id)) })).sort((a, b) => (a.start || '9') < (b.start || '9') ? -1 : 1), icsToken: feedToken(u), accounts: u.accounts, mock }); }
       if (p === '/create' && req.method === 'POST') return sendJson(res, 200, { trip: createTrip(await readJson(req)) });
       if (p.startsWith('/geo/')) {
         const num = (k) => Number(q.get(k));
@@ -621,9 +648,14 @@ function createTrips({ dataDir, mock = false, log = console.log }) {
         if (p === '/geo/fx') return sendJson(res, 200, { rate: await geo.fx(q.get('from'), q.get('to'), q.get('date')) });
         return sendJson(res, 404, { error: 'Not found' });
       }
-      if (p === '/ics-token' && req.method === 'POST') { settings.icsToken = token(); await saveSettings(); return sendJson(res, 200, { icsToken: settings.icsToken }); }
+      if (p === '/ics-token' && req.method === 'POST') {
+        const u = getUser();
+        if (u.accounts && u.id) { settings.feeds ||= {}; settings.feeds[u.id] = token(); } else settings.icsToken = token();
+        await saveSettings();
+        return sendJson(res, 200, { icsToken: feedToken(u) });
+      }
       // Atlas: countries marked visited or on the bucket list (besides those the trips went to).
-      if (p === '/atlas' && req.method === 'GET') return sendJson(res, 200, { visited: settings.visited || [], bucket: settings.bucket || [], trips: [...trips.values()].map(summary) });
+      if (p === '/atlas' && req.method === 'GET') return sendJson(res, 200, { visited: settings.visited || [], bucket: settings.bucket || [], trips: visible().map(summary) });
       if (p === '/atlas' && req.method === 'POST') {
         const b = await readJson(req);
         const codes = (a) => [...new Set((Array.isArray(a) ? a : []).map((c) => String(c).toUpperCase()).filter((c) => /^[A-Z]{2}$/.test(c)))];
@@ -643,6 +675,7 @@ function createTrips({ dataDir, mock = false, log = console.log }) {
       const m = /^\/trip\/([\w-]+)(\/.*)?$/.exec(p);
       if (!m) return sendJson(res, 404, { error: 'Not found' });
       const d = get(m[1]);
+      if (!canSee(d)) throw new TripError(404, 'That trip doesn’t exist any more');
       const rest = m[2] || '';
       if (!rest && req.method === 'GET') {
         if (Number(q.get('since')) === d.rev) return sendJson(res, 200, { rev: d.rev, same: true });
@@ -696,9 +729,11 @@ function createTrips({ dataDir, mock = false, log = console.log }) {
       if (m) {
         let list = [];
         let name = 'Trips';
-        if (m[1] === settings.icsToken) list = [...trips.values()].filter((d) => !d.trip.archived);
+        const owner = Object.entries(settings.feeds || {}).find(([, t]) => t === m[1])?.[0];
+        if (owner) list = visible({ accounts: true, id: owner, admin: false }).filter((d) => !d.trip.archived && (d.trip.owner === owner || d.trip.members.some((x) => x.userId === owner)));
+        else if (m[1] === settings.icsToken) list = [...trips.values()].filter((d) => !d.trip.archived);
         else { const d = [...trips.values()].find((x) => x.trip.icsToken === m[1]); if (d) { list = [d]; name = d.trip.title; } }
-        if (!list.length && m[1] !== settings.icsToken) return sendJson(res, 404, { error: 'Not found' });
+        if (!list.length && m[1] !== settings.icsToken && !owner) return sendJson(res, 404, { error: 'Not found' });
         res.writeHead(200, { 'Content-Type': 'text/calendar; charset=utf-8', 'Cache-Control': 'no-store' });
         return res.end(ics(list, name));
       }

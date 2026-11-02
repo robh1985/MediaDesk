@@ -13,6 +13,7 @@ These are loaded only when needed (by Preview, Plex Viewer and the eBook Reader)
 | `leaflet.markercluster/` | [Leaflet.markercluster](https://github.com/Leaflet/Leaflet.markercluster) | 1.5.3 | MIT | Grouping nearby places on the Trip Planner's map |
 | `world-atlas/` | [world-atlas](https://github.com/topojson/world-atlas) (Natural Earth, 1:50m countries), with ISO country codes from [i18n-iso-countries](https://github.com/michaelwittig/node-i18n-iso-countries) | 2.0.2 | ISC (map data: public domain); MIT (codes) | The Trip Planner's Atlas |
 | `airports/` | [mwgg/Airports](https://github.com/mwgg/Airports) (IATA airports only, trimmed to code, name, city, country, position and time zone), with each airport's size from [OurAirports](https://ourairports.com/data/) | 2024 | MIT; sizes public domain | Finding airports for flights in the Trip Planner, and the nearest big one to a place |
+| `qrcode/` | [QR Code Generator](https://github.com/kazuhikoarase/qrcode-generator) (`qrcode-generator`) | 1.4.4 | MIT | The QR code for setting up two-step sign-in |
 
 For Office files, Mammoth, SheetJS and JSZip run inside a dedicated Web Worker (`public/js/apps/office-worker.js`)
 with a time limit, so a malformed or hostile file cannot affect the MediaDesk page. Their output is shown

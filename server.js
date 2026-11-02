@@ -9,6 +9,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const { Readable } = require('node:stream');
+const { AsyncLocalStorage } = require('node:async_hooks');
 const files = require('./files');
 const appSettings = require('./appsettings');
 const { createNotifier } = require('./notify');
@@ -20,6 +21,7 @@ const { createArchive } = require('./archive');
 const { createFamily } = require('./family');
 const { createEbooks } = require('./ebooks');
 const { createTrips } = require('./trips');
+const { createUsers } = require('./users');
 
 const ROOT = __dirname;
 
@@ -153,12 +155,14 @@ const isConfigured = (svc) => {
 };
 
 // Shape of the config the browser is allowed to see: no secrets.
-function publicConfig() {
+const SERVICE_APPS = { radarr: ['radarr'], sonarr: ['sonarr'], nzbget: ['nzbget'], jellyfin: ['jellyfin', 'music'], plex: ['plex', 'plexviewer'], pikvm: ['pikvm'] };
+function publicConfig(u = reqUser()) {
   const services = {};
   for (const svc of SERVICES) {
     const c = config.services[svc];
     services[svc] = {
-      configured: MOCK || isConfigured(svc),
+      // A service someone can't use looks unset to them (no dashboard widgets or links for it).
+      configured: (MOCK || isConfigured(svc)) && (SERVICE_APPS[svc] || []).some((a) => users.can(u, a)),
       url: c.url || '',
       publicUrl: trimSlash(c.publicUrl || c.url || ''),
       username: c.username || '',
@@ -169,11 +173,14 @@ function publicConfig() {
     };
   }
   return {
-    services, mock: MOCK, auth: Boolean(config.portalPassword), files: filesStatus(), version: VERSION, appSettings: appSettings.resolve(config.appSettings),
+    services, mock: MOCK, auth: users.enabled(), files: filesStatus(u), version: VERSION,
+    // An admin's preferences are everyone's defaults; others can have their own on top.
+    appSettings: appSettings.resolve(u.role === 'admin' ? config.appSettings : appSettings.merge(config.appSettings || {}, users.byId(u.id)?.appSettings || {})),
+    usersFolder: u.role === 'admin' ? personalBase() : undefined,
     media: { ...media.status(), ffmpegPath: config.ffmpegPath || '', libreOfficePath: config.libreOfficePath || '' },
     archive: { ...archive.status(), sevenZipPath: config.sevenZipPath || '' },
     games: { folder: MOCK ? '(demo games)' : config.gamesFolder || '' },
-    ebooks: { folder: MOCK ? '(demo books)' : config.ebooksFolder || '', kindle: kindlePublic() },
+    ebooks: { folder: MOCK ? '(demo books)' : config.ebooksFolder || '', kindle: u.role === 'admin' ? { ...kindlePublic(), email: kindleFor(u).email } : { email: kindleFor(u).email, smtp: { ready: Boolean(config.kindle?.smtp?.host) } }, personal: personalOn(u) },
   };
 }
 
@@ -196,11 +203,11 @@ function mergeKindle(prev = {}, body = {}) {
 }
 
 // The file manager can change anything inside its folders, so it also requires a portal password.
-function filesStatus() {
-  const list = files.rootList(config);
+function filesStatus(u = reqUser()) {
+  const list = files.rootList(filesConfigFor(u));
   const roots = list.map((r) => r.path);
   let reason = null;
-  if (!config.portalPassword && !MOCK) reason = 'password';
+  if (!users.enabled() && !MOCK) reason = 'password';
   else if (!roots.length) reason = 'roots';
   return { enabled: !reason, reason, roots, folders: list.map(({ path: p, alias, tags, folderName }) => ({ path: p, alias, tags, folderName })), tags: config.fileTags || [] };
 }
@@ -209,25 +216,18 @@ function filesStatus() {
 // Authentication (optional — enabled when a portal password is set)
 // ---------------------------------------------------------------------------
 
-function sign(value) {
-  return crypto.createHmac('sha256', String(config.portalPassword)).update(value).digest('base64url');
-}
-
-function makeSession() {
-  const expires = String(Date.now() + SESSION_DAYS * 864e5);
-  return `${expires}.${sign(expires)}`;
-}
-
-function parseCookies(req) {
+// Sessions belong to user accounts (users.js). Without accounts MediaDesk is open, used as its
+// owner (with a warning at start-up); in the demo nobody signs in.
+const parseCookies = (req) => {
   const out = {};
   for (const part of (req.headers.cookie || '').split(';')) {
     const i = part.indexOf('=');
     if (i > 0) out[part.slice(0, i).trim()] = decodeURIComponent(part.slice(i + 1).trim());
   }
   return out;
-}
+};
 
-// Sessions locked by the screensaver ("require password to return"). Unlocking means logging in
+// Sessions locked by the screensaver ("require password to return"). Unlocking means signing in
 // again, which issues a new, unlocked session cookie. Every tab using the locked cookie sees the lock.
 const lockedSessions = new Map();     // session token -> its expiry time
 const sessionToken = (req) => parseCookies(req).mediadesk_session || '';
@@ -238,35 +238,16 @@ function isLocked(req) {
   return true;
 }
 
-function isAuthed(req, { ignoreLock = false } = {}) {
-  if (!config.portalPassword) return true;
-  if (!ignoreLock && isLocked(req)) return false;
+// The person making a request, or null (not signed in, or locked).
+function currentUser(req, { ignoreLock = false } = {}) {
+  if (!users.enabled()) return users.OWNER;
   const internal = req.headers['x-mediadesk-internal'];
-  if (internal && internal.length === INTERNAL_TOKEN.length && crypto.timingSafeEqual(Buffer.from(internal), Buffer.from(INTERNAL_TOKEN))) return true;
-  const token = parseCookies(req).mediadesk_session || '';
-  const [expires, sig] = token.split('.');
-  if (!expires || !sig || Number(expires) < Date.now()) return false;
-  const expected = Buffer.from(sign(expires));
-  const given = Buffer.from(sig);
-  return expected.length === given.length && crypto.timingSafeEqual(expected, given);
+  if (internal && internal.length === INTERNAL_TOKEN.length && crypto.timingSafeEqual(Buffer.from(internal), Buffer.from(INTERNAL_TOKEN))) return users.byId(users.ownerId()) || users.OWNER;
+  if (!ignoreLock && isLocked(req)) return null;
+  return users.fromToken(sessionToken(req));
 }
-
-function safeEqual(a, b) {
-  const ha = crypto.createHash('sha256').update(String(a)).digest();
-  const hb = crypto.createHash('sha256').update(String(b)).digest();
-  return crypto.timingSafeEqual(ha, hb);
-}
-
-// Basic brute-force protection for the login endpoint.
-const loginAttempts = new Map();
-function tooManyAttempts(ip) {
-  const now = Date.now();
-  const entry = loginAttempts.get(ip) || { count: 0, since: now };
-  if (now - entry.since > 15 * 60e3) { entry.count = 0; entry.since = now; }
-  entry.count++;
-  loginAttempts.set(ip, entry);
-  return entry.count > 10;
-}
+const isAuthed = (req, opts) => Boolean(currentUser(req, opts));
+const sessionCookie = (req) => (value, maxAge) => `mediadesk_session=${value}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${maxAge}${req.headers['x-forwarded-proto'] === 'https' ? '; Secure' : ''}`;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -517,6 +498,11 @@ async function updateConfig(req, res) {
   if (body.kindle && typeof body.kindle === 'object') {
     try { next.kindle = mergeKindle(next.kindle, body.kindle); } catch (err) { return sendJson(res, err.status || 400, { error: err.message }); }
   }
+  if (typeof body.usersFolder === 'string') {
+    const f = body.usersFolder.trim();
+    if (f && !path.isAbsolute(f)) return sendJson(res, 400, { error: 'Personal folders: give the full path of a folder' });
+    if (f) { try { fs.mkdirSync(f, { recursive: true }); fs.accessSync(f, fs.constants.W_OK); } catch { return sendJson(res, 400, { error: `MediaDesk can’t write to ${f}` }); } next.usersFolder = path.resolve(f); } else delete next.usersFolder;
+  }
   let toolsChanged = false;
   for (const key of ['ffmpegPath', 'libreOfficePath']) {
     if (typeof body[key] === 'string' && body[key].trim() !== (next[key] || '')) { next[key] = body[key].trim(); toolsChanged = true; }
@@ -646,14 +632,59 @@ async function plexSignIn(req, res, p) {
 // ---------------------------------------------------------------------------
 
 const mock = MOCK ? require('./mock') : null;
+const DATA_DIR = MOCK ? path.join(require('node:os').tmpdir(), 'mediadesk-demo-data') : path.dirname(CONFIG_PATH);
+const users = createUsers({ dataDir: DATA_DIR, mock: MOCK, legacyPassword: () => config.portalPassword || '' });
+// Who a request is from, for the apps (set for each request in handle()).
+const requestContext = new AsyncLocalStorage();
+const reqUser = () => requestContext.getStore()?.user || users.OWNER;
+// With accounts, everyone has personal folders (Books, Games, Files) under one folder,
+// <config folder>/users by default (Settings → Users can move it).
+const personalBase = () => path.resolve(config.usersFolder || path.join(DATA_DIR, 'users'));
+const personalOn = (u) => users.enabled() && u && !u.open;
+const safeDirName = (s) => String(s).replace(/[^\w.-]+/g, '_').replace(/^\.+/, '_').slice(0, 60) || 'user';
+function personalDir(u, kind) {
+  const d = path.join(personalBase(), safeDirName(u.username), kind);
+  fs.mkdirSync(d, { recursive: true });
+  return d;
+}
+// A user's own data (reading places, saves, settings of their personal libraries).
+const userDataDir = (u) => path.join(DATA_DIR, 'user-data', u.id);
+async function renamePersonal(from, to) {
+  const a = path.join(personalBase(), safeDirName(from));
+  const b = path.join(personalBase(), safeDirName(to));
+  if (fs.existsSync(a) && !fs.existsSync(b)) await fs.promises.rename(a, b).catch((err) => console.error(`Couldn’t rename ${a}: ${err.message}`));
+}
+// The first admin takes over what was used before there were accounts (nothing to move: data
+// from then belongs to the first admin).
+async function adoptOwnerData() {}
+// Files: the shared folders a person may use (admins: all; others: all, or the ones picked for
+// them) and their own "My files".
+function filesConfigFor(u) {
+  if (!personalOn(u)) return config;
+  const allowed = (r) => u.role === 'admin' || !Array.isArray(u.folders) || u.folders.includes(path.resolve(r));
+  const shared = (config.fileRoots || []).filter((r) => typeof r === 'string' && r.trim() && allowed(r.trim()));
+  // "My files" is the person's whole folder: their Books and Games (the personal libraries) and Files.
+  const mine = path.resolve(path.dirname(personalDir(u, 'Files')));
+  personalDir(u, 'Books');
+  personalDir(u, 'Games');
+  return { ...config, fileRoots: [...shared, mine], fileRootInfo: { ...(config.fileRootInfo || {}), [mine]: { alias: 'My files', tags: [] } } };
+}
+// Send to Kindle: everyone's own Kindle address, through the email server an admin set up.
+function kindleFor(u) {
+  const k = config.kindle || {};
+  const own = personalOn(u) && u.id !== users.ownerId() ? users.byId(u.id)?.kindleEmail || '' : u.kindleEmail || k.email || '';
+  return { email: own, smtp: k.smtp };
+}
 const games = createGames({
   dataDir: MOCK ? path.join(require('node:os').tmpdir(), 'mediadesk-demo-data') : path.dirname(CONFIG_PATH),
   getFolder: () => config.gamesFolder || '',
   mock: MOCK,
   sample: MOCK ? require('./mock-games').createSample() : null,
+  // Saves, favourites and play history are each person's own (the first admin keeps the ones from before accounts).
+  playerKey: () => { const u = reqUser(); return personalOn(u) && u.id !== users.ownerId() ? { id: u.id, name: safeDirName(u.username) } : null; },
 });
 const pikvm = createPikvm({ getConfig: () => config.services.pikvm });
-const tripPlanner = createTrips({ dataDir: MOCK ? path.join(require('node:os').tmpdir(), 'mediadesk-demo-data') : path.dirname(CONFIG_PATH), mock: MOCK });
+const tripPlanner = createTrips({ dataDir: MOCK ? path.join(require('node:os').tmpdir(), 'mediadesk-demo-data') : path.dirname(CONFIG_PATH), mock: MOCK, getUser: () => { const u = reqUser(); return { id: personalOn(u) ? u.id : null, name: u.name, color: u.color, admin: u.role === 'admin', accounts: users.enabled() }; } });
 const ebooks = createEbooks({
   dataDir: MOCK ? path.join(require('node:os').tmpdir(), 'mediadesk-demo-data') : path.dirname(CONFIG_PATH),
   getFolder: () => config.ebooksFolder || '',
@@ -663,12 +694,32 @@ const ebooks = createEbooks({
   getSevenZip: () => archive.status().path,
   getConvertPath: () => config.ebookConvertPath || '',
   // Send to Kindle: the reader's Kindle email address and the email server to send through.
-  getKindle: () => config.kindle || {},
-  resolveShared: (root, rel) => files.resolveInShared(config, Number(root), rel),
-  filesEnabled: () => filesStatus().enabled,
+  getKindle: () => kindleFor(reqUser()),
+  resolveShared: (root, rel) => files.resolveInShared(filesConfigFor(reqUser()), Number(root), rel),
+  filesEnabled: () => filesStatus(reqUser()).enabled,
+  // Reading places and bookmarks are each person's own (the first admin keeps the ones from before accounts).
+  readerKey: () => { const u = reqUser(); return personalOn(u) && u.id !== users.ownerId() ? u.id : null; },
 });
+// Personal libraries: an eBook Reader and a Game Console of each person's own folder.
+const personalEbooks = new Map();
+function ebooksFor(u) {
+  if (!personalEbooks.has(u.id)) {
+    personalEbooks.set(u.id, createEbooks({
+      dataDir: userDataDir(u), getFolder: () => personalDir(users.byId(u.id) || u, 'Books'), idSalt: `mine:${u.id}`,
+      getSevenZip: () => archive.status().path, getConvertPath: () => config.ebookConvertPath || '',
+      getKindle: () => kindleFor(reqUser()),
+      resolveShared: (root, rel) => files.resolveInShared(filesConfigFor(reqUser()), Number(root), rel), filesEnabled: () => filesStatus(reqUser()).enabled,
+    }));
+  }
+  return personalEbooks.get(u.id);
+}
+const personalGames = new Map();
+function gamesFor(u) {
+  if (!personalGames.has(u.id)) personalGames.set(u.id, createGames({ dataDir: userDataDir(u), getFolder: () => personalDir(users.byId(u.id) || u, 'Games'), idSalt: `mine:${u.id}` }));
+  return personalGames.get(u.id);
+}
 const family = createFamily({ dataDir: MOCK ? path.join(require('node:os').tmpdir(), 'mediadesk-demo-data') : path.dirname(CONFIG_PATH), mock: MOCK });
-const archive = createArchive({ getConfig: () => config, resolveInShared: files.resolveInShared, filesEnabled: () => filesStatus().enabled });
+const archive = createArchive({ getConfig: () => filesConfigFor(reqUser()), resolveInShared: files.resolveInShared, filesEnabled: () => filesStatus(reqUser()).enabled });
 const wallpapers = createWallpapers(MOCK ? path.join(require('node:os').tmpdir(), 'mediadesk-demo-wallpapers') : path.join(path.dirname(CONFIG_PATH), 'wallpapers'));
 
 // --- Notifications ------------------------------------------------------------
@@ -700,6 +751,26 @@ const notifier = createNotifier({
 });
 if (MOCK) mock.seedNotifications(notifier);
 
+// Which apps an address belongs to (any of them gives access).
+const FILE_APPS = ['files', 'music', 'notes', 'paint', 'paintpro', 'logs', 'archive', 'ebooks', 'preview'];
+const FILE_WRITERS = ['files', 'notes', 'paint', 'paintpro', 'archive'];
+const ROUTE_APPS = [
+  ['/api/radarr/', ['radarr']], ['/api/sonarr/', ['sonarr']], ['/api/nzbget', ['nzbget']], ['/api/jellyfin/', ['jellyfin', 'music']],
+  ['/api/plex/', ['plex', 'plexviewer']], ['/api/pikvm/', ['pikvm']], ['/portal/games/', ['console']], ['/portal/trips/', ['trips']],
+  ['/portal/ebooks/', ['ebooks', 'files']], ['/portal/archive/', ['archive', 'files']], ['/portal/files/', FILE_APPS],
+];
+const appsFor = (p) => ROUTE_APPS.find(([prefix]) => p.startsWith(prefix))?.[1] || null;
+// Changing MediaDesk itself (connections, signing in to Plex, testing services).
+const ADMIN_ROUTES = ['/portal/test', '/portal/plex'];
+// Notifications only about apps a person has.
+function notesFor(u, summary) {
+  if (u.role === 'admin' || !summary || typeof summary !== 'object') return summary;
+  const out = { ...summary };
+  for (const k of Object.keys(out)) if (users.APPS[k] && !users.can(u, k)) delete out[k];
+  if (Array.isArray(summary.items)) out.items = summary.items.filter((n) => !n.app || !users.APPS[n.app] || users.can(u, n.app));
+  return out;
+}
+
 async function handle(req, res) {
   const url = new URL(req.url, 'http://localhost');
   const p = url.pathname;
@@ -712,39 +783,41 @@ async function handle(req, res) {
     return sendJson(res, 403, { error: 'This page is out of date because MediaDesk was updated. Reload the page (Ctrl+F5) and try again.', code: 'stale-page' });
   }
 
-  // Public routes
-  if (p === '/portal/login' && req.method === 'POST') {
-    const ip = req.socket.remoteAddress;
-    if (tooManyAttempts(ip)) return sendJson(res, 429, { error: 'Too many attempts — try again later' });
-    const { password } = await readJson(req);
-    if (!config.portalPassword || !safeEqual(password || '', config.portalPassword)) {
-      return sendJson(res, 401, { error: 'Incorrect password' });
-    }
-    loginAttempts.delete(ip);
-    const secure = req.headers['x-forwarded-proto'] === 'https' ? '; Secure' : '';
-    return sendJson(res, 200, { ok: true }, {
-      'Set-Cookie': `mediadesk_session=${makeSession()}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${SESSION_DAYS * 86400}${secure}`,
+  // Signing in, your own account, and (for admins) everyone's.
+  if (p === '/portal/login' || p === '/portal/login/code' || p === '/portal/users/setup' || p === '/portal/me' || p.startsWith('/portal/me/') || p === '/portal/users' || p.startsWith('/portal/users/')) {
+    const me = currentUser(req);
+    const done = await users.handle(req, res, p, {
+      user: me, ip: req.socket.remoteAddress || '', cookie: sessionCookie(req), sendJson, readJson,
+      onRename: (from, to) => renamePersonal(from, to),
+      onFirstAdmin: (u) => adoptOwnerData(u),
     });
+    if (done !== null) return done;
   }
   if (p === '/portal/logout' && req.method === 'POST') {
     return sendJson(res, 200, { ok: true }, { 'Set-Cookie': 'mediadesk_session=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0' });
   }
   if (p === '/portal/session') {
-    return sendJson(res, 200, { authed: isAuthed(req), locked: isLocked(req) && isAuthed(req, { ignoreLock: true }), auth: Boolean(config.portalPassword), build: BUILD_ID });
+    const me = currentUser(req);
+    const only = users.enabled() && users.all().length === 1 ? users.all()[0] : null;
+    return sendJson(res, 200, { authed: Boolean(me), locked: isLocked(req) && isAuthed(req, { ignoreLock: true }), auth: users.enabled(), user: me ? { ...users.publicUser(me), owner: me.id === users.ownerId() || Boolean(me.open) } : null, lockedUser: !me && isLocked(req) ? users.publicUser(currentUser(req, { ignoreLock: true })) : null, usernameHint: only?.migrated ? only.username : null, build: BUILD_ID });
   }
   if (p === '/portal/lock' && req.method === 'POST') {
-    if (!config.portalPassword) return sendJson(res, 400, { error: 'Set a portal password to lock MediaDesk' });
+    if (!users.enabled()) return sendJson(res, 400, { error: 'Turn on sign-in (Settings → Users) to lock MediaDesk' });
     if (!isAuthed(req)) return sendJson(res, 401, { error: 'Not logged in' });
     const now = Date.now();
     for (const [t, exp] of lockedSessions) if (exp < now) lockedSessions.delete(t);
-    lockedSessions.set(sessionToken(req), Number(sessionToken(req).split('.')[0]) || now + SESSION_DAYS * 864e5);
+    lockedSessions.set(sessionToken(req), Number(sessionToken(req).split('.')[2]) || now + SESSION_DAYS * 864e5);
     return sendJson(res, 200, { locked: true });
   }
 
   // The Family Organizer has accounts of its own (for using it on its own at /family); someone
   // signed in to MediaDesk counts as a parent.
   if (p.startsWith('/portal/family/')) {
-    return family.handle(req, res, url, { sendJson, readJson, readBody, portal: isAuthed(req), ip: req.socket.remoteAddress || '' });
+    // Signed in to MediaDesk with the Family Organizer: a parent, or the kid an admin linked them to.
+    const u = currentUser(req);
+    const linked = u && users.can(u, 'family') && u.family?.role !== 'none' ? { id: u.id, name: u.name, role: u.family?.role || 'parent', profile: u.family?.profile || null, accounts: users.enabled() } : null;
+    requestContext.getStore().user = u;
+    return family.handle(req, res, url, { sendJson, readJson, readBody, portal: Boolean(linked), portalUser: linked, ip: req.socket.remoteAddress || '' });
   }
   if (p === '/family' || p === '/family/') return serveFamilyPage(req, res);
 
@@ -758,27 +831,54 @@ async function handle(req, res) {
   if (!isApi) return serveStatic(req, res, p);
   // While locked, music that's already playing from Jellyfin may keep streaming; nothing else works.
   const lockedMusic = req.method === 'GET' && p.startsWith('/api/jellyfin/Audio/') && isAuthed(req, { ignoreLock: true });
-  if (!isAuthed(req) && !lockedMusic) return sendJson(res, 401, { error: isLocked(req) ? 'MediaDesk is locked' : 'Not logged in', locked: isLocked(req) });
+  const me = currentUser(req) || (lockedMusic ? currentUser(req, { ignoreLock: true }) : null);
+  if (!me) return sendJson(res, 401, { error: isLocked(req) ? 'MediaDesk is locked' : 'Not logged in', locked: isLocked(req) });
+  requestContext.getStore().user = me;
+  // Each app's addresses are only for people who have that app.
+  const need = appsFor(p);
+  if (need && !need.some((a) => users.can(me, a))) return sendJson(res, 403, { error: `You don’t have access to ${users.APPS[need[0]] || 'that'}. Ask an admin.`, noAccess: need[0] });
+  if (ADMIN_ROUTES.some((r) => p === r || p.startsWith(`${r}/`)) && me.role !== 'admin') return sendJson(res, 403, { error: 'Only admins can do that' });
+  // People with a custom role add books to their own library, not the shared one.
+  if (p === '/portal/ebooks/upload' && me.role === 'custom' && personalOn(me)) return sendJson(res, 403, { error: 'Add books to your own library (an admin can let you add to the shared one)' });
+  // Apps that only open files (Music, eBook Reader, Preview, Log Viewer) can read shared folders, not change them.
+  if (p.startsWith('/portal/files/') && !['GET', 'HEAD'].includes(req.method) && !FILE_WRITERS.some((a) => users.can(me, a))) return sendJson(res, 403, { error: 'You can open files, but not change them. Ask an admin for Files.' });
 
   if (p === '/portal/wallpapers' || p.startsWith('/portal/wallpapers/')) {
     return wallpapers.handle(req, res, url, {
       sendJson, readJson,
       resolveSharedFile: (root, rel) => {
-        const status = filesStatus();
+        const status = filesStatus(me);
         if (!status.enabled) throw Object.assign(new Error('Shared folders are not set up'), { status: 403 });
-        return files.resolveShared(config, root, rel);
+        return files.resolveShared(filesConfigFor(me), root, rel);
       },
     });
   }
   if (p.startsWith('/portal/files/')) {
-    const status = filesStatus();
+    const status = filesStatus(me);
     if (!status.enabled) {
-      return sendJson(res, 403, { error: status.reason === 'password' ? 'Set a portal password to use Files' : 'No folders are shared yet. Add some in Settings → Files.' });
+      return sendJson(res, 403, { error: status.reason === 'password' ? 'Turn on sign-in (Settings → Users) to use Files' : 'No folders are shared yet. Add some in Settings → Files.' });
     }
-    return files.handle(req, res, url, { config, sendJson, readJson });
+    return files.handle(req, res, url, { config: filesConfigFor(me), sendJson, readJson });
   }
 
-  if (p === '/portal/config' && req.method === 'GET') return sendJson(res, 200, publicConfig());
+  if (p === '/portal/config' && req.method === 'GET') return sendJson(res, 200, publicConfig(me));
+  // Everyone's own app preferences and Kindle address; everything else is for admins.
+  if (p === '/portal/config' && req.method === 'POST' && me.role !== 'admin') {
+    const body = await readJson(req);
+    const extra = Object.keys(body).filter((k) => !['appSettings', 'kindle'].includes(k));
+    if (extra.length) return sendJson(res, 403, { error: 'Only admins can change MediaDesk’s settings' });
+    const u = users.byId(me.id);
+    if (u) {
+      if (body.appSettings) u.appSettings = appSettings.merge(u.appSettings || {}, body.appSettings);
+      if (body.kindle && typeof body.kindle.email === 'string') {
+        const email = body.kindle.email.trim().slice(0, 200);
+        if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return sendJson(res, 400, { error: 'That Kindle email address doesn’t look right' });
+        u.kindleEmail = email;
+      }
+      await users.save();
+    }
+    return sendJson(res, 200, publicConfig(me));
+  }
   if (p === '/portal/config' && req.method === 'POST') {
     if (MOCK) {
       // Demo mode: app preferences can be tried out (kept in memory); connections can't change.
@@ -795,14 +895,14 @@ async function handle(req, res) {
     }
     return updateConfig(req, res);
   }
-  if (p === '/portal/notifications' && req.method === 'GET') return sendJson(res, 200, notifier.summary());
+  if (p === '/portal/notifications' && req.method === 'GET') return sendJson(res, 200, notesFor(me, notifier.summary()));
   if (p === '/portal/notifications/read' && req.method === 'POST') {
     notifier.markRead((await readJson(req)).app);
-    return sendJson(res, 200, notifier.summary());
+    return sendJson(res, 200, notesFor(me, notifier.summary()));
   }
   if (p === '/portal/notifications/clear' && req.method === 'POST') {
     notifier.clear((await readJson(req)).app);
-    return sendJson(res, 200, notifier.summary());
+    return sendJson(res, 200, notesFor(me, notifier.summary()));
   }
   if (p === '/portal/test') {
     const results = {};
@@ -811,6 +911,13 @@ async function handle(req, res) {
   }
 
   if (p.startsWith('/portal/plex/')) return plexSignIn(req, res, p);
+  // Personal libraries: /portal/<app>/mine/… is the same app, on the person's own folder.
+  if (p.startsWith('/portal/games/mine/') || p.startsWith('/portal/ebooks/mine/')) {
+    if (!personalOn(me)) return sendJson(res, 404, { error: 'Personal libraries come with user accounts (Settings → Users)' });
+    const u2 = new URL(url);
+    u2.pathname = p.replace('/mine/', '/');
+    return p.startsWith('/portal/games/') ? gamesFor(me).handle(req, res, u2, { sendJson, readJson }) : ebooksFor(me).handle(req, res, u2, { sendJson, readJson, readBody });
+  }
   if (p.startsWith('/portal/games/')) return games.handle(req, res, url, { sendJson, readJson });
   if (p.startsWith('/portal/trips/')) return tripPlanner.handle(req, res, url, { sendJson, readJson });
   if (p.startsWith('/portal/ebooks/')) return ebooks.handle(req, res, url, { sendJson, readJson, readBody });
@@ -832,7 +939,7 @@ async function handle(req, res) {
 const server = http.createServer((req, res) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('Referrer-Policy', 'same-origin');
-  handle(req, res).catch((err) => {
+  requestContext.run({ user: null }, () => handle(req, res)).catch((err) => {
     console.error(err);
     if (!res.headersSent) sendJson(res, 500, { error: err.message });
     else res.end();
@@ -861,7 +968,14 @@ server.on('error', (err) => {
   exitAfterLog(1);
 });
 
-server.listen(PORT, HOST, () => {
+// Forgot the admin password: node server.js --reset-password <user name> <new password>
+const resetArg = process.argv.indexOf('--reset-password');
+if (resetArg !== -1) {
+  const [who, pw] = process.argv.slice(resetArg + 1);
+  users.resetPassword(who || '', pw || '')
+    .then((u) => { console.log(`The password of ${u.username} was changed (and two-step sign-in turned off).`); exitAfterLog(0); })
+    .catch((err) => { console.error(err.message); exitAfterLog(1); });
+} else users.migrate().catch((err) => console.error(`Accounts: ${err.message}`)).then(() => server.listen(PORT, HOST, () => {
   console.log(`MediaDesk ${VERSION} starting`);
   notifier.start();
   media.detect(config).then((t) => {
@@ -875,5 +989,5 @@ server.listen(PORT, HOST, () => {
     const missing = SERVICES.filter((s) => !isConfigured(s));
     if (missing.length) console.log(`Not configured yet: ${missing.join(', ')} - open Settings in the portal or edit ${CONFIG_PATH}`);
   }
-  if (!config.portalPassword) console.log('Warning: no portal password set. Set PORTAL_PASSWORD if this is reachable by others.');
-});
+  if (!users.enabled() && !MOCK) console.log('Warning: there are no user accounts, so anyone who can reach MediaDesk can use it. Open Settings → Users to make an admin account (or set PORTAL_PASSWORD).');
+}));

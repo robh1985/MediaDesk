@@ -336,7 +336,12 @@ function makeZip(entries) {
   return Buffer.concat([...local, centralBuf, end]);
 }
 
-function createGames({ dataDir, getFolder, mock = false, sample = null }) {
+function createGames({ dataDir, getFolder, mock = false, sample = null, idSalt = '', playerKey = () => null }) {
+  // Game ids (a personal library's are salted, so they never match the shared library's).
+  const gameId = (rel) => idOf(`${idSalt}${rel}`);
+  // Whose saves, favourites and play history: null for the first admin (the ones from before
+  // accounts), otherwise { id, name } of the person playing.
+  const player = () => playerKey();
   const gamesData = path.join(dataDir, 'games');
   const savesDir = path.join(gamesData, 'saves');
   const artDir = path.join(gamesData, 'art');
@@ -458,7 +463,7 @@ function createGames({ dataDir, getFolder, mock = false, sample = null }) {
         tracks = [...seen].map((r) => path.relative(root, r).split(path.sep).join('/'));
       }
       games.push({
-        id: idOf(f.rel), path: f.rel, file: f.name, base, title, tags, system, size, guessed,
+        id: gameId(f.rel), path: f.rel, file: f.name, base, title, tags, system, size, guessed,
         color: f.ext === 'gbc' || /\bcolor\b/i.test(tags.join(' ')) ? true : undefined,
         art: pic ? true : undefined, parts: tracks,
         // Where its saves and box art go in the layout: Saves/<console>/<saveFolder>/<saveName> - …
@@ -508,6 +513,15 @@ function createGames({ dataDir, getFolder, mock = false, sample = null }) {
     settingsCache.systems ||= {}; settingsCache.favorites ||= []; settingsCache.played ||= {}; settingsCache.art ||= {};
     return settingsCache;
   }
+  // A person's favourites and play history (the first admin's are the ones from before accounts).
+  function mineOf(s) {
+    const pl = player();
+    if (!pl) return s;
+    s.people ||= {};
+    const m = (s.people[pl.id] ||= {});
+    m.favorites ||= []; m.played ||= {};
+    return m;
+  }
   async function writeSettings(s) {
     settingsCache = s;
     await fsp.mkdir(gamesData, { recursive: true });
@@ -532,7 +546,7 @@ function createGames({ dataDir, getFolder, mock = false, sample = null }) {
 
   // ---- Save states and battery saves ----
 
-  const saveDir = (id) => path.join(savesDir, id.replace(/[^a-f0-9]/g, ''));
+  const saveDir = (id) => { const pl = player(); return path.join(savesDir, ...(pl ? ['people', pl.id] : []), id.replace(/[^a-f0-9]/g, '')); };
   const SLOT = /^(auto|[1-9])$/;
   const SLOTS = ['auto', '1', '2', '3', '4', '5', '6', '7', '8', '9'];
   // Saves kept with MediaDesk's settings (no layout, or a folder MediaDesk can't write to).
@@ -552,7 +566,8 @@ function createGames({ dataDir, getFolder, mock = false, sample = null }) {
     writable.set(dir, { ok, at: Date.now() });
     return ok;
   }
-  const savesRoot = (lib) => path.join(lib.folder, lib.dirs?.saves || LAYOUT.saves);
+  // In the games folder, other people's saves are in a folder of their own: Saves/<name>/…
+  const savesRoot = (lib) => { const pl = player(); return path.join(lib.folder, lib.dirs?.saves || LAYOUT.saves, ...(pl ? [pl.name] : [])); };
   // Where a game's saves are, and what they're called. Saves made before the layout (kept with
   // MediaDesk's settings) move across the first time; `legacyId` is the game's id from before
   // its files were moved into the layout.
@@ -1108,7 +1123,7 @@ function createGames({ dataDir, getFolder, mock = false, sample = null }) {
         const s = await readSettings();
         return sendJson(res, 200, {
           configured: true, folder: lib.folder, demo: Boolean(lib.demo), games: lib.games, bios: lib.bios,
-          favorites: s.favorites, played: s.played, systems: s.systems, emulator: emulatorStatus(), artPrefs: s.art,
+          favorites: mineOf(s).favorites, played: mineOf(s).played, systems: s.systems, emulator: emulatorStatus(), artPrefs: s.art,
           layout: lib.structured ? { dirs: lib.dirs, savesInFolder: !mock && await canWrite(savesRoot(lib)) } : null,
           folderNames: FOLDER_NAMES,
         });
@@ -1193,19 +1208,20 @@ function createGames({ dataDir, getFolder, mock = false, sample = null }) {
         const body = await readJson(req);
         const s = await readSettings();
         if (body.system && SYSTEMS[body.system] && body.values) s.systems[body.system] = cleanSystemSettings(body.system, { ...s.systems[body.system], ...body.values });
+        const mine = mineOf(s);
         if (typeof body.favorite === 'string' && /^[a-f0-9]{16}$/.test(body.favorite)) {
-          s.favorites = s.favorites.filter((x) => x !== body.favorite);
-          if (body.on) s.favorites.unshift(body.favorite);
+          mine.favorites = mine.favorites.filter((x) => x !== body.favorite);
+          if (body.on) mine.favorites.unshift(body.favorite);
         }
         if (typeof body.played === 'string' && /^[a-f0-9]{16}$/.test(body.played)) {
-          const prev = s.played[body.played] || { count: 0, seconds: 0 };
-          s.played[body.played] = { at: Date.now(), count: prev.count + (body.start ? 1 : 0), seconds: prev.seconds + Math.max(0, Math.min(86400, Number(body.seconds) || 0)) };
+          const prev = mine.played[body.played] || { count: 0, seconds: 0 };
+          mine.played[body.played] = { at: Date.now(), count: prev.count + (body.start ? 1 : 0), seconds: prev.seconds + Math.max(0, Math.min(86400, Number(body.seconds) || 0)) };
           // Keep the history to the most recent 500 games.
-          const keys = Object.keys(s.played).sort((a, b) => s.played[b].at - s.played[a].at);
-          for (const k of keys.slice(500)) delete s.played[k];
+          const keys = Object.keys(mine.played).sort((a, b) => mine.played[b].at - mine.played[a].at);
+          for (const k of keys.slice(500)) delete mine.played[k];
         }
         await writeSettings(s);
-        return sendJson(res, 200, { favorites: s.favorites, played: s.played, systems: s.systems });
+        return sendJson(res, 200, { favorites: mine.favorites, played: mine.played, systems: s.systems });
       }
       if (p === '/emulator-install' && req.method === 'POST') {
         const { system } = await readJson(req);

@@ -84,6 +84,8 @@ textarea.input { height: auto; padding: 8px 10px; resize: vertical; line-height:
 .tp-card.archived { opacity: .7; }
 .tp-card-cover { position: relative; height: 110px; display: grid; place-items: center; font-size: 52px; background: linear-gradient(135deg, var(--c), color-mix(in srgb, var(--c) 55%, #000)); }
 .tp-card-count { position: absolute; left: 10px; bottom: 10px; padding: 2px 9px; border-radius: 999px; font-size: 12px; font-weight: 700; background: rgba(255,255,255,.92); color: #111; }
+.tp-card-lock { position: absolute; right: 10px; top: 10px; padding: 2px 7px; border-radius: 999px; background: rgba(255,255,255,.9); font-size: 13px; }
+.tp-member-link { max-width: 200px; }
 .tp-card-body { padding: 12px 14px; display: flex; flex-direction: column; gap: 4px; flex: 1; }
 .tp-card-body h3 { font-size: 15.5px; }
 .tp-card-body p { margin: 0; }

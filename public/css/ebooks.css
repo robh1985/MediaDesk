@@ -290,3 +290,5 @@
 .ebk-shelf.picking .ebk-book-cover { outline: 2px dashed var(--accent); outline-offset: 4px; border-radius: 4px; }
 .ebk-kbtn { font-size: 17px; }
 @media (max-width: 560px) { .ebk-krow { grid-template-columns: 1fr auto; } .ebk-krow small { display: none; } }
+
+.ebk-mine { position: absolute; left: 6px; top: 6px; z-index: 2; padding: 1px 6px; border-radius: 6px; background: rgba(15,17,21,.75); color: #fff; font-size: 10.5px; font-weight: 700; letter-spacing: .02em; }

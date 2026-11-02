@@ -12,7 +12,7 @@ export class NotesView {
   get voter() {
     let v = null;
     try { v = localStorage.getItem(`${VOTER_KEY}.${this.store.id}`); } catch { /* not kept */ }
-    return this.store.member(v) ? v : this.store.trip.members[0]?.id;
+    return this.store.member(v) ? v : this.store.meMember()?.id || this.store.trip.members[0]?.id;
   }
   set voter(v) { try { localStorage.setItem(`${VOTER_KEY}.${this.store.id}`, v); } catch { /* not kept */ } }
 

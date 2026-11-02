@@ -33,6 +33,11 @@ const api = async (path, opts = {}) => {
   return data;
 };
 
+// With user accounts each person also has their own games ("Mine", at /portal/games/mine/…);
+// a game's `mine` says which library it's in.
+const gbase = (g) => (g?.mine ? '/mine' : '');
+import { state as appState } from '../../api.js';
+
 export const consoleApp = {
   id: 'console', name: 'The Game Console', icon: appIcon.console, size: [1180, 760], description: 'Play NES, SNES, N64, PlayStation, Genesis, Game Boy and more',
   open(win, opts = {}) {
@@ -112,7 +117,14 @@ class GameConsole {
   async load(refresh = false) {
     if (!this.lib) clear(this.stage, h('div', { class: 'gc-loading' }, h('div', { class: 'gc-spin' }), 'Loading your games…'));
     try {
-      this.lib = await api(`/library${refresh ? '?refresh=1' : ''}`);
+      const q = refresh ? '?refresh=1' : '';
+      const [shared, mine] = await Promise.all([api(`/library${q}`), appState.config?.ebooks?.personal ? api(`/mine/library${q}`).catch(() => null) : null]);
+      // Both libraries as one: your own games after the shared ones, with your own favourites and history.
+      this.lib = mine?.configured ? {
+        ...shared, configured: shared.configured || mine.games.length > 0, personal: true, mineFolder: mine.folder,
+        games: [...(shared.games || []), ...mine.games.map((g) => ({ ...g, mine: true }))],
+        favorites: [...(shared.favorites || []), ...(mine.favorites || [])], played: { ...(shared.played || {}), ...(mine.played || {}) },
+      } : shared;
     } catch (err) {
       clear(this.stage, h('div', { class: 'gc-empty' }, h('h2', {}, 'Couldn’t load your games'), h('p', {}, err.message),
         this.navBtn('Try again', () => this.load(true), 'retry')));
@@ -254,7 +266,7 @@ class GameConsole {
         el.classList.add('has-art');
       };
       img.onerror = () => { GameConsole.noArt.add(game.id); art.remove(); };
-      img.src = `/portal/games/art?id=${game.id}${prefs.v ? `&v=${prefs.v}` : ''}`;
+      img.src = `/portal/games${gbase(game)}/art?id=${game.id}${prefs.v ? `&v=${prefs.v}` : ''}`;
       const art = h('span', { class: 'gc-cover-art' }, img);
       el.append(art);
     }
@@ -370,7 +382,7 @@ class GameConsole {
           h('div', { class: 'gc-small' }, game.path))));
       // Saves decide between "Play" and "Continue".
       let saves = { states: [] };
-      if (!game.sample && !sys.unsupported) { try { saves = await api(`/saves/${game.id}`); } catch { /* none */ } }
+      if (!game.sample && !sys.unsupported) { try { saves = await api(`${gbase(game)}/saves/${game.id}`); } catch { /* none */ } }
       const auto = saves.states.find((s) => s.slot === 'auto');
       const playable = !game.sample && !sys.unsupported;
       clear(actions,
@@ -384,7 +396,7 @@ class GameConsole {
       if (slots.length && playable) {
         statesBox.append(h('h3', {}, 'Saved states'), h('div', { class: 'gc-state-row' }, slots.map((s) => {
           const b = h('button', { class: 'gc-state', 'data-nav': `d:state:${s.slot}` },
-            s.shot ? h('img', { src: `/portal/games/saves/${game.id}/shot/${s.slot}?t=${s.at}`, alt: '' }) : h('span', { class: 'gc-state-ph' }, s.slot),
+            s.shot ? h('img', { src: `/portal/games${gbase(game)}/saves/${game.id}/shot/${s.slot}?t=${s.at}`, alt: '' }) : h('span', { class: 'gc-state-ph' }, s.slot),
             h('span', {}, `Slot ${s.slot}`), h('span', { class: 'gc-small' }, timeAgo(s.at)));
           b.onActivate = () => this.play(game, s.slot);
           return b;
@@ -443,8 +455,8 @@ class GameConsole {
       const busy = async (label, fn) => {
         try { toast(label, { icon: appIcon.console, timeout: 1200 }); changed(await fn()); } catch (err) { if (err) toastError(err, 'Couldn’t change the box art'); }
       };
-      const upload = async (blob) => changed(await api(`/art?id=${game.id}`, { method: 'PUT', body: new Uint8Array(await (await shrinkPicture(blob)).arrayBuffer()), headers: { 'Content-Type': 'application/octet-stream' } }));
-      const settings = (values) => busy('Saving…', () => api('/art-settings', { method: 'POST', body: JSON.stringify({ id: game.id, ...values }) }));
+      const upload = async (blob) => changed(await api(`${gbase(game)}/art?id=${game.id}`, { method: 'PUT', body: new Uint8Array(await (await shrinkPicture(blob)).arrayBuffer()), headers: { 'Content-Type': 'application/octet-stream' } }));
+      const settings = (values) => busy('Saving…', () => api(`${gbase(game)}/art-settings`, { method: 'POST', body: JSON.stringify({ id: game.id, ...values }) }));
       const fromDevice = () => {
         const input = h('input', { type: 'file', accept: 'image/png,image/jpeg,image/webp,image/gif', style: { display: 'none' } });
         input.onchange = async () => { const f = input.files?.[0]; input.remove(); if (f) try { await upload(f); toast('Box art changed', { icon: appIcon.console, timeout: 1500 }); } catch (err) { toastError(err, 'Couldn’t use that picture'); } };
@@ -484,8 +496,8 @@ class GameConsole {
     if (!game) return;
     const on = !this.model.favorites.has(game.id);
     try {
-      const r = await api('/settings', { method: 'POST', body: JSON.stringify({ favorite: game.id, on }) });
-      this.lib.favorites = r.favorites;
+      const r = await api(`${gbase(game)}/settings`, { method: 'POST', body: JSON.stringify({ favorite: game.id, on }) });
+      this.lib.favorites = [...this.lib.favorites.filter((id) => !this.byId.get(id) || Boolean(this.byId.get(id).mine) !== Boolean(game.mine)), ...r.favorites];
       this.buildModel();
       toast(on ? 'Added to favorites' : 'Removed from favorites', { body: game.title, icon: appIcon.console, timeout: 1600 });
       if (rerender && !this.layers.length) this.render(`game:${game.id}`);
@@ -499,7 +511,7 @@ class GameConsole {
     const sys = SYSTEMS[game.system];
     const accent = getComputedStyle(this.root).getPropertyValue('--gc-accent').trim();
     const base = new URL('../../../console-player.html', import.meta.url);
-    base.search = new URLSearchParams({ id: game.id, ...(resume ? { resume } : {}), ...(/^#[0-9a-f]{6}$/i.test(accent) ? { accent } : {}) }).toString();
+    base.search = new URLSearchParams({ id: game.id, ...(game.mine ? { lib: 'mine' } : {}), ...(resume ? { resume } : {}), ...(/^#[0-9a-f]{6}$/i.test(accent) ? { accent } : {}) }).toString();
     // PSP's emulator needs a page of its own (threads need an isolated page).
     if (sys?.threads) {
       window.open(base.href, '_blank');

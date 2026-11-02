@@ -241,7 +241,7 @@ function fromFileName(file) {
   return m ? { title: m[1].trim(), author: m[2].trim() } : { title: stem, author: '' };
 }
 
-function createEbooks({ dataDir, getFolder, mock = false, sample = null, getSevenZip = () => null, getConvertPath = () => '', resolveShared = null, filesEnabled = () => false, getKindle = () => ({}) }) {
+function createEbooks({ dataDir, getFolder, mock = false, sample = null, getSevenZip = () => null, getConvertPath = () => '', resolveShared = null, filesEnabled = () => false, getKindle = () => ({}), idSalt = '', readerKey = () => null }) {
   const stateFile = path.join(dataDir, 'ebooks.json');
   const coverDir = path.join(dataDir, 'ebook-covers');
   const convDir = path.join(dataDir, 'ebook-converted');
@@ -289,7 +289,9 @@ function createEbooks({ dataDir, getFolder, mock = false, sample = null, getSeve
     return writing;
   }
 
-  const idFor = (rel) => crypto.createHash('sha1').update(rel).digest('hex').slice(0, 16);
+  const idFor = (rel) => crypto.createHash('sha1').update(`${idSalt}${rel}`).digest('hex').slice(0, 16);
+  // Reading places of the person asking: the first admin's are the ones from before accounts.
+  const readingOf = (s) => { const k = readerKey(); if (!k) return s.books; s.byUser ||= {}; return (s.byUser[k] ||= {}); };
 
   async function walk(root, rel = '', depth = 0, out = [], dirs = []) {
     if (depth > 8 || out.length > 20000) return out;
@@ -545,7 +547,7 @@ function createEbooks({ dataDir, getFolder, mock = false, sample = null, getSeve
       if (p === '/library' && req.method === 'GET') {
         const lib = await library(url.searchParams.get('refresh') === '1');
         const k = getKindle();
-        return sendJson(res, 200, { ...lib, mock, reading: load().books, sendToKindle: k.email && k.smtp?.host ? k.email : null });
+        return sendJson(res, 200, { ...lib, mock, reading: readingOf(load()), sendToKindle: k.email && k.smtp?.host ? k.email : null });
       }
       let m = /^\/file\/([0-9a-f]{16})$/.exec(p);
       if (m && (req.method === 'GET' || req.method === 'HEAD')) {
@@ -678,19 +680,20 @@ function createEbooks({ dataDir, getFolder, mock = false, sample = null, getSeve
         cache.at = 0;
         return sendJson(res, 200, { ok: true });
       }
-      if (p === '/state' && req.method === 'GET') return sendJson(res, 200, { books: load().books });
+      if (p === '/state' && req.method === 'GET') return sendJson(res, 200, { books: readingOf(load()) });
       if (p === '/state' && req.method === 'POST') {
         const body = await readJson(req);
         const key = cleanKey(body.key);
         if (!key) throw new BookError(400, 'Which book?');
         const s = load();
-        if (body.forget) delete s.books[key];
-        else s.books[key] = cleanState(s.books[key], body);
+        const mine = readingOf(s);
+        if (body.forget) delete mine[key];
+        else mine[key] = cleanState(mine[key], body);
         // Keep the 1000 most recently read.
-        const keys = Object.keys(s.books);
-        if (keys.length > 1000) keys.sort((a, b) => (s.books[a].at || 0) - (s.books[b].at || 0)).slice(0, keys.length - 1000).forEach((k) => delete s.books[k]);
+        const keys = Object.keys(mine);
+        if (keys.length > 1000) keys.sort((a, b) => (mine[a].at || 0) - (mine[b].at || 0)).slice(0, keys.length - 1000).forEach((k) => delete mine[k]);
         await save();
-        return sendJson(res, 200, { state: s.books[key] || null });
+        return sendJson(res, 200, { state: mine[key] || null });
       }
       return sendJson(res, 404, { error: 'Not found' });
     } catch (err) {

@@ -126,16 +126,23 @@ function createFamilyAuth({ load, persist, onUsersChanged = () => {} }) {
     return { first, last, email };
   }
 
-  // ctx: { portal: signed in to MediaDesk, ip }
+  // Someone using the organizer through their MediaDesk account (see family.js handle).
+  const viaMediaDesk = (pu) => ({ id: `md-${pu.id}`, username: '', first: pu.name || 'MediaDesk', last: '', email: '', role: pu.role === 'kid' ? 'member' : 'parent', profile: pu.profile || null, viaMediaDesk: true });
+
+  // ctx: { portal: signed in to MediaDesk (with the organizer), portalUser, ip }
   async function route(req, res, p, ctx, { sendJson, readJson }) {
-    const me = userFromReq(req);
-    const isParent = ctx.portal || me?.role === 'parent';
+    const own = userFromReq(req);
+    const me = own || (ctx.portal && ctx.portalUser ? viaMediaDesk(ctx.portalUser) : null);
+    const isParent = me?.role === 'parent';
     const a = auth();
     const save = async () => { await persist(); onUsersChanged(); };
 
     if (p === '/auth/session' && req.method === 'GET') {
       return sendJson(res, 200, {
-        user: publicUser(me), portal: ctx.portal, parent: Boolean(isParent),
+        // Through MediaDesk: parents as before (no account of their own; the parent PIN still applies),
+        // kids as their family profile.
+        user: own ? publicUser(own) : me && me.role !== 'parent' ? { id: me.id, first: me.first, last: '', role: me.role, profile: me.profile, viaMediaDesk: true } : null,
+        profile: me?.profile || null, portal: ctx.portal, parent: Boolean(isParent),
         // No accounts yet: the first parent's account is made from MediaDesk.
         setup: Object.keys(a.users).length === 0,
       });
@@ -167,7 +174,7 @@ function createFamilyAuth({ load, persist, onUsersChanged = () => {} }) {
       const body = await readJson(req);
       const first = Object.keys(a.users).length === 0;
       let invite = null;
-      if (!(first && ctx.portal)) {
+      if (!(first && ctx.portal && isParent)) {
         invite = validInvite(body.code);
         if (!invite) throw new AuthError(400, first ? 'Enter the invite code made in MediaDesk (Family Organizer → Settings → Users)' : 'That invite code isn’t valid (it may have been used or expired)');
       }
@@ -185,11 +192,11 @@ function createFamilyAuth({ load, persist, onUsersChanged = () => {} }) {
       return sendJson(res, 200, { user: publicUser(u) }, { 'Set-Cookie': cookie(req, makeToken(u), SESSION_DAYS * 86400) });
     }
 
-    if (!ctx.portal && !me) throw new AuthError(401, 'Sign in to the Family Organizer');
+    if (!me) throw new AuthError(401, 'Sign in to the Family Organizer');
 
     // Your own account.
     if (p === '/auth/me' && req.method === 'POST') {
-      if (!me) throw new AuthError(400, 'You’re using the organizer through MediaDesk, without an account');
+      if (!own) throw new AuthError(400, 'You’re using the organizer through your MediaDesk account: change your details in MediaDesk (Settings → My account)');
       const body = await readJson(req);
       Object.assign(me, profileFields(body, me));
       if (Object.values(a.users).some((x) => x !== me && x.email === me.email)) throw new AuthError(409, 'There’s already an account with that email address');
@@ -283,7 +290,7 @@ function createFamilyAuth({ load, persist, onUsersChanged = () => {} }) {
     await persist();
   }
 
-  return { route, userFromReq, seedDemo, AuthError };
+  return { route, userFromReq, viaMediaDesk, seedDemo, AuthError };
 }
 
 module.exports = { createFamilyAuth };

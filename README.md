@@ -4,6 +4,7 @@ One web portal for **Radarr, Sonarr, NZBGet, Jellyfin, Plex and PiKVM**, laid ou
 
 ## Features
 
+- **Users**: accounts with admin, standard and custom roles, the apps each person can use, two-step sign-in with Google Authenticator, shared and personal libraries, and links into the Family Organizer and Trip Planner. See [Users and sign-in](#users-and-sign-in).
 - **Desktop shell**: windows that snap to screen edges (drag to the left/right edge, or the top to maximise), minimise to the dock, and remember their positions. Includes a light/dark theme, accent colours, built-in wallpapers or your own pictures (Fill, Fit, Stretch, Centre or Tile), and a mobile layout.
 - **Dock, like macOS**: by default it shows Search & apps, the apps you have open, and Settings. Turn off *Show only open apps* in Settings → Dock & Desktop to keep your chosen apps in it instead; then you can drag apps to reorder them, drag one off to remove it, or use *Keep in Dock* on an open app. You can also choose its size, magnification and screen edge (left, bottom or right), hide it automatically, and show or hide open-app dots.
 - **Arrange the desktop**: drag icons anywhere. Drop one app onto another to make a named group, like folders on Android; tap a group to open it, rename it, or drag apps back out. Drop a desktop icon onto the dock to add it. On phones, hold an icon and then drag it.
@@ -75,7 +76,7 @@ docker compose up -d --build
 # open http://<your-server>:8080, then open Settings and connect each app
 ```
 
-Edit `PORTAL_PASSWORD` in `docker-compose.yml` first. Settings you save in the UI are stored in `./config/config.json`.
+Edit `PORTAL_PASSWORD` in `docker-compose.yml` first: it becomes the password of the first account, **admin** (see [Users and sign-in](#users-and-sign-in)). Settings you save in the UI are stored in `./config/config.json`.
 
 If your media apps run in the same Compose project or Docker network, use their container names as URLs (for example `http://radarr:7878`).
 
@@ -126,7 +127,7 @@ You can configure MediaDesk in three ways. Environment variables override the co
 
 | Variable | Purpose |
 | --- | --- |
-| `PORTAL_PASSWORD` | Turns on the lock screen. **Set this** if anyone else can reach the portal. |
+| `PORTAL_PASSWORD` | The first time MediaDesk starts without accounts, this becomes the password of an **admin** account (sign-in turns on). After that, accounts are managed in *Settings → Users*. **Set this** (or make an account in Settings → Users) if anyone else can reach the portal. |
 | `RADARR_URL`, `RADARR_API_KEY` | Radarr → *Settings → General → API Key* |
 | `SONARR_URL`, `SONARR_API_KEY` | Sonarr → *Settings → General → API Key* |
 | `NZBGET_URL`, `NZBGET_USERNAME`, `NZBGET_PASSWORD` | NZBGet → *Settings → Security* (`ControlUsername` / `ControlPassword`) |
@@ -228,15 +229,31 @@ password covers it), the AI assistant and MCP server, plugins, TREK Studio photo
 3D terrain, electric road-trip planning, the Journal and Vacay, group chat, other languages, offline use as
 an installed app, reading bookings from e-mails, and the Immich, AirTrail and Dawarich connections.
 
+## Users and sign-in
+
+MediaDesk has user accounts, managed by admins in **Settings → Users**:
+
+- **Roles.** *Admin*: everything, including MediaDesk's settings and the people who use it. *Standard*: every app except the admin-only ones (PiKVM and the Log Viewer, unless an admin ticks them), plus their own settings and personal libraries. *Custom*: only the apps an admin ticks. Settings, Search and Preview are always there. The server checks every request, so an app someone doesn't have can't be reached any other way, and services they can't use (and their dashboard widgets) look unset to them. Apps that only open files (Music, eBook Reader, Preview) can read shared folders but not change them.
+- **Shared folders.** Each person sees all of Files' shared folders, or only the ones picked for them.
+- **Two-step sign-in.** In *Settings → My account*, anyone can turn on codes from Google Authenticator (or Microsoft Authenticator, Authy, 1Password…): scan the QR code, type a code, and keep the 10 recovery codes. Then signing in asks for the code after the password. An admin can turn it off for someone who has lost their phone.
+- **Sessions.** Changing your password, *Sign out everywhere else*, an admin's *Sign them out everywhere*, or turning an account off ends that person's other sessions. Sign-in attempts are rate-limited per address and per account. The screensaver's lock asks the same person for their password (and code), or lets someone else sign in.
+- **Personal libraries.** Everyone has their own library in the eBook Reader ("Mine", next to the shared one) and the Game Console, and **My files** in Files: a folder of their own (Books, Games and Files) under `users/<user name>` next to MediaDesk's settings, or a folder set in Settings → Users. Reading places, bookmarks, game saves, favourites, play history, app preferences and the Send to Kindle address are each person's own; in the shared Game Console library others' saves go in `Saves/<user name>`. Admins and standard users can add books to the shared library; custom users to their own. What a browser keeps (desktop layout, appearance, window places) is kept apart for each person who signs in on it.
+- **Family Organizer.** Each account can be a parent or a kid in the family, linked to their family profile: kids get their own chores, stars and lists and can't change parent things, as with the organizer's own accounts (which still work on their own at `/family`).
+- **Trip Planner.** A new trip belongs to whoever made it, with them as the first traveller. Travellers can be linked to MediaDesk accounts; a trip is seen by its travellers and admins, or by everyone if its settings say so (trips from before accounts are). Each person's calendar feed has their own trips, and Notes and Costs start with "you".
+
+**Before accounts.** Without accounts MediaDesk is open to anyone who can reach it (as before, with a warning when it starts). A portal password from before becomes the password of the **admin** account, and its owner keeps their reading places, saves and desktop. With no password, *Settings → Users → Make my admin account* turns sign-in on.
+
+**Forgotten password.** On the server: `node server.js --reset-password <user name> <new password>` (with Docker: `docker compose exec mediadesk node server.js --reset-password admin <new password>`). This also turns off that account's two-step sign-in.
+
 ## Custom wallpapers
 
 In Settings → Appearance, choose **Add picture…** to upload one from your device or pick one from the shared folders. You can also right-click a picture in Files and choose **Set as desktop wallpaper**. Pictures are kept in a `wallpapers` folder next to `config.json` (up to 24 pictures, 40 MB each), so every device can use them.
 
 ## Security notes
 
-- Logging in to MediaDesk gives full API access to every connected service. Treat the portal password like an admin password.
+- An admin account has full access to every connected service and MediaDesk's settings: give others the *standard* or *custom* role, and turn on two-step sign-in for admins.
 - For access from outside your network, put MediaDesk behind a reverse proxy with HTTPS (Caddy, Traefik, nginx, or SWAG). If the proxy sends `X-Forwarded-Proto: https`, the session cookie is marked `Secure`.
-- To sign out, click the MediaDesk logo at the top left and choose **Log out**. Login attempts are rate-limited, and sessions last 30 days. Changing the password signs everyone out.
+- To sign out, click the MediaDesk logo at the top left and choose **Sign out**. Sign-in attempts are rate-limited, and sessions last 30 days. Accounts are kept in `users.json` next to the config (passwords as scrypt hashes), written with `0600` permissions.
 - The config file is written with `0600` permissions.
 
 ## Compatibility

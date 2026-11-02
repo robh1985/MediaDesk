@@ -5,6 +5,7 @@
 import { h, clear, toast, toastError, formatBytes } from '../../ui.js';
 import { openApp } from '../../wm.js';
 import { formatOf } from './sources.js';
+import { baseOf, uploadUrl, loadLibrary, destinations } from './library.js';
 
 const FIRE = /\bSilk\b|\bKF[A-Z]{2,5}\b|Kindle/i.test(navigator.userAgent);
 const ANDROID = /Android/i.test(navigator.userAgent);
@@ -47,8 +48,8 @@ function dialog(title, body, { wide = false } = {}) {
 export function kindleDialog(app, b) {
   const lib = app.lib || {};
   const where = b.shared ? `?${new URLSearchParams({ root: b.shared.root, path: b.shared.path })}` : '';
-  const copyPath = b.shared ? `shared/kindle${where}` : `file/${b.id}/kindle`;
-  const sendPath = b.shared ? `shared/send-to-kindle${where}` : `file/${b.id}/send-to-kindle`;
+  const copyPath = b.shared ? `shared/kindle${where}` : `${baseOf(b)}file/${b.id}/kindle`;
+  const sendPath = b.shared ? `shared/send-to-kindle${where}` : `${baseOf(b)}file/${b.id}/send-to-kindle`;
   const calibre = Boolean(lib.tools?.calibre);
   if (b.drm) { toast('This book has DRM', { type: 'error', body: 'It was bought from Amazon, so only the Kindle app it came from can open it.' }); return; }
   // Download: as it is, or made into AZW3 by Calibre on the server.
@@ -111,25 +112,27 @@ export function kindleDialog(app, b) {
 // how a file is uploaded.
 function libraryTarget(app) {
   const lib = app.lib || {};
-  const folders = lib.folders || [];
   const suggested = FIRE ? 'Kindle Fire' : 'From my device';
-  const sel = h('select', { class: 'input' }, h('option', { value: '__new' }, 'A new folder…'), h('option', { value: '' }, 'The books folder itself'), folders.map((f) => h('option', { value: f }, f)));
-  sel.value = folders.includes(suggested) ? suggested : '__new';
+  const places = destinations(lib);
+  // A new folder: in your own library if you have one (and can't add to the shared one), else the shared one.
+  const newIn = lib.personal && !lib.sharedWritable ? 'mine:' : '';
+  const sel = h('select', { class: 'input' }, h('option', { value: '__new' }, lib.personal ? `A new folder in ${newIn ? 'my library' : 'the shared library'}…` : 'A new folder…'), places.map(([v, l]) => h('option', { value: v }, l)));
+  sel.value = places.some(([v]) => v === `${newIn}${suggested}`) ? `${newIn}${suggested}` : '__new';
   const newName = h('input', { class: 'input', value: suggested, 'aria-label': 'New folder name' });
   const showNew = () => { newName.hidden = sel.value !== '__new'; };
   sel.addEventListener('change', showNew);
   showNew();
   return {
     problem: !lib.configured ? 'Choose a books folder first (Settings → eBook Reader)' : !lib.writable ? 'MediaDesk can’t write to the books folder' : null,
-    intro: 'Choose books on this device to copy to the MediaDesk server. They’re added to your library, so you can read them in the eBook Reader on any device.',
+    intro: lib.personal ? 'Choose books on this device to copy to the MediaDesk server, into your own library or the shared one, so you can read them in the eBook Reader on any device.' : 'Choose books on this device to copy to the MediaDesk server. They’re added to your library, so you can read them in the eBook Reader on any device.',
     picker: h('div', { class: 'ebk-krowfields' }, h('label', { class: 'field' }, h('span', {}, 'Put them in'), sel), newName),
-    // Books already anywhere in the library (same file name and size).
+    // Books already anywhere in the libraries (same file name and size).
     async begin() {
-      const dest = sel.value === '__new' ? newName.value.trim().replace(/[\\/]+/g, ' ') || suggested : sel.value;
+      const dest = sel.value === '__new' ? `${newIn}${newName.value.trim().replace(/[\\/]+/g, ' ') || suggested}` : sel.value;
       const have = new Set(app.lib.books.map((x) => `${x.path.split('/').pop().toLowerCase()}|${x.size}`));
-      return { has: (f) => have.has(`${f.name.toLowerCase()}|${f.size}`), upload: (f, onProgress) => upload(`/portal/ebooks/upload?${new URLSearchParams({ name: f.name, folder: dest })}`, f, onProgress) };
+      return { has: (f) => have.has(`${f.name.toLowerCase()}|${f.size}`), upload: (f, onProgress) => upload(uploadUrl(dest, f.name), f, onProgress) };
     },
-    async end(counts) { app.lib = await call('library?refresh=1').catch(() => app.lib); if (counts.added && !app.book) app.showLibrary(); },
+    async end(counts) { app.lib = await loadLibrary(call, true).catch(() => app.lib); if (counts.added && !app.book) app.showLibrary(); },
   };
 }
 

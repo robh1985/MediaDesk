@@ -37,6 +37,8 @@ export class TripStore {
   all(col) { return Object.values(this.doc[col] || {}); }
   get(col, id) { return this.doc[col]?.[id] || null; }
   member(id) { return this.trip.members.find((m) => m.id === id) || null; }
+  // The traveller who is you (linked to your MediaDesk account), if any.
+  meMember() { const uid = window.mediadeskSession?.user?.id; return uid ? this.trip.members.find((m) => m.userId === uid) || null : null; }
   on(fn) { this.listeners.add(fn); return () => this.listeners.delete(fn); }
   emit(why) { for (const fn of this.listeners) fn(why); }
 

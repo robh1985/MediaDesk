@@ -35,7 +35,9 @@ const api = async (url, opts = {}) => {
   if (!res.ok) { let msg = `HTTP ${res.status}`; try { msg = (await res.json()).error || msg; } catch { /* not JSON */ } throw Object.assign(new Error(msg), { status: res.status }); }
   return res;
 };
-const fileUrl = (rel) => `/portal/games/file/${rel.split('/').map(encodeURIComponent).join('/')}`;
+// A game in someone's own library is at /portal/games/mine/… (the emulator is shared).
+const GAMES = new URLSearchParams(location.search).get('lib') === 'mine' ? '/portal/games/mine' : '/portal/games';
+const fileUrl = (rel) => `${GAMES}/file/${rel.split('/').map(encodeURIComponent).join('/')}`;
 const toast = (text) => {
   const t = h('div', { class: 'toast' }, text);
   document.body.append(t);
@@ -66,7 +68,7 @@ async function start() {
     return;
   }
   let lib;
-  try { lib = await (await api('/portal/games/library')).json(); } catch (err) { return fail('Couldn’t load your games', err.message); }
+  try { lib = await (await api(`${GAMES}/library`)).json(); } catch (err) { return fail('Couldn’t load your games', err.message); }
   game = lib.games.find((g) => g.id === gameId);
   if (!game) return fail('Game not found', 'It may have been moved or deleted from the games folder.');
   system = game.system;
@@ -82,8 +84,8 @@ async function start() {
 
   // Battery save and the state to resume from, fetched before the game starts.
   const [battery, resume] = await Promise.all([
-    api(`/portal/games/saves/${gameId}/battery`).then((r) => r.arrayBuffer()).catch(() => null),
-    params.get('resume') ? api(`/portal/games/saves/${gameId}/state/${params.get('resume')}`).then((r) => r.arrayBuffer()).catch(() => null) : null,
+    api(`${GAMES}/saves/${gameId}/battery`).then((r) => r.arrayBuffer()).catch(() => null),
+    params.get('resume') ? api(`${GAMES}/saves/${gameId}/state/${params.get('resume')}`).then((r) => r.arrayBuffer()).catch(() => null) : null,
   ]);
 
   const bios = settings.bios && lib.bios.some((b) => b.path === settings.bios) ? settings.bios : null;
@@ -144,7 +146,7 @@ async function start() {
       if (resume?.byteLength) {
         setTimeout(() => { try { gm.loadState(new Uint8Array(resume)); toast('Continuing where you left off'); } catch { toast('Couldn’t load the saved state'); } }, 300);
       }
-      api('/portal/games/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ played: gameId, start: true }) }).catch(() => {});
+      api(`${GAMES}/settings`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ played: gameId, start: true }) }).catch(() => {});
       post({ type: 'console-started' });
       assignPads();
       // Touch screens have no Esc or Home button: give them one for the game menu.
@@ -222,7 +224,7 @@ async function syncBattery() {
     if (!data?.length) return;
     const hash = quickHash(data);
     if (hash === lastBatteryHash) return;
-    await api(`/portal/games/saves/${gameId}/battery`, { method: 'PUT', body: data });
+    await api(`${GAMES}/saves/${gameId}/battery`, { method: 'PUT', body: data });
     lastBatteryHash = hash;
   } catch { /* try again next time */ }
 }
@@ -234,15 +236,15 @@ async function saveState(slot) {
     const state = gm.getState().slice();
     // The picture was taken as the menu opened (the emulator only draws one while running).
     const shot = menuShot ? await menuShot : null;
-    await api(`/portal/games/saves/${gameId}/state/${slot}`, { method: 'PUT', body: state });
-    if (shot) await api(`/portal/games/saves/${gameId}/shot/${slot}`, { method: 'PUT', body: shot }).catch(() => {});
+    await api(`${GAMES}/saves/${gameId}/state/${slot}`, { method: 'PUT', body: state });
+    if (shot) await api(`${GAMES}/saves/${gameId}/shot/${slot}`, { method: 'PUT', body: shot }).catch(() => {});
     return true;
   } catch (err) { toast(`Couldn’t save: ${err.message}`); return false; }
 }
 
 async function loadState(slot) {
   try {
-    const buf = await (await api(`/portal/games/saves/${gameId}/state/${slot}`)).arrayBuffer();
+    const buf = await (await api(`${GAMES}/saves/${gameId}/state/${slot}`)).arrayBuffer();
     emu.gameManager.loadState(new Uint8Array(buf));
     return true;
   } catch (err) { toast(err.status === 404 ? 'Nothing saved in that slot' : `Couldn’t load: ${err.message}`); return false; }
@@ -327,7 +329,7 @@ function showMain(focus = 'resume') {
 
 async function showSlots(mode) {
   let list = { states: [] };
-  try { list = await (await api(`/portal/games/saves/${gameId}`)).json(); } catch { /* none yet */ }
+  try { list = await (await api(`${GAMES}/saves/${gameId}`)).json(); } catch { /* none yet */ }
   const bySlot = Object.fromEntries(list.states.map((s) => [s.slot, s]));
   const slots = mode === 'load' ? ['auto', '1', '2', '3', '4', '5', '6', '7', '8', '9'] : ['1', '2', '3', '4', '5', '6', '7', '8', '9'];
   const card = (slot) => {
@@ -337,7 +339,7 @@ async function showSlots(mode) {
       if (mode === 'save') { if (await saveState(slot)) { toast(`Saved to slot ${slot}`); closeMenu(); } }
       else if (await loadState(slot)) { toast(slot === 'auto' ? 'Loaded your last session' : `Loaded slot ${slot}`); closeMenu(); }
     } },
-    h('div', { class: 'shot' }, st?.shot ? h('img', { src: `/portal/games/saves/${gameId}/shot/${slot}?t=${st.at}`, alt: '' }) : h('span', {}, slot === 'auto' ? 'A' : slot)),
+    h('div', { class: 'shot' }, st?.shot ? h('img', { src: `${GAMES}/saves/${gameId}/shot/${slot}?t=${st.at}`, alt: '' }) : h('span', {}, slot === 'auto' ? 'A' : slot)),
     h('div', { class: 'slot-name' }, slot === 'auto' ? 'Last session' : `Slot ${slot}`),
     h('div', { class: 'slot-when' }, when));
   };
@@ -386,7 +388,7 @@ async function quit() {
     if (!menuOpen) menuShot = Promise.race([emu.gameManager.screenshot().then((png) => png.slice()), new Promise((r) => setTimeout(() => r(null), 800))]).catch(() => null);
     if (settings.autosave !== false && emu.gameManager?.supportsStates?.()) await saveState('auto');
     const seconds = Math.round((Date.now() - startedAt) / 1000);
-    await api('/portal/games/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ played: gameId, seconds }) }).catch(() => {});
+    await api(`${GAMES}/settings`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ played: gameId, seconds }) }).catch(() => {});
     try { emu.pause?.(); } catch { /* gone */ }
   }
   if (embedded) post({ type: 'console-exit' });

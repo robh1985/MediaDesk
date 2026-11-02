@@ -85,7 +85,8 @@ export class CostsView {
     if (!rateRow.hidden && !rate.value) lookRate();
     // Who paid: one person, or several with amounts.
     const paidBy = { ...e.paidBy };
-    if (!Object.keys(paidBy).length) paidBy[trip.members[0].id] = Number(e.amount) || 0;
+    // You paid, to start with (or the first traveller).
+    if (!Object.keys(paidBy).length) paidBy[(this.store.meMember() || trip.members[0]).id] = Number(e.amount) || 0;
     const payBox = h('div', { class: 'tp-split' });
     const drawPay = () => {
       const many = Object.keys(paidBy).length > 1;

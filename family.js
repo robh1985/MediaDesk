@@ -483,17 +483,20 @@ function createFamily({ dataDir, mock = false }) {
   const PARENT_COLLECTIONS = new Set(['members', 'calendars']);
 
   // ctx: { portal: signed in to MediaDesk, ip }
-  async function handle(req, res, url, { sendJson, readJson, readBody, portal = false, ip = '' }) {
+  // portalUser: someone signed in to MediaDesk with the Family Organizer, as an admin linked them:
+  // { id, name, role: 'parent' | 'kid', profile: their family member, or null }.
+  async function handle(req, res, url, { sendJson, readJson, readBody, portal = false, portalUser = null, ip = '' }) {
     const p = url.pathname.replace(/^\/portal\/family/, '') || '/';
     try {
       if (p.startsWith('/auth/')) {
-        const done = await auth.route(req, res, p, { portal, ip }, { sendJson, readJson });
+        const done = await auth.route(req, res, p, { portal, portalUser, ip }, { sendJson, readJson });
         if (done === null) return sendJson(res, 404, { error: 'Not found' });
         return done;
       }
-      const me = auth.userFromReq(req);
-      if (!portal && !me) return sendJson(res, 401, { error: 'Sign in to the Family Organizer', signin: true });
-      const parent = portal || me.role === 'parent';
+      // A Family Organizer account of its own, or the MediaDesk account linked to the family.
+      const me = auth.userFromReq(req) || (portal && portalUser ? auth.viaMediaDesk(portalUser) : null);
+      if (!me) return sendJson(res, 401, { error: 'Sign in to the Family Organizer', signin: true });
+      const parent = me.role === 'parent';
       const needParent = () => { if (!parent) throw new FamilyError(403, 'Only a parent can change that'); };
       // Recipe photos, importing from websites, and Mealie.
       if (p === '/mealie' || p.startsWith('/mealie/') || p.startsWith('/recipes/')) {

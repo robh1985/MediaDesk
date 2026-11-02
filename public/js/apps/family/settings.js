@@ -33,7 +33,7 @@ export class SettingsView {
     this.el = el;
     if (section) this.section = ALIASES[section] || section;
     const session = this.app.session || {};
-    const sections = [session.user ? ['account', 'My account', ICONS.user, '#f08c00'] : null, ['accounts', 'Accounts', ICONS.family, '#7048e8'], ['calendars', 'Calendars', ICONS.calendar, '#1c7ed6'], ['general', 'General', ICONS.sliders, '#0ca678'],
+    const sections = [session.user && !session.user.viaMediaDesk ? ['account', 'My account', ICONS.user, '#f08c00'] : null, ['accounts', 'Accounts', ICONS.family, '#7048e8'], ['calendars', 'Calendars', ICONS.calendar, '#1c7ed6'], ['general', 'General', ICONS.sliders, '#0ca678'],
       ['display', 'Photo frame & sleep', ICONS.photos, '#d6336c'], ['chores', 'Chores/Routines', ICONS.chores, '#2f9e44']].filter(Boolean);
     if (!sections.some(([id]) => id === this.section)) this.section = sections[0][0];
     // The sections: a menu beside the left one (a grid across the top on a phone).

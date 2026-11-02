@@ -5,6 +5,7 @@
 import { h, clear, toast, toastError, confirmDialog } from '../../ui.js';
 import { appIcon } from '../../icons.js';
 import { api, TripStore, newId } from './store.js';
+import { state } from '../../api.js';
 import { PlanView } from './plan.js';
 import { BookingsView } from './bookings.js';
 import { CostsView } from './costs.js';
@@ -78,7 +79,7 @@ class TripPlanner {
     if (this.filter === 'past') shown.reverse();
     const next = groups.upcoming.find((x) => x.start && x.start >= t) || groups.upcoming.find((x) => x.start);
     const card = (x) => h('article', { class: `tp-card ${x.archived ? 'archived' : ''}`, style: { '--c': x.color || '#1c7ed6' }, tabindex: 0, onclick: (e) => { if (!e.target.closest('button')) this.openTrip(x.id); }, onkeydown: (e) => { if (e.key === 'Enter') this.openTrip(x.id); } },
-      h('div', { class: 'tp-card-cover' }, h('span', {}, x.cover || '🗺️'), x.start ? h('span', { class: 'tp-card-count' }, countdown(x)) : null),
+      h('div', { class: 'tp-card-cover' }, h('span', {}, x.cover || '🗺️'), x.start ? h('span', { class: 'tp-card-count' }, countdown(x)) : null, this.list.accounts && x.visibility === 'members' ? h('span', { class: 'tp-card-lock', title: 'Only its travellers can see it' }, '🔒') : null),
       h('div', { class: 'tp-card-body' },
         h('h3', {}, x.title),
         h('p', { class: 'muted small' }, [x.destination, x.start ? fmtRange(x.start, x.end) : 'No dates yet'].filter(Boolean).join(' · ')),
@@ -276,9 +277,19 @@ class TripPlanner {
     drawCovers();
     let members = t.members.map((m) => ({ ...m }));
     const memberBox = h('div', { class: 'tp-members' });
+    const vis = select([['members', '🔒 Only its travellers'], ['everyone', 'Everyone with the Trip Planner']], t.visibility || 'everyone');
+    // With accounts: who each traveller is on MediaDesk (they then see the trip, and it's "you" for them).
+    let people = [];
+    if (state.config?.auth) fetch('/portal/users/directory', { credentials: 'same-origin' }).then((r) => r.json()).then((d) => { people = d.users || []; drawMembers(); }).catch(() => {});
+    const linkSel = (m) => (people.length ? h('select', { class: 'input tp-member-link', 'aria-label': `${m.name || 'Traveller'} on MediaDesk`, onchange: (e) => {
+      m.userId = e.target.value || undefined;
+      const p = people.find((x) => x.id === m.userId);
+      if (p && !m.name.trim()) { m.name = p.name; drawMembers(); }
+    } }, h('option', { value: '' }, 'Not on MediaDesk'), people.map((p) => h('option', { value: p.id, selected: m.userId === p.id, disabled: members.some((o) => o !== m && o.userId === p.id) }, `👤 ${p.name}`))) : null);
     const drawMembers = () => clear(memberBox, members.map((m, i) => h('div', { class: 'tp-member' },
       h('input', { type: 'color', value: m.color, 'aria-label': 'Colour', oninput: (e) => { m.color = e.target.value; } }),
       input({ value: m.name, 'aria-label': 'Name', oninput: (e) => { m.name = e.target.value; } }),
+      linkSel(m),
       h('button', { type: 'button', class: 'tp-icon-btn', 'aria-label': `Remove ${m.name}`, disabled: members.length < 2, onclick: () => { members = members.filter((x) => x !== m); drawMembers(); } }, '✕'))),
     h('button', { type: 'button', class: 'btn btn-sm', onclick: () => { members.push({ id: Math.random().toString(36).slice(2, 10), name: '', color: DAY_COLORS[members.length % DAY_COLORS.length] }); drawMembers(); memberBox.querySelector('.tp-member:last-of-type input:not([type=color])')?.focus(); } }, '＋ Add a traveller'));
     drawMembers();
@@ -291,7 +302,8 @@ class TripPlanner {
         where.origin, where.el,
         h('div', { class: 'tp-row' }, field('Money in', cur), field(`Budget (${t.currency || 'EUR'})`, budget), field('Distances in', dist)),
         field('Colour', colors), field('Picture', covers),
-        field('Travellers', memberBox, 'Everyone on the trip: for splitting costs, packing and to-dos.')),
+        field('Travellers', memberBox, 'Everyone on the trip: for splitting costs, packing and to-dos.'),
+        state.config?.auth ? field('Who can see this trip', vis, 'Travellers are the people linked to a MediaDesk account above. Admins can see every trip.') : null),
       actions: [
         { label: t.archived ? 'Unarchive' : 'Archive', left: true, onClick: async (close) => { close(); await this.store.patchTrip({ archived: !t.archived }).catch(toastError); toast(t.archived ? 'Back from the archive' : 'Archived', { timeout: 1500 }); } },
         { label: 'Delete trip', danger: true, left: true, onClick: async (close) => { close(); if (await this.deleteTrip({ id: this.store.id, title: t.title })) this.showDashboard(); } },
@@ -309,7 +321,7 @@ class TripPlanner {
               if (start.value) await this.store.redate(start.value, end.value || start.value);
               else await this.store.patchTrip({ start: null, end: null });
             }
-            await this.store.patchTrip({ title: title.value.trim() || t.title, origin, destination: destinationLabel(places), destinations: places, description: desc.value, currency: cur.value, units: dist.value, budget: Number(budget.value) || null, color, cover, members: members.map((m) => ({ ...m, name: m.name.trim() || 'Traveller' })) }, { label: 'trip settings' });
+            await this.store.patchTrip({ title: title.value.trim() || t.title, origin, destination: destinationLabel(places), destinations: places, description: desc.value, currency: cur.value, units: dist.value, budget: Number(budget.value) || null, color, cover, members: members.map((m) => ({ ...m, name: m.name.trim() || 'Traveller' })), ...(state.config?.auth ? { visibility: vis.value } : {}) }, { label: 'trip settings' });
           } catch (err) { toastError(err); }
         } }],
     });
