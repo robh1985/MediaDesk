@@ -1,7 +1,7 @@
 // Trip Planner: a printable itinerary (print it, or save it as a PDF from the print dialog). Also
 // used by the read-only share page, from the same data.
 
-import { tripDays, fmtDay, fmtTime, fmtRange, catOf, bookingType, money, expenseParts, esc, TRAVEL, travelSummary, fmtKm, fmtMins, setUnits } from './util.js';
+import { tripDays, fmtDay, fmtTime, fmtRange, catOf, bookingType, money, expenseParts, esc, TRAVEL, travelSummary, fmtKm, fmtMins, setUnits, STAYS, dayDiff } from './util.js';
 
 const placeKey = (p) => (Number.isFinite(p?.lat) ? `${p.lat.toFixed(4)},${p.lon.toFixed(4)}` : '');
 // The driving route saved for the journey to destination i (if it still fits the journey).
@@ -77,12 +77,19 @@ export function itineraryHtml(d, { routeMap = true } = {}) {
     });
     html += `<section class="route"><h2>Route</h2>${routeMap ? routeSvg(t) : ''}<ul class="route-list">${rows.join('')}</ul></section>`;
   }
-  html += days.map((day, i) => { const list = items(day); return `<section class="day"><h2>Day ${i + 1} <small>${esc(fmtDay(day, { weekday: 'long', day: 'numeric', month: 'long' }))}</small></h2>${list.length ? `<ol>${list.map(row).join('')}</ol>` : '<p class="muted">Free day</p>'}</section>`; }).join('');
+  // Where you stay each day: checking in (with the time), staying, or checking out (with the time).
+  const when = (v) => (v?.length > 10 ? ` ${fmtTime(v)}` : '');
+  const staysOn = (day) => all('bookings').filter((b) => STAYS.has(b.type) && b.status !== 'cancelled' && b.start && b.start.slice(0, 10) <= day && (b.end || b.start).slice(0, 10) >= day).map((b) => {
+    if (b.end && b.end.slice(0, 10) === day && b.start.slice(0, 10) !== day) return `<li>🧳 <b>Check-out${esc(when(b.end))}</b> · ${esc(b.title)}</li>`;
+    if (b.start.slice(0, 10) === day) return `<li>🛏 <b>Check-in${esc(when(b.start))}</b> · ${esc(b.title)}${b.address ? ` <small>${esc(b.address)}</small>` : ''}</li>`;
+    return `<li>🛏 Staying at ${esc(b.title)}</li>`;
+  }).join('');
+  html += days.map((day, i) => { const list = items(day); const st = staysOn(day); return `<section class="day"><h2>Day ${i + 1} <small>${esc(fmtDay(day, { weekday: 'long', day: 'numeric', month: 'long' }))}</small></h2>${st ? `<ul class="stays">${st}</ul>` : ''}${list.length ? `<ol>${list.map(row).join('')}</ol>` : '<p class="muted">Free day</p>'}</section>`; }).join('');
   const pool = items(null).filter((it) => it.kind === 'place');
   if (pool.length) html += `<section class="day"><h2>Other places</h2><ul>${pool.map(row).join('')}</ul></section>`;
   const bookings = all('bookings').sort((a, b) => (a.start || '').localeCompare(b.start || ''));
   if (bookings.length) {
-    html += `<section><h2>Bookings</h2><table><tr><th></th><th>What</th><th>When</th><th>Code</th><th>Price</th></tr>${bookings.map((b) => { const [l, e] = bookingType(b.type); return `<tr${b.status === 'cancelled' ? ' class="x"' : ''}><td>${e}</td><td><b>${esc(b.title || l)}</b>${b.provider ? `<br><small>${esc(b.provider)}</small>` : ''}${(b.legs || []).map((g) => `<br><small>${esc(g.from)} ${fmtTime(g.depart)} → ${esc(g.to)} ${fmtTime(g.arrive)} ${esc(g.number || '')}</small>`).join('')}</td><td>${b.start ? esc(`${fmtDay(b.start.slice(0, 10))} ${fmtTime(b.start)}`) : ''}${b.end ? `<br><small>until ${esc(`${fmtDay(b.end.slice(0, 10))} ${fmtTime(b.end)}`)}</small>` : ''}</td><td>${esc(b.code || '')}</td><td>${b.price ? esc(money(Number(b.price), b.currency || t.currency)) : ''}</td></tr>`; }).join('')}</table></section>`;
+    html += `<section><h2>Bookings</h2><table><tr><th></th><th>What</th><th>When</th><th>Code</th><th>Price</th></tr>${bookings.map((b) => { const [l, e] = bookingType(b.type); return `<tr${b.status === 'cancelled' ? ' class="x"' : ''}><td>${e}</td><td><b>${esc(b.title || l)}</b>${b.provider ? `<br><small>${b.type === 'rental' ? 'Booked through ' : ''}${esc(b.provider)}</small>` : ''}${(b.legs || []).map((g) => `<br><small>${esc(g.from)} ${fmtTime(g.depart)} → ${esc(g.to)} ${fmtTime(g.arrive)} ${esc(g.number || '')}</small>`).join('')}</td><td>${STAYS.has(b.type) ? `${b.start ? `<b>Check-in</b> ${esc(`${fmtDay(b.start.slice(0, 10))}${when(b.start)}`)}` : ''}${b.end ? `<br><b>Check-out</b> ${esc(`${fmtDay(b.end.slice(0, 10))}${when(b.end)}`)}` : ''}${b.start && b.end && dayDiff(b.start.slice(0, 10), b.end.slice(0, 10)) > 0 ? `<br><small>${dayDiff(b.start.slice(0, 10), b.end.slice(0, 10))} nights</small>` : ''}` : `${b.start ? esc(`${fmtDay(b.start.slice(0, 10))} ${fmtTime(b.start)}`) : ''}${b.end ? `<br><small>until ${esc(`${fmtDay(b.end.slice(0, 10))} ${fmtTime(b.end)}`)}</small>` : ''}`}</td><td>${esc(b.code || '')}</td><td>${b.price ? esc(money(Number(b.price), b.currency || t.currency)) : ''}</td></tr>`; }).join('')}</table></section>`;
   }
   const lists = all('lists');
   for (const l of lists) {
@@ -105,6 +112,7 @@ ol, ul { margin: 0; padding-left: 22px; } li { margin: 4px 0; } li.note { color:
 small { color: #666; } small.n { color: #444; } .muted { color: #888; }
 table { border-collapse: collapse; width: 100%; } td, th { text-align: left; border-bottom: 1px solid #eee; padding: 5px 6px; vertical-align: top; } tr.x { text-decoration: line-through; color: #888; }
 .checks { list-style: none; padding-left: 0; columns: 2; }
+ul.stays { list-style: none; padding: 0; margin: 0 0 6px; color: #364fc7; } ul.stays li { margin: 2px 0; } ul.stays small { color: #666; }
 .route-map { display: block; width: 100%; max-width: 680px; height: auto; margin: 4px 0 10px; border: 1px solid #ddd; border-radius: 8px; background: #f4f8fb; } .svg-label { font: 600 12px system-ui, sans-serif; fill: #111; paint-order: stroke; stroke: #fff; stroke-width: 3px; } .svg-mark { font: 700 11px system-ui, sans-serif; fill: #1c4f9c; } .svg-small { font: 600 10px system-ui, sans-serif; fill: #5f3dc4; paint-order: stroke; stroke: #fff; stroke-width: 3px; } .r-drive { color: #1c4f9c !important; } .route { break-inside: avoid; }
 .route-list { list-style: none; padding: 0; } .route-list li { display: flex; gap: 10px; align-items: flex-start; margin: 0; padding: 4px 0; } .route-list .r-travel { padding-left: 4px; color: #555; } .r-icon { width: 24px; text-align: center; flex: none; } .r-num { display: inline-block; width: 22px; height: 22px; border-radius: 50%; background: #1c7ed6; color: #fff; font-weight: 700; font-size: 12px; line-height: 22px; } .route-list small { color: #666; } .r-origin small { display: block; }
 section.day { break-inside: avoid; }

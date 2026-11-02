@@ -46,3 +46,6 @@ footer { margin-top: 30px; font-size: 12px; }
 .tp-destpin > * , .tp-destpin { display: grid; place-items: center; }
 .tp-destpin { width: 28px; height: 28px; border-radius: 8px; background: #fff; color: #111; font: 700 13px/28px system-ui, sans-serif; text-align: center; box-shadow: 0 0 0 2px var(--c), 0 2px 6px rgba(0,0,0,.3); }
 .tp-destpin.home { font-size: 15px; }
+
+.ts-doc ul.stays { list-style: none; padding: 0; margin: 0 0 6px; color: var(--c); }
+.ts-doc ul.stays li { margin: 2px 0; }
