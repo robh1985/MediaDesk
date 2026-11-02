@@ -22,6 +22,7 @@ const os = require('node:os');
 const { spawn } = require('node:child_process');
 const { Transform } = require('node:stream');
 const { pipeline } = require('node:stream/promises');
+const { sendMail } = require('./smtp');
 
 // Every kind of file the library takes (by extension) and the format it is.
 const FORMATS = {
@@ -32,6 +33,7 @@ const FORMATS = {
 const COMIC_ARCHIVES = new Set(['cbr', 'cb7', 'cbt']);
 const CALIBRE_FORMATS = new Set(['azw3', 'rtf', 'docx', 'odt', 'lit']);
 const MAX_UPLOAD = 2 * 1024 * 1024 * 1024;
+const MAX_KINDLE_EMAIL = 49 * 1024 * 1024; // Send to Kindle takes attachments up to 50 MB
 const formatOfName = (name) => FORMATS[String(name).split('.').pop().toLowerCase()] || null;
 // How the browser reads a format: as it is, or after the server converts it (as).
 function viewOf(format, tools) {
@@ -145,6 +147,8 @@ function mobiMeta(buf) {
   const [r0] = rec(0);
   if (buf.toString('latin1', r0 + 16, r0 + 20) !== 'MOBI') throw new BookError(422, 'This isn’t a Kindle book');
   const hlen = buf.readUInt32BE(r0 + 20);
+  // The PalmDOC header says whether the text is encrypted (DRM, as in books bought from Amazon).
+  const drm = buf.readUInt16BE(r0 + 12) !== 0;
   const enc = buf.readUInt32BE(r0 + 28) === 65001 ? 'utf8' : 'latin1';
   const nameOff = buf.readUInt32BE(r0 + 84);
   const nameLen = buf.readUInt32BE(r0 + 88);
@@ -175,7 +179,7 @@ function mobiMeta(buf) {
     coverData = buf.subarray(r[0], r[1]);
     coverExt = coverData[0] === 0xff ? 'jpg' : coverData[0] === 0x89 ? 'png' : coverData.toString('latin1', 0, 3) === 'GIF' ? 'gif' : null;
   }
-  return { title, author: authors.join(', '), coverData: coverExt ? coverData : null, coverExt };
+  return { title, author: authors.join(', '), coverData: coverExt ? coverData : null, coverExt, drm };
 }
 
 // FictionBook: XML with the title, authors and a cover picture (base64) inside.
@@ -237,7 +241,7 @@ function fromFileName(file) {
   return m ? { title: m[1].trim(), author: m[2].trim() } : { title: stem, author: '' };
 }
 
-function createEbooks({ dataDir, getFolder, mock = false, sample = null, getSevenZip = () => null, getConvertPath = () => '', resolveShared = null, filesEnabled = () => false }) {
+function createEbooks({ dataDir, getFolder, mock = false, sample = null, getSevenZip = () => null, getConvertPath = () => '', resolveShared = null, filesEnabled = () => false, getKindle = () => ({}) }) {
   const stateFile = path.join(dataDir, 'ebooks.json');
   const coverDir = path.join(dataDir, 'ebook-covers');
   const convDir = path.join(dataDir, 'ebook-converted');
@@ -309,7 +313,7 @@ function createEbooks({ dataDir, getFolder, mock = false, sample = null, getSeve
       try {
         const buf = await fsp.readFile(abs);
         const m = format === 'epub' ? epubMeta(buf) : format === 'cbz' ? cbzMeta(buf) : format === 'fb2' ? fb2Meta(buf) : mobiMeta(buf);
-        meta = { ...meta, title: m.title, author: m.author, pages: m.pages };
+        meta = { ...meta, title: m.title, author: m.author, pages: m.pages, ...(m.drm ? { drm: true } : {}) };
         if (m.coverData?.length && IMAGE_TYPES[m.coverExt]) {
           await fsp.mkdir(coverDir, { recursive: true });
           const name = `${id}.${m.coverExt}`;
@@ -360,7 +364,7 @@ function createEbooks({ dataDir, getFolder, mock = false, sample = null, getSeve
         id, path: rel, format, size: st.size, modified: st.mtimeMs,
         title: meta.title || guess.title, author: meta.author || guess.author,
         folder: rel.includes('/') ? rel.slice(0, rel.lastIndexOf('/')) : '',
-        cover: Boolean(meta.cover), pages: meta.pages || null,
+        cover: Boolean(meta.cover), pages: meta.pages || null, ...(meta.drm ? { drm: true } : {}),
       });
     }
     books.sort((a, b) => naturalSort(a.title, b.title));
@@ -387,10 +391,10 @@ function createEbooks({ dataDir, getFolder, mock = false, sample = null, getSeve
     return { book: b, abs: path.join(folder(), b.path) };
   }
 
-  async function sendRange(req, res, abs, type) {
+  async function sendRange(req, res, abs, type, downloadName = null) {
     const st = await fsp.stat(abs);
     let start = 0, end = st.size - 1, status = 200;
-    const headers = { 'Content-Type': type, 'Accept-Ranges': 'bytes', 'Cache-Control': 'private, no-cache', 'Last-Modified': st.mtime.toUTCString(), 'X-Content-Type-Options': 'nosniff' };
+    const headers = { 'Content-Type': type, ...(downloadName ? { 'Content-Disposition': `attachment; filename="${downloadName.normalize('NFKD').replace(/[^\x20-\x7e]/g, '').replace(/["\\]/g, '') || 'book'}"; filename*=UTF-8''${encodeURIComponent(downloadName)}` } : {}), 'Accept-Ranges': 'bytes', 'Cache-Control': 'private, no-cache', 'Last-Modified': st.mtime.toUTCString(), 'X-Content-Type-Options': 'nosniff' };
     const range = /^bytes=(\d*)-(\d*)$/.exec(req.headers.range || '');
     if (range && st.size) {
       if (range[1] === '') start = Math.max(0, st.size - Number(range[2]));
@@ -405,7 +409,27 @@ function createEbooks({ dataDir, getFolder, mock = false, sample = null, getSeve
     await pipeline(fs.createReadStream(abs, { start, end }), res).catch(() => {});
   }
 
-  const TYPES = { epub: 'application/epub+zip', pdf: 'application/pdf', cbz: 'application/vnd.comicbook+zip' };
+  const TYPES = { epub: 'application/epub+zip', pdf: 'application/pdf', cbz: 'application/vnd.comicbook+zip', mobi: 'application/x-mobipocket-ebook', azw3: 'application/vnd.amazon.ebook', txt: 'text/plain; charset=utf-8', docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', rtf: 'application/rtf' };
+
+  // --- Kindle -------------------------------------------------------------------------------------
+  // A copy of a book for a Kindle: for the Kindle app on the device itself (it opens MOBI, AZW3,
+  // PDF and text; anything else becomes AZW3 through Calibre), or for Amazon's Send to Kindle
+  // email (it takes EPUB, PDF, Word, RTF and text; Kindle books become EPUB and comics PDF).
+  const KINDLE_APP = new Set(['mobi', 'azw3', 'pdf', 'txt']);
+  const SEND_TO_KINDLE = new Set(['epub', 'pdf', 'docx', 'rtf', 'txt']);
+  async function kindleCopy(book, abs, purpose) {
+    if (book.drm) throw new BookError(422, 'This book has DRM (it was bought from Amazon), so it can only be read in the Kindle app it came from');
+    const stem = (book.title || path.basename(book.path).replace(/\.[^.]+$/, '')).replace(/[\u0000-\u001f<>:"/\\|?*]+/g, ' ').trim().slice(0, 150) || 'Book';
+    const ext = path.extname(book.path).slice(1).toLowerCase();
+    const keep = purpose === 'email' ? SEND_TO_KINDLE : KINDLE_APP;
+    if (keep.has(book.format)) return { file: abs, name: `${stem}.${ext === 'azw' || ext === 'prc' ? 'mobi' : ext}`, type: TYPES[book.format] || 'application/octet-stream', converted: false };
+    const target = purpose === 'email' ? (['cbz', 'cbr', 'cb7', 'cbt'].includes(book.format) ? 'pdf' : 'epub') : 'azw3';
+    // Comics in RAR, 7z or tar archives become CBZ first.
+    const src = COMIC_ARCHIVES.has(book.format) ? await converted(abs, book.id, 'cbz') : abs;
+    if (!calibre) await detectCalibre();
+    if (!calibre) throw new BookError(503, `Calibre is needed to make a ${target.toUpperCase()} copy of this book for the Kindle. Install Calibre on the MediaDesk server (see Settings → eBook Reader).`);
+    return { file: await converted(src, `${book.id}:kindle:${target}`, target), name: `${stem}.${target}`, type: TYPES[target], converted: true };
+  }
 
   // The pictures in a comic archive, in reading order.
   async function archiveImages(abs) {
@@ -493,7 +517,8 @@ function createEbooks({ dataDir, getFolder, mock = false, sample = null, getSeve
     try {
       if (p === '/library' && req.method === 'GET') {
         const lib = await library(url.searchParams.get('refresh') === '1');
-        return sendJson(res, 200, { ...lib, mock, reading: load().books });
+        const k = getKindle();
+        return sendJson(res, 200, { ...lib, mock, reading: load().books, sendToKindle: k.email && k.smtp?.host ? k.email : null });
       }
       let m = /^\/file\/([0-9a-f]{16})$/.exec(p);
       if (m && (req.method === 'GET' || req.method === 'HEAD')) {
@@ -501,6 +526,41 @@ function createEbooks({ dataDir, getFolder, mock = false, sample = null, getSeve
         const as = url.searchParams.get('as');
         if (as === 'cbz' || as === 'epub') return await sendRange(req, res, await converted(abs, book.id, as), TYPES[as]);
         return await sendRange(req, res, abs, TYPES[book.format] || 'application/octet-stream');
+      }
+      // A copy for the Kindle app on this device: made (converted if it has to be), then downloaded.
+      m = /^\/file\/([0-9a-f]{16})\/kindle$/.exec(p);
+      if (m && (req.method === 'POST' || req.method === 'GET' || req.method === 'HEAD')) {
+        const { book, abs } = await bookFile(m[1]);
+        const copy = await kindleCopy(book, abs, 'app');
+        if (req.method === 'POST') return sendJson(res, 200, { name: copy.name, size: (await fsp.stat(copy.file)).size, converted: copy.converted });
+        return await sendRange(req, res, copy.file, copy.type, copy.name);
+      }
+      // Send to Kindle: the book emailed to the reader's Kindle address.
+      m = /^\/file\/([0-9a-f]{16})\/send-to-kindle$/.exec(p);
+      if (m && req.method === 'POST') {
+        const k = getKindle();
+        if (!k.email || !k.smtp?.host) throw new BookError(400, 'Set up Send to Kindle in Settings → eBook Reader first');
+        const { book, abs } = await bookFile(m[1]);
+        const copy = await kindleCopy(book, abs, 'email');
+        const size = (await fsp.stat(copy.file)).size;
+        if (size > MAX_KINDLE_EMAIL) throw new BookError(413, `This book is too big to email (${Math.round(size / 1048576)} MB; Send to Kindle takes up to 50 MB). Download it for the Kindle app instead.`);
+        if (mock) { await new Promise((r) => setTimeout(r, 400)); return sendJson(res, 200, { sent: true, to: k.email, name: copy.name, demo: true }); }
+        await sendMail(k.smtp, {
+          from: k.smtp.from || k.smtp.user, to: k.email, subject: book.title || copy.name,
+          text: `${book.title || copy.name}${book.author ? ` by ${book.author}` : ''}, sent from MediaDesk.`,
+          attachments: [{ filename: copy.name, type: copy.type, content: await fsp.readFile(copy.file) }],
+        }).catch((err) => { throw new BookError(502, err.message); });
+        return sendJson(res, 200, { sent: true, to: k.email, name: copy.name });
+      }
+      // A test email (to the From address, so nothing lands in the Kindle library).
+      if (p === '/kindle/test' && req.method === 'POST') {
+        const k = getKindle();
+        if (!k.smtp?.host) throw new BookError(400, 'Fill in the email server first');
+        const to = k.smtp.from || k.smtp.user;
+        if (mock) return sendJson(res, 200, { sent: true, to, demo: true });
+        await sendMail(k.smtp, { from: to, to, subject: 'MediaDesk test email', text: 'MediaDesk can send email through this server, so Send to Kindle will work once this address is on your Approved Personal Document E-mail List at Amazon.' })
+          .catch((err) => { throw new BookError(502, err.message); });
+        return sendJson(res, 200, { sent: true, to });
       }
       // A book in a shared folder (Files), converted if it needs to be.
       if (p === '/shared' && (req.method === 'GET' || req.method === 'HEAD')) {

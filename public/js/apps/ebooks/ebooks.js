@@ -11,6 +11,10 @@ import { openApp } from '../../wm.js';
 import { pickFile, fileUrl, filesEnabled } from '../../fileapi.js';
 import { Flipbook } from './flipbook.js';
 import { bookFor, formatOf, viewOf, ACCEPT, madeCover, markText } from './sources.js';
+import { kindleDialog, backupDialog } from './kindle.js';
+
+// Android's file picker greys out files it has no type for (.azw3, .mobi…): there, show them all.
+const PICK_ACCEPT = /Android/i.test(navigator.userAgent) ? undefined : ACCEPT;
 
 let cssAdded = false;
 function addCss() {
@@ -151,6 +155,7 @@ class EbookReader {
     const openBtn = h('button', { class: 'btn', onclick: (e) => this.openMenu(e.currentTarget) }, h('span', { html: I.open }), 'Open a book');
     clear(head, h('div', { class: 'ebk-libtitle' }, h('span', { class: 'ebk-libicon', html: appIcon.ebooks }), h('h2', {}, 'Library'), h('span', { class: 'muted small' }, lib.configured ? `${lib.books.length} book${lib.books.length === 1 ? '' : 's'}` : '')),
       h('div', { class: 'ebk-libtools' }, search, seg, sort, openBtn,
+        lib.configured ? h('button', { class: 'btn', onclick: (e) => this.kindleMenu(e.currentTarget) }, '📲 Kindle') : null,
         h('button', { class: 'btn btn-icon', title: 'Look for new books', 'aria-label': 'Refresh', html: I.refresh, onclick: async () => { await api('library?refresh=1').catch(() => {}); this.showLibrary(); } }),
         h('button', { class: 'btn btn-icon', title: 'Books folder (Settings)', 'aria-label': 'Settings', html: I.settings, onclick: () => openApp('settings', { tab: 'ebooks' }) })));
     const reading = lib.reading || {};
@@ -187,7 +192,8 @@ class EbookReader {
       body.querySelector('.btn-row .btn:last-child')?.addEventListener('click', (e) => this.openMenu(e.currentTarget));
       return;
     }
-    clear(body, lib.mock ? h('div', { class: 'notice ebk-notice' }, 'Demo mode: these are small books MediaDesk makes itself.') : null, lib.error ? h('div', { class: 'notice' }, lib.error) : null, cont,
+    this.pickBanner = h('div', { class: 'notice ebk-notice ebk-pick', hidden: !this.pickKindle }, '📲 Tap a book to send it to Kindle. ', h('button', { class: 'btn btn-sm', onclick: () => this.setPick(false) }, 'Done'));
+    clear(body, this.pickBanner, lib.mock ? h('div', { class: 'notice ebk-notice' }, 'Demo mode: these are small books MediaDesk makes itself.') : null, lib.error ? h('div', { class: 'notice' }, lib.error) : null, cont,
       lib.books.length ? h('h3', { class: 'ebk-shelf-title' }, 'Bookshelf') : this.empty('📚', 'There are no EPUB books, PDFs or comic books in the books folder yet.'), shelf);
     drawShelf();
     this.makePdfCovers(lib.books.filter((b) => b.format === 'pdf' && !b.cover));
@@ -202,7 +208,7 @@ class EbookReader {
 
   bookCard(b, s) {
     const pct = s?.progress ? Math.round(s.progress * 100) : 0;
-    return h('button', { class: 'ebk-book', title: `${b.title}${b.author ? ` — ${b.author}` : ''}`, onclick: () => this.openFrom({ id: b.id }) },
+    return h('button', { class: 'ebk-book', title: `${b.title}${b.author ? ` — ${b.author}` : ''}`, onclick: () => (this.pickKindle ? kindleDialog(this, b) : this.openFrom({ id: b.id })), oncontextmenu: (e) => { e.preventDefault(); this.bookMenu(b, e.clientX, e.clientY); } },
       h('div', { class: 'ebk-book-cover', dataset: { id: b.id } }, this.coverEl(b),
         h('span', { class: `ebk-badge ${KIND(b.format)} f-${b.format}` }, FORMAT_LABEL[b.format] || b.format.toUpperCase()),
         pct ? h('div', { class: 'ebk-book-progress' }, h('i', { style: { width: `${pct}%` } })) : null,
@@ -228,6 +234,38 @@ class EbookReader {
     }
   }
 
+  // Kindle: back up this device's books, or send books to the Kindle app.
+  kindleMenu(anchor) {
+    const r = anchor.getBoundingClientRect();
+    this.popMenu(Math.min(r.left, innerWidth - 280), r.bottom + 6, [
+      ['📥', 'Back up books from this device…', () => backupDialog(this)],
+      ['📲', 'Send a book to Kindle…', () => this.setPick(true)],
+    ]);
+  }
+  setPick(on) {
+    this.pickKindle = on;
+    if (this.pickBanner) this.pickBanner.hidden = !on;
+    this.root.querySelector('.ebk-shelf')?.classList.toggle('picking', on);
+    if (on) this.pickBanner?.scrollIntoView({ block: 'nearest' });
+  }
+  // A book's menu (right-click, or press and hold on a touch screen).
+  bookMenu(b, x, y) {
+    this.popMenu(Math.min(x, innerWidth - 250), Math.min(y, innerHeight - 160), [
+      ['📖', 'Read', () => this.openFrom({ id: b.id })],
+      ['📲', 'Send to Kindle…', () => kindleDialog(this, b)],
+      ['⤓', 'Download', () => { const a = h('a', { href: `/portal/ebooks/file/${b.id}`, download: b.path.split('/').pop() }); document.body.append(a); a.click(); a.remove(); }],
+    ]);
+  }
+  popMenu(left, top, items) {
+    document.querySelector('.ebk-menu')?.remove();
+    const close = () => { menu.remove(); document.removeEventListener('pointerdown', away, true); };
+    const away = (e) => { if (!menu.contains(e.target)) close(); };
+    const menu = h('div', { class: 'ebk-menu', style: { left: `${Math.max(8, left)}px`, top: `${Math.max(8, top)}px` } },
+      items.map(([emoji, label, fn]) => h('button', { onclick: () => { close(); fn(); } }, h('span', { class: 'ebk-menu-emoji' }, emoji), label)));
+    document.body.append(menu);
+    setTimeout(() => document.addEventListener('pointerdown', away, true));
+  }
+
   openMenu(anchor) {
     const r = anchor.getBoundingClientRect();
     document.querySelector('.ebk-menu')?.remove();
@@ -241,12 +279,12 @@ class EbookReader {
       } }, h('span', { html: I.open }), 'From Files…') : null,
       h('button', { onclick: () => {
         close();
-        const input = h('input', { type: 'file', accept: ACCEPT, onchange: () => { const file = input.files[0]; if (file) this.openFrom({ file }); } });
+        const input = h('input', { type: 'file', accept: PICK_ACCEPT, onchange: () => { const file = input.files[0]; if (file) this.openFrom({ file }); } });
         input.click();
       } }, h('span', { html: I.download }), 'From this computer…'),
       this.lib?.configured ? h('button', { disabled: !this.lib.writable, title: this.lib.writable ? '' : 'MediaDesk can’t write to the books folder', onclick: () => {
         close();
-        const input = h('input', { type: 'file', accept: ACCEPT, multiple: true, onchange: () => this.addBooks([...input.files]) });
+        const input = h('input', { type: 'file', accept: PICK_ACCEPT, multiple: true, onchange: () => this.addBooks([...input.files].filter((f) => formatOf(f.name))) });
         input.click();
       } }, h('span', { html: I.plus }), 'Add books to the library…') : null);
     document.body.append(menu);
@@ -263,6 +301,7 @@ class EbookReader {
     if (o.id) {
       const b = lib?.books.find((x) => x.id === o.id);
       if (!b) { toast('That book isn’t in the library any more', { type: 'error' }); this.showLibrary(); return; }
+      if (b.drm) { toast('This book has DRM', { type: 'error', body: 'It was bought from Amazon, so only the Kindle app can open it. It’s kept safe in your library.' }); return; }
       if (!b.view) { toast('This book can’t be opened yet', { type: 'error', body: NEED_TEXT[b.need] || '' }); return; }
       src = { key: b.id, url: `/portal/ebooks/file/${b.id}${b.as ? `?as=${b.as}` : ''}`, download: `/portal/ebooks/file/${b.id}`, format: b.format, view: b.view, title: b.title, author: b.author, name: b.path.split('/').pop() };
     } else if (o.file) {
@@ -443,6 +482,7 @@ class EbookReader {
       this.playBtn, this.soundBtn, this.modeBtn,
       book.reflows ? tool(I.text, 'Text and page', (e) => this.textSettings(e.currentTarget)) : tool(I.settings, 'Background', (e) => this.textSettings(e.currentTarget)),
       tool(I.full, 'Full screen', () => this.fullscreen()),
+      this.lib?.books?.some((x) => x.id === src.key) ? h('button', { class: 'ebk-tbtn ebk-kbtn', title: 'Send to Kindle', 'aria-label': 'Send to Kindle', onclick: () => kindleDialog(this, this.lib.books.find((x) => x.id === src.key)) }, '📲') : null,
       src.download ? h('a', { class: 'ebk-tbtn', title: 'Download', 'aria-label': 'Download', href: src.download, download: src.name || '', html: I.download }) : null);
     const bottom = h('div', { class: 'ebk-bottom' }, h('div', { class: 'ebk-slider-wrap' }, this.slider, this.sliderTip), tools);
     this.side = h('div', { class: 'ebk-side', hidden: true });

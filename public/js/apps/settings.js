@@ -413,6 +413,49 @@ function renderConsole(container) {
   };
 }
 
+// Send to Kindle: books emailed to the reader's Kindle address, through their own email account.
+function kindleSection(cfg) {
+  const k = cfg.ebooks?.kindle || { email: '', smtp: {} };
+  const m = k.smtp || {};
+  const inp = (value, attrs = {}) => h('input', { class: 'input', value: value ?? '', spellcheck: 'false', autocomplete: 'off', ...attrs });
+  const email = inp(k.email, { type: 'email', placeholder: 'yourname_123@kindle.com' });
+  const host = inp(m.host, { placeholder: 'smtp.gmail.com' });
+  const port = inp(m.port || 587, { type: 'number', min: 1, max: 65535, style: { maxWidth: '110px' } });
+  const security = h('select', { class: 'input' }, [['starttls', 'STARTTLS (usually port 587)'], ['tls', 'SSL/TLS (usually port 465)'], ['none', 'None (not recommended)']].map(([v, l]) => h('option', { value: v, selected: (m.security || 'starttls') === v }, l)));
+  security.addEventListener('change', () => { if (security.value === 'tls' && Number(port.value) === 587) port.value = 465; if (security.value === 'starttls' && Number(port.value) === 465) port.value = 587; });
+  const user = inp(m.user, { placeholder: 'you@gmail.com' });
+  const pass = inp('', { type: 'password', autocomplete: 'new-password', placeholder: m.hasPassword ? 'Saved (leave blank to keep it)' : 'Password or app password' });
+  const from = inp(m.from, { type: 'email', placeholder: 'you@gmail.com (the address Amazon must approve)' });
+  const status = h('div', { class: 'small muted' });
+  const field = (label, control, hint) => h('label', { class: 'field' }, h('span', {}, label), control, hint ? h('small', { class: 'muted' }, hint) : null);
+  const values = () => ({ email: email.value.trim(), smtp: { host: host.value.trim(), port: Number(port.value) || 587, security: security.value, user: user.value.trim(), from: from.value.trim(), ...(pass.value ? { pass: pass.value } : {}) } });
+  const save = h('button', { class: 'btn btn-primary', onclick: async () => {
+    save.disabled = true;
+    try { state.config = await portal.saveConfig({ kindle: values() }); pass.value = ''; pass.placeholder = state.config.ebooks?.kindle?.smtp?.hasPassword ? 'Saved (leave blank to keep it)' : 'Password or app password'; toast('Send to Kindle saved', { type: 'success', icon: appIcon.ebooks }); } catch (err) { toastError(err, 'Could not save'); }
+    save.disabled = false;
+  } }, h('span', { html: icon.check }), 'Save');
+  const test = h('button', { class: 'btn', onclick: async () => {
+    test.disabled = true;
+    status.textContent = 'Saving and sending a test email…';
+    try {
+      state.config = await portal.saveConfig({ kindle: values() });
+      pass.value = '';
+      const r = await fetch('/portal/ebooks/kindle/test', { method: 'POST', credentials: 'same-origin', headers: { 'X-MediaDesk': '1' } }).then(async (x) => { const d = await x.json(); if (!x.ok) throw new Error(d.error || `HTTP ${x.status}`); return d; });
+      status.textContent = r.demo ? 'Demo: nothing is really sent.' : `A test email was sent to ${r.to}. If it arrives, Send to Kindle is ready.`;
+    } catch (err) { status.textContent = `The test email couldn’t be sent: ${err.message}`; }
+    test.disabled = false;
+  } }, 'Send a test email');
+  return section('Send to Kindle',
+    h('p', { class: 'muted small' }, 'Send books from the library to your Kindle library: Amazon adds them to every device with the Kindle app (Kindle Fire, phone, Kindle e-reader) and keeps your place in step. MediaDesk emails each book through your own email account, so fill in its email server below.'),
+    field('Your Send-to-Kindle email', email, 'Find it at amazon.com → Manage Your Content and Devices → Preferences → Personal Document Settings (it ends in @kindle.com).'),
+    h('div', { style: { display: 'flex', gap: '10px', flexWrap: 'wrap' } }, h('div', { style: { flex: '1 1 220px' } }, field('Email server (SMTP)', host)), h('div', {}, field('Port', port)), h('div', { style: { flex: '1 1 200px' } }, field('Encryption', security))),
+    h('div', { style: { display: 'flex', gap: '10px', flexWrap: 'wrap' } }, h('div', { style: { flex: '1 1 200px' } }, field('User name', user)), h('div', { style: { flex: '1 1 200px' } }, field('Password', pass))),
+    field('Send from', from, 'Add this address to the Approved Personal Document E-mail List on the same Amazon page, or Amazon ignores the books.'),
+    h('p', { class: 'muted small' }, 'Gmail: server smtp.gmail.com, port 587, STARTTLS, your Gmail address, and an app password (myaccount.google.com → Security → App passwords). Outlook.com: smtp-mail.outlook.com, port 587. The password is kept on the MediaDesk server and never shown again.'),
+    status,
+    h('div', { class: 'btn-row' }, save, test));
+}
+
 function renderEbooks(container) {
   const cfg = state.config;
   const input = h('input', { class: 'input', value: cfg.ebooks?.folder || '', disabled: cfg.mock, spellcheck: 'false', placeholder: 'For example D:\\Books or /mnt/books' });
@@ -426,6 +469,7 @@ function renderEbooks(container) {
       h('label', { class: 'field' }, h('span', {}, 'Folder'), input),
       status,
       h('div', { class: 'btn-row' }, save, h('button', { class: 'btn', onclick: () => import('../wm.js').then((wm) => wm.openApp('ebooks')) }, h('span', { html: icon.external }), 'Open the eBook Reader'))));
+  container.append(kindleSection(cfg));
   const toolsEl = h('div', {});
   container.append(section('Opening other formats', toolsEl));
   fetch('/portal/ebooks/library', { credentials: 'same-origin' }).then((r) => r.json()).then((lib) => {

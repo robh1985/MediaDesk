@@ -173,8 +173,26 @@ function publicConfig() {
     media: { ...media.status(), ffmpegPath: config.ffmpegPath || '', libreOfficePath: config.libreOfficePath || '' },
     archive: { ...archive.status(), sevenZipPath: config.sevenZipPath || '' },
     games: { folder: MOCK ? '(demo games)' : config.gamesFolder || '' },
-    ebooks: { folder: MOCK ? '(demo books)' : config.ebooksFolder || '' },
+    ebooks: { folder: MOCK ? '(demo books)' : config.ebooksFolder || '', kindle: kindlePublic() },
   };
+}
+
+// Send to Kindle settings as the browser sees them: everything but the password.
+function kindlePublic() {
+  const k = config.kindle || {};
+  const m = k.smtp || {};
+  return { email: k.email || '', smtp: { host: m.host || '', port: m.port || 587, security: m.security || 'starttls', user: m.user || '', from: m.from || '', hasPassword: Boolean(m.pass) } };
+}
+// New Send to Kindle settings: a blank password keeps the one saved.
+function mergeKindle(prev = {}, body = {}) {
+  const email = String(body.email ?? prev.email ?? '').trim().slice(0, 200);
+  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw Object.assign(new Error('That Kindle email address doesn’t look right'), { status: 400 });
+  const b = body.smtp || {};
+  const p = prev.smtp || {};
+  const pick = (k, max = 200) => String(b[k] ?? p[k] ?? '').trim().slice(0, max);
+  const smtp = { host: pick('host'), port: Math.min(65535, Math.max(1, Number(b.port ?? p.port) || 587)), security: ['tls', 'starttls', 'none'].includes(b.security) ? b.security : p.security || 'starttls', user: pick('user'), from: pick('from'), pass: b.clearPassword ? '' : typeof b.pass === 'string' && b.pass ? b.pass.slice(0, 500) : p.pass || '' };
+  if (smtp.from && !/@/.test(smtp.from)) throw Object.assign(new Error('The From address doesn’t look right'), { status: 400 });
+  return { email, smtp };
 }
 
 // The file manager can change anything inside its folders, so it also requires a portal password.
@@ -496,6 +514,9 @@ async function updateConfig(req, res) {
     } else delete next.ebooksFolder;
     ebooks.invalidate();
   }
+  if (body.kindle && typeof body.kindle === 'object') {
+    try { next.kindle = mergeKindle(next.kindle, body.kindle); } catch (err) { return sendJson(res, err.status || 400, { error: err.message }); }
+  }
   let toolsChanged = false;
   for (const key of ['ffmpegPath', 'libreOfficePath']) {
     if (typeof body[key] === 'string' && body[key].trim() !== (next[key] || '')) { next[key] = body[key].trim(); toolsChanged = true; }
@@ -641,6 +662,8 @@ const ebooks = createEbooks({
   // CBR / CB7 / CBT comics go through the Archive Expander's 7-Zip; AZW3, Word and the like through Calibre.
   getSevenZip: () => archive.status().path,
   getConvertPath: () => config.ebookConvertPath || '',
+  // Send to Kindle: the reader's Kindle email address and the email server to send through.
+  getKindle: () => config.kindle || {},
   resolveShared: (root, rel) => files.resolveInShared(config, Number(root), rel),
   filesEnabled: () => filesStatus().enabled,
 });
@@ -766,6 +789,8 @@ async function handle(req, res) {
       if (Array.isArray(body.fileTags)) config.fileTags = files.cleanTags(body.fileTags);
       if (body.fileRootInfo || Array.isArray(body.fileTags)) config.fileRootInfo = files.cleanRootInfo(body.fileRootInfo || config.fileRootInfo, config.fileRoots || [], config.fileTags || []);
       if (body.recheckTools) { await media.detect(config); await archive.detect(); await ebooks.detectCalibre(); }
+      // Send to Kindle can be filled in (kept in memory; nothing is really sent in the demo).
+      if (body.kindle && typeof body.kindle === 'object') { try { config.kindle = mergeKindle(config.kindle, body.kindle); } catch (err) { return sendJson(res, err.status || 400, { error: err.message }); } }
       return sendJson(res, 200, publicConfig());
     }
     return updateConfig(req, res);
