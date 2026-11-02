@@ -417,6 +417,33 @@ function createEbooks({ dataDir, getFolder, mock = false, sample = null, getSeve
   // email (it takes EPUB, PDF, Word, RTF and text; Kindle books become EPUB and comics PDF).
   const KINDLE_APP = new Set(['mobi', 'azw3', 'pdf', 'txt']);
   const SEND_TO_KINDLE = new Set(['epub', 'pdf', 'docx', 'rtf', 'txt']);
+  // Send to Kindle: the book (converted if Amazon won't take it as it is) emailed to the Kindle address.
+  async function emailBook(book, abs) {
+    const k = getKindle();
+    if (!k.email || !k.smtp?.host) throw new BookError(400, 'Set up Send to Kindle in Settings → eBook Reader first');
+    const copy = await kindleCopy(book, abs, 'email');
+    const size = (await fsp.stat(copy.file)).size;
+    if (size > MAX_KINDLE_EMAIL) throw new BookError(413, `This book is too big to email (${Math.round(size / 1048576)} MB; Send to Kindle takes up to 50 MB). Download it for the Kindle app instead.`);
+    if (mock) { await new Promise((r) => setTimeout(r, 400)); return { sent: true, to: k.email, name: copy.name, demo: true }; }
+    await sendMail(k.smtp, {
+      from: k.smtp.from || k.smtp.user, to: k.email, subject: book.title || copy.name,
+      text: `${book.title || copy.name}${book.author ? ` by ${book.author}` : ''}, sent from MediaDesk.`,
+      attachments: [{ filename: copy.name, type: copy.type, content: await fsp.readFile(copy.file) }],
+    }).catch((err) => { throw new BookError(502, err.message); });
+    return { sent: true, to: k.email, name: copy.name };
+  }
+  // A book in a shared folder, described like a library book (title and DRM from inside it).
+  async function sharedBook(root, rel) {
+    if (!filesEnabled() || !resolveShared) throw new BookError(403, 'Files isn’t set up');
+    const abs = await resolveShared(root, rel);
+    const format = formatOfName(rel);
+    if (!format) throw new BookError(415, 'That isn’t a book');
+    const st = await fsp.stat(abs);
+    const id = crypto.createHash('sha1').update(`shared:${root}:${rel}`).digest('hex').slice(0, 16);
+    const meta = await metaFor(abs, id, format, st);
+    const guess = fromFileName(rel);
+    return { book: { id, path: rel, format, title: meta.title || guess.title, author: meta.author || guess.author, ...(meta.drm ? { drm: true } : {}) }, abs };
+  }
   async function kindleCopy(book, abs, purpose) {
     if (book.drm) throw new BookError(422, 'This book has DRM (it was bought from Amazon), so it can only be read in the Kindle app it came from');
     const stem = (book.title || path.basename(book.path).replace(/\.[^.]+$/, '')).replace(/[\u0000-\u001f<>:"/\\|?*]+/g, ' ').trim().slice(0, 150) || 'Book';
@@ -541,16 +568,24 @@ function createEbooks({ dataDir, getFolder, mock = false, sample = null, getSeve
         const k = getKindle();
         if (!k.email || !k.smtp?.host) throw new BookError(400, 'Set up Send to Kindle in Settings → eBook Reader first');
         const { book, abs } = await bookFile(m[1]);
-        const copy = await kindleCopy(book, abs, 'email');
-        const size = (await fsp.stat(copy.file)).size;
-        if (size > MAX_KINDLE_EMAIL) throw new BookError(413, `This book is too big to email (${Math.round(size / 1048576)} MB; Send to Kindle takes up to 50 MB). Download it for the Kindle app instead.`);
-        if (mock) { await new Promise((r) => setTimeout(r, 400)); return sendJson(res, 200, { sent: true, to: k.email, name: copy.name, demo: true }); }
-        await sendMail(k.smtp, {
-          from: k.smtp.from || k.smtp.user, to: k.email, subject: book.title || copy.name,
-          text: `${book.title || copy.name}${book.author ? ` by ${book.author}` : ''}, sent from MediaDesk.`,
-          attachments: [{ filename: copy.name, type: copy.type, content: await fsp.readFile(copy.file) }],
-        }).catch((err) => { throw new BookError(502, err.message); });
-        return sendJson(res, 200, { sent: true, to: k.email, name: copy.name });
+        return sendJson(res, 200, await emailBook(book, abs));
+      }
+      // The same for a book in a shared folder (Files).
+      if ((p === '/shared/kindle' || p === '/shared/send-to-kindle') && (req.method === 'POST' || req.method === 'GET' || req.method === 'HEAD')) {
+        const { book, abs } = await sharedBook(url.searchParams.get('root'), url.searchParams.get('path') || '');
+        if (p === '/shared/kindle') {
+          const copy = await kindleCopy(book, abs, 'app');
+          if (req.method === 'POST') return sendJson(res, 200, { name: copy.name, size: (await fsp.stat(copy.file)).size, converted: copy.converted });
+          return await sendRange(req, res, copy.file, copy.type, copy.name);
+        }
+        if (req.method !== 'POST') return sendJson(res, 405, { error: 'Send with POST' });
+        return sendJson(res, 200, await emailBook(book, abs));
+      }
+      // What Send to Kindle can do here (for Files).
+      if (p === '/kindle/status' && req.method === 'GET') {
+        if (!calibre) await detectCalibre();
+        const k = getKindle();
+        return sendJson(res, 200, { tools: tools(), sendToKindle: k.email && k.smtp?.host ? k.email : null, mock });
       }
       // A test email (to the From address, so nothing lands in the Kindle library).
       if (p === '/kindle/test' && req.method === 'POST') {

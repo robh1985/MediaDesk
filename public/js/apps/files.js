@@ -7,6 +7,11 @@ import { openApp } from '../wm.js';
 import { isArchiveName, canOpenAsArchive, addToArchive, quickAdd, quickExtract } from './archive.js';
 import { fromFiles } from './music-engine.js';
 import { setWallpaperFromFile } from '../desktop.js';
+import { kindleDialog, backupDialog, filesTarget } from './ebooks/kindle.js';
+
+const BOOKS_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 6c-2-1.5-5-2-8-1.5v13c3-.5 6 0 8 1.5 2-1.5 5-2 8-1.5v-13c-3-.5-6 0-8 1.5z"/><path d="M12 6v13"/><path d="M9 13l3 3 3-3M12 9v7" stroke-width="1.6"/></svg>';
+const KINDLE_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="2.5" width="12" height="19" rx="2"/><path d="M9 7h6M9 10.5h6M9 14h4"/></svg>';
+const BOOK_NAME = /\.(epub|pdf|cbz|cbr|cb7|cbt|mobi|azw3?|prc|fb2|txt|rtf|docx|odt|lit)$/i;
 
 // --- API -----------------------------------------------------------------------
 
@@ -163,6 +168,7 @@ class FileBrowser {
       h('div', { class: 'fm-actions' },
         act('New folder', icon.folder, () => this.newFolder()),
         act('Upload', icon.arrowUp, () => this.uploadInput.click()), this.uploadInput,
+        act('Back up books', BOOKS_ICON, () => this.backupBooks()),
         h('span', { class: 'fm-sep' }), ...this.selActions, this.pasteBtn,
         h('div', { class: 'spacer' }),
         h('label', { class: 'check small' }, this.hiddenToggle, ' Hidden files')),
@@ -179,6 +185,7 @@ class FileBrowser {
         { label: 'New folder', icon: icon.folder, action: () => this.newFolder() },
         { label: 'Select all', icon: icon.check, disabled: !this.entries.length, action: () => this.select(this.visible().map((x) => x.name)) },
         { label: 'Upload files…', icon: icon.arrowUp, action: () => this.uploadInput.click() },
+        { label: 'Back up books from this device…', icon: BOOKS_ICON, action: () => this.backupBooks() },
         { label: clipboard.paths.length ? `Paste ${clipboard.paths.length} item${clipboard.paths.length > 1 ? 's' : ''}` : 'Paste', icon: ICON_PASTE, disabled: !clipboard.paths.length, action: () => this.paste() },
         '-', { label: 'Refresh', icon: icon.refresh, action: () => this.refresh() },
       ]);
@@ -464,7 +471,8 @@ class FileBrowser {
       { label: e.dir ? 'Open' : kindOf(e) === 'text' ? 'Open in Notes' : 'Open in Preview', icon: e.dir ? icon.folder : icon.eye, disabled: many, action: () => this.open(e) },
       !e.dir ? { label: 'Download', icon: icon.download, action: () => this.download() } : null,
       !e.dir && /\.(log|lo_|txt)$/i.test(e.name) ? { label: 'Open in Log Viewer', icon: appIcon.logs, disabled: many, action: () => openApp('logs', { root: this.root, path: join(this.path, e.name), key: `${this.root}:${join(this.path, e.name)}` }) } : null,
-      !e.dir && /\.(epub|pdf|cbz|cbr|cb7|cbt|mobi|azw3?|prc|fb2|txt|rtf|docx|odt|lit)$/i.test(e.name) ? { label: 'Read in eBook Reader', icon: appIcon.ebooks, disabled: many, action: () => openApp('ebooks', { root: this.root, path: join(this.path, e.name), name: e.name }) } : null,
+      !e.dir && BOOK_NAME.test(e.name) ? { label: 'Read in eBook Reader', icon: appIcon.ebooks, disabled: many, action: () => openApp('ebooks', { root: this.root, path: join(this.path, e.name), name: e.name }) } : null,
+      !e.dir && BOOK_NAME.test(e.name) ? { label: 'Send to Kindle…', icon: KINDLE_ICON, disabled: many, action: () => this.sendToKindle(e) } : null,
       !e.dir && kindOf(e) !== 'text' ? { label: 'Open in Notes', icon: appIcon.notes, disabled: many, action: () => openApp('notes', { root: this.root, path: join(this.path, e.name) }) } : null,
       ...this.archiveItems(e, many),
       !e.dir && /\.(png|jpe?g|gif|webp|bmp|svg|avif|ora)$/i.test(e.name) ? { label: 'Edit in Paint Pro', icon: appIcon.paintpro, disabled: many, action: () => openApp('paintpro', { root: this.root, path: join(this.path, e.name) }) } : null,
@@ -617,6 +625,37 @@ class FileBrowser {
     call('roots').then((r) => { this.roots = r; this.updateStatus(); }).catch(() => {});
   }
 
+  // ---- Kindle ----
+  // A book file sent to the Kindle app (downloaded for it, or emailed by Send to Kindle).
+  async sendToKindle(e) {
+    let status;
+    try {
+      const res = await fetch('/portal/ebooks/kindle/status', { credentials: 'same-origin' });
+      status = await res.json();
+      if (!res.ok) throw new Error(status.error || `HTTP ${res.status}`);
+    } catch (err) { toastError(err, 'Send to Kindle isn’t available'); return; }
+    const ext = e.name.split('.').pop().toLowerCase();
+    const format = { azw: 'mobi', prc: 'mobi' }[ext] || ext;
+    kindleDialog({ lib: status }, { shared: { root: this.root, path: join(this.path, e.name) }, title: e.name.replace(/\.[^.]+$/, ''), format });
+  }
+  // Books on this device (a Kindle Fire, say) copied into this folder, skipping ones already here.
+  backupBooks() {
+    const root = this.root;
+    const base = this.path;
+    const r = this.roots[root];
+    const abs = `${(r?.path || '').replace(/[\\/]+$/, '')}/${base}`.replace(/\\/g, '/').replace(/\/+$/, '');
+    const books = (state.config?.ebooks?.folder || '').replace(/\\/g, '/').replace(/\/+$/, '');
+    const inLibrary = Boolean(books) && (abs === books || abs.startsWith(`${books}/`));
+    backupDialog({}, filesTarget({
+      folderName: base ? base.split('/').pop() : r?.alias || r?.name || 'this folder',
+      inLibrary,
+      list: async (sub) => (await call('list', { params: { root, path: join(base, sub), hidden: 1 } })).entries.filter((x) => !x.dir),
+      mkdir: async (name) => { try { await call('mkdir', { method: 'POST', body: { root, path: base, name } }); } catch (err) { if (err.status !== 409) throw err; } },
+      upload: async (file, sub, onProgress) => { await this.uploadOne(file, root, join(base, sub), false, { onProgress, throwErrors: true }); return {}; },
+      refresh: () => { if (root === this.root && base === this.path) this.refresh(); this.loadRootsQuiet(); },
+    }));
+  }
+
   // ---- Upload ----
   async upload(fileList) {
     if (!fileList.length) return;
@@ -635,7 +674,7 @@ class FileBrowser {
 
   // Sends the file in pieces. A piece that fails (Wi-Fi drop, server restart, phone asleep) is
   // retried with increasing waits before the upload gives up, and nothing has to start over.
-  async uploadOne(file, root, path, overwrite) {
+  async uploadOne(file, root, path, overwrite, opts = {}) {
     const bar = progressBar(0);
     const label = h('span', { class: 'small muted fm-upload-status' }, 'Starting…');
     let cancelled = false;
@@ -651,6 +690,7 @@ class FileBrowser {
       try {
         ({ id } = await call('upload/start', { method: 'POST', body: { root, path, name: file.name, size: file.size, overwrite } }));
       } catch (err) {
+        if (err.status === 409 && !overwrite && opts.throwErrors) { item.remove(); throw new Error('A different file with this name is already there'); }
         if (err.status === 409 && !overwrite) {
           item.remove();
           const ok = await confirmDialog({ title: `Replace “${file.name}”?`, message: 'A file with this name already exists in this folder.', confirm: 'Replace', danger: true });
@@ -669,6 +709,7 @@ class FileBrowser {
         const [t0, b0] = samples[0];
         const rate = now > t0 ? ((sent - b0) / (now - t0)) * 1000 : 0;
         setBar(file.size ? (sent / file.size) * 100 : 100);
+        opts.onProgress?.(file.size ? sent / file.size : 1);
         const left = rate > 0 ? ` · ${formatDuration((file.size - sent) / rate)} left` : '';
         label.textContent = `${formatBytes(sent)} of ${formatBytes(file.size)}${rate > 0 ? ` · ${formatBytes(rate)}/s` : ''}${left}`;
       };
@@ -722,6 +763,7 @@ class FileBrowser {
     } catch (err) {
       item.remove();
       if (id) call('upload/cancel', { method: 'POST', body: { root, id } }).catch(() => {});
+      if (opts.throwErrors) throw err.cancelled ? new Error('Cancelled') : err;
       if (err.cancelled) toast(`Upload cancelled: ${file.name}`);
       else toastError(err, `Upload failed: ${file.name}`);
     }

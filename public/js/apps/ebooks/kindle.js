@@ -19,8 +19,15 @@ async function call(path, opts = {}) {
   return data;
 }
 
+// The dialogs' styles live with the eBook Reader's; Files may use them before it has opened.
+function addCss() {
+  const href = new URL('../../../css/ebooks.css', import.meta.url).href;
+  if (![...document.querySelectorAll('link[rel=stylesheet]')].some((l) => l.href === href)) document.head.append(h('link', { rel: 'stylesheet', href }));
+}
+
 // A dialog in the middle of the screen; resolves when closed.
 function dialog(title, body, { wide = false } = {}) {
+  addCss();
   let done;
   const closed = new Promise((r) => { done = r; });
   const close = () => { overlay.remove(); document.removeEventListener('keydown', onKey, true); done(); };
@@ -35,8 +42,13 @@ function dialog(title, body, { wide = false } = {}) {
 
 // --- Sending a library book to the Kindle app ---------------------------------------------------
 
+// b: a library book, or a book file in a shared folder ({ shared: { root, path }, title, format }).
+// ctx.lib needs tools.calibre and sendToKindle (the library, or /portal/ebooks/kindle/status).
 export function kindleDialog(app, b) {
   const lib = app.lib || {};
+  const where = b.shared ? `?${new URLSearchParams({ root: b.shared.root, path: b.shared.path })}` : '';
+  const copyPath = b.shared ? `shared/kindle${where}` : `file/${b.id}/kindle`;
+  const sendPath = b.shared ? `shared/send-to-kindle${where}` : `file/${b.id}/send-to-kindle`;
   const calibre = Boolean(lib.tools?.calibre);
   if (b.drm) { toast('This book has DRM', { type: 'error', body: 'It was bought from Amazon, so only the Kindle app it came from can open it.' }); return; }
   // Download: as it is, or made into AZW3 by Calibre on the server.
@@ -57,8 +69,8 @@ export function kindleDialog(app, b) {
     download.disabled = true;
     status.textContent = asIs ? 'Starting the download…' : 'Making a Kindle copy (AZW3) on the server… this can take a minute.';
     try {
-      const r = await call(`file/${b.id}/kindle`, { method: 'POST' });
-      const a = h('a', { href: `/portal/ebooks/file/${b.id}/kindle`, download: r.name });
+      const r = await call(copyPath, { method: 'POST' });
+      const a = h('a', { href: `/portal/ebooks/${copyPath}`, download: r.name });
       document.body.append(a);
       a.click();
       a.remove();
@@ -71,7 +83,7 @@ export function kindleDialog(app, b) {
     send.disabled = true;
     status.textContent = emailAsIs ? `Sending to ${lib.sendToKindle}…` : `Making an ${COMIC.has(b.format) ? 'PDF' : 'EPUB'} copy and sending it to ${lib.sendToKindle}…`;
     try {
-      const r = await call(`file/${b.id}/send-to-kindle`, { method: 'POST' });
+      const r = await call(sendPath, { method: 'POST' });
       status.textContent = '';
       toast(r.demo ? 'Demo: not really sent' : `Sent to ${r.to}`, { type: 'success', timeout: 9000, body: r.demo ? 'In the demo nothing is emailed.' : 'It appears in your Kindle library on every device with the Kindle app in a few minutes. If it doesn’t, check that the sending address is on your Approved Personal Document E-mail List at Amazon.' });
       d.close();
@@ -94,10 +106,11 @@ export function kindleDialog(app, b) {
 
 // --- Backing up the books on this device ---------------------------------------------------------
 
-export function backupDialog(app) {
+// Where backed-up books go: a folder of the eBook Reader's library (the default), or a folder in
+// Files (see filesTarget). A target gives the destination picker, the books already there, and
+// how a file is uploaded.
+function libraryTarget(app) {
   const lib = app.lib || {};
-  if (!lib.configured) { toast('Choose a books folder first', { body: 'In Settings → eBook Reader', type: 'error' }); return; }
-  if (!lib.writable) { toast('MediaDesk can’t write to the books folder', { type: 'error' }); return; }
   const folders = lib.folders || [];
   const suggested = FIRE ? 'Kindle Fire' : 'From my device';
   const sel = h('select', { class: 'input' }, h('option', { value: '__new' }, 'A new folder…'), h('option', { value: '' }, 'The books folder itself'), folders.map((f) => h('option', { value: f }, f)));
@@ -106,6 +119,45 @@ export function backupDialog(app) {
   const showNew = () => { newName.hidden = sel.value !== '__new'; };
   sel.addEventListener('change', showNew);
   showNew();
+  return {
+    problem: !lib.configured ? 'Choose a books folder first (Settings → eBook Reader)' : !lib.writable ? 'MediaDesk can’t write to the books folder' : null,
+    intro: 'Choose books on this device to copy to the MediaDesk server. They’re added to your library, so you can read them in the eBook Reader on any device.',
+    picker: h('div', { class: 'ebk-krowfields' }, h('label', { class: 'field' }, h('span', {}, 'Put them in'), sel), newName),
+    // Books already anywhere in the library (same file name and size).
+    async begin() {
+      const dest = sel.value === '__new' ? newName.value.trim().replace(/[\\/]+/g, ' ') || suggested : sel.value;
+      const have = new Set(app.lib.books.map((x) => `${x.path.split('/').pop().toLowerCase()}|${x.size}`));
+      return { has: (f) => have.has(`${f.name.toLowerCase()}|${f.size}`), upload: (f, onProgress) => upload(`/portal/ebooks/upload?${new URLSearchParams({ name: f.name, folder: dest })}`, f, onProgress) };
+    },
+    async end(counts) { app.lib = await call('library?refresh=1').catch(() => app.lib); if (counts.added && !app.book) app.showLibrary(); },
+  };
+}
+
+// Backing up into the folder open in Files. fm: { folderName, inLibrary, list(subfolder) → names
+// and sizes, mkdir(name), upload(file, subfolder, onProgress), refresh() }.
+export function filesTarget(fm) {
+  const suggested = FIRE ? 'Kindle Fire' : 'From my device';
+  const sel = h('select', { class: 'input' }, h('option', { value: '' }, `This folder (${fm.folderName})`), h('option', { value: '__new' }, 'A new folder in it…'));
+  const newName = h('input', { class: 'input', value: suggested, 'aria-label': 'New folder name' });
+  const showNew = () => { newName.hidden = sel.value !== '__new'; };
+  sel.addEventListener('change', showNew);
+  showNew();
+  return {
+    problem: null,
+    intro: `Choose books on this device to copy into ${fm.folderName} on the MediaDesk server.${fm.inLibrary ? ' This folder is in the eBook Reader’s books folder, so they’re added to your library too.' : ''}`,
+    picker: h('div', { class: 'ebk-krowfields' }, h('label', { class: 'field' }, h('span', {}, 'Put them in'), sel), newName),
+    async begin() {
+      const sub = sel.value === '__new' ? newName.value.trim().replace(/[\\/]+/g, ' ') || suggested : '';
+      if (sub) await fm.mkdir(sub);
+      const have = new Set((await fm.list(sub)).map((e) => `${e.name.toLowerCase()}|${e.size}`));
+      return { has: (f) => have.has(`${f.name.toLowerCase()}|${f.size}`), upload: (f, onProgress) => fm.upload(f, sub, onProgress) };
+    },
+    async end() { fm.refresh(); },
+  };
+}
+
+export function backupDialog(app, target = libraryTarget(app)) {
+  if (target.problem) { toast(target.problem, { type: 'error' }); return; }
   const list = h('div', { class: 'ebk-klist' });
   const summary = h('div', { class: 'ebk-kstatus', role: 'status' });
   // Android's file picker greys out files it has no type for (.azw3, .mobi…), so there it shows
@@ -124,8 +176,6 @@ export function backupDialog(app) {
     running = true;
     choose.disabled = true;
     if (chooseDir) chooseDir.disabled = true;
-    const dest = sel.value === '__new' ? newName.value.trim().replace(/[\\/]+/g, ' ') || suggested : sel.value;
-    const have = new Map(app.lib.books.map((x) => [`${x.path.split('/').pop().toLowerCase()}|${x.size}`, x]));
     const rows = files.map((f) => {
       const format = formatOf(f.name);
       const status = h('span', { class: 'ebk-kst' });
@@ -135,31 +185,32 @@ export function backupDialog(app) {
     clear(list, rows.filter((r) => r.format).map((r) => r.row));
     const skipped = rows.filter((r) => !r.format);
     const counts = { added: 0, already: 0, failed: 0, drm: 0 };
+    let job;
+    try { job = await target.begin(); } catch (err) { summary.textContent = `The backup couldn’t start: ${err.message}`; running = false; choose.disabled = false; if (chooseDir) chooseDir.disabled = false; return; }
     for (const r of rows.filter((x) => x.format)) {
       r.row.scrollIntoView({ block: 'nearest' });
-      if (have.has(`${r.f.name.toLowerCase()}|${r.f.size}`)) { r.status.textContent = '✓ Already in the library'; r.row.classList.add('same'); counts.already++; continue; }
+      if (job.has(r.f)) { r.status.textContent = '✓ Already there'; r.row.classList.add('same'); counts.already++; continue; }
       r.status.textContent = 'Uploading…';
       r.row.classList.add('busy');
       try {
-        const res = await upload(`/portal/ebooks/upload?${new URLSearchParams({ name: r.f.name, folder: dest })}`, r.f, (p) => { r.status.textContent = `${Math.round(p * 100)}%`; });
+        const res = await job.upload(r.f, (p) => { r.status.textContent = `${Math.round(p * 100)}%`; });
         r.row.classList.remove('busy');
-        if (res.existed) { r.status.textContent = '✓ Already in the library'; r.row.classList.add('same'); counts.already++; } else { r.status.textContent = res.book?.drm ? '✓ Backed up (has DRM)' : '✓ Backed up'; r.row.classList.add('done'); counts.added++; if (res.book?.drm) counts.drm++; }
+        if (res?.existed) { r.status.textContent = '✓ Already there'; r.row.classList.add('same'); counts.already++; } else { r.status.textContent = res?.book?.drm ? '✓ Backed up (has DRM)' : '✓ Backed up'; r.row.classList.add('done'); counts.added++; if (res?.book?.drm) counts.drm++; }
       } catch (err) { r.row.classList.remove('busy'); r.row.classList.add('bad'); r.status.textContent = `✕ ${err.message}`; counts.failed++; }
     }
-    summary.textContent = [`${counts.added} backed up`, counts.already ? `${counts.already} already in the library` : null, counts.failed ? `${counts.failed} failed` : null, skipped.length ? `${skipped.length} other file${skipped.length === 1 ? '' : 's'} skipped (not books)` : null].filter(Boolean).join(' · ');
+    summary.textContent = [`${counts.added} backed up`, counts.already ? `${counts.already} already there` : null, counts.failed ? `${counts.failed} failed` : null, skipped.length ? `${skipped.length} other file${skipped.length === 1 ? '' : 's'} skipped (not books)` : null].filter(Boolean).join(' · ');
     if (counts.drm) summary.append(h('p', { class: 'ebk-kwarn small' }, `${counts.drm} of them ${counts.drm === 1 ? 'has' : 'have'} DRM (bought from Amazon): kept safe on the server, but only the Kindle app can open ${counts.drm === 1 ? 'it' : 'them'}.`));
-    app.lib = await call('library?refresh=1').catch(() => app.lib);
+    await target.end(counts);
     running = false;
     choose.disabled = false;
     if (chooseDir) chooseDir.disabled = false;
-    if (counts.added && !app.book) app.showLibrary();
   }
   dialog(FIRE ? 'Back up this Kindle Fire’s books' : 'Back up books from this device', h('div', { class: 'ebk-kbody' },
-    h('p', { class: 'small' }, 'Choose books on this device to copy to the MediaDesk server. They’re added to your library, so you can read them in the eBook Reader on any device.'),
+    h('p', { class: 'small' }, target.intro),
     FIRE || ANDROID ? h('div', { class: 'ebk-ksteps' }, h('b', {}, 'Where the books are:'), h('ul', {},
       h('li', {}, 'Books you’ve downloaded or copied onto the tablet are usually in ', h('b', {}, 'Internal storage'), ' → ', h('b', {}, 'Books'), ', ', h('b', {}, 'Documents'), ' or ', h('b', {}, 'Download'), '. Tap ☰ in the picker to find them; you can tick several.'),
       h('li', {}, 'Books bought from Amazon are kept inside the Kindle app, where no other app can reach them, and they’re protected (DRM), so they can’t be backed up this way. They’re already kept by Amazon in your Kindle library.'))) : null,
-    h('div', { class: 'ebk-krowfields' }, h('label', { class: 'field' }, h('span', {}, 'Put them in'), sel), newName),
+    target.picker,
     h('div', { class: 'btn-row' }, choose, chooseDir),
     list, summary), { wide: true });
 }
