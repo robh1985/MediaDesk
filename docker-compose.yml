@@ -9,6 +9,15 @@ services:
     restart: unless-stopped
     ports:
       - "8080:8080"
+    # Network shares in Files (Settings → Files → Network shares) are mounted by MediaDesk inside
+    # the container, which needs permission for it. Uncomment these to use them:
+    # cap_add:
+    #   - SYS_ADMIN          # mounting (SMB, NFS, SFTP, WebDAV)
+    #   - DAC_READ_SEARCH    # SMB
+    # devices:
+    #   - /dev/fuse          # SFTP and WebDAV
+    # security_opt:
+    #   - apparmor:unconfined  # Ubuntu / Debian hosts: AppArmor otherwise blocks mounting
     volumes:
       - ./config:/config
       # - /mnt/games:/games      # The Game Console: its root folder (then set GAMES_DIR below); writable, for saves

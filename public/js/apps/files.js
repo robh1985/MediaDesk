@@ -1,8 +1,9 @@
 // Files: a file manager for the folders shared in Settings → Files.
 
+import { shareDialog, NET_ICON } from '../netshares-ui.js';
 import { h, clear, formatBytes, formatDuration, debounce, toast, toastError, confirmDialog, contextMenu, spinner, emptyState, errorState, progressBar, isTouch } from '../ui.js';
 import { icon, appIcon } from '../icons.js';
-import { state, appPref } from '../api.js';
+import { state, appPref, portal } from '../api.js';
 import { openApp } from '../wm.js';
 import { isArchiveName, canOpenAsArchive, addToArchive, quickAdd, quickExtract } from './archive.js';
 import { fromFiles } from './music-engine.js';
@@ -114,20 +115,96 @@ class FileBrowser {
     // Folder names and tags edited in Settings show up straight away.
     const onFolders = () => { if (this.win.el.isConnected) this.loadRoots(); else removeEventListener('mediadesk:folders', onFolders); };
     addEventListener('mediadesk:folders', onFolders);
-    this.root = 0;
-    this.path = '';
+    // Tabs: each one a place (shared folder + path) with its own back / forward history.
+    this.tabs = [{ root: 0, path: '', history: [], future: [] }];
+    this.tabIdx = 0;
     this.entries = [];
     this.selected = new Set();
     this.anchor = null;
-    this.history = [];
-    this.future = [];
     this.sort = JSON.parse(localStorage.getItem('mediadesk.files.sort') || '{"key":"name","dir":1}');
     // The checkbox remembers your choice in this browser; Settings → Files sets the starting point.
     const savedHidden = localStorage.getItem('mediadesk.files.hidden');
     this.showHidden = savedHidden === null ? Boolean(appPref('files', 'showHidden')) : savedHidden === '1';
     this.build();
-    this.loadRoots().then(() => this.go(opts.root ?? 0, opts.path ?? '', false));
-    win.on('reopen', (o) => { if (o?.root !== undefined) this.go(o.root, o.path || ''); });
+    this.loadRoots().then(() => {
+      // The tabs open last time (unless Files was asked to show a particular folder).
+      const saved = opts.root === undefined ? this.savedTabs() : null;
+      if (saved?.length) {
+        this.tabs = saved.map((t) => ({ root: t.root, path: t.path, history: [], future: [] }));
+        this.tabIdx = Math.min(Math.max(0, Number(localStorage.getItem('mediadesk.files.tab')) || 0), this.tabs.length - 1);
+        this.drawTabs();
+        this.go(this.root, this.path, false);
+      } else this.go(opts.root ?? 0, opts.path ?? '', false);
+    });
+    // Asked to show a folder while open: in a new tab, unless this one is already there.
+    win.on('reopen', (o) => {
+      if (o?.root === undefined) return;
+      const at = this.tabs.findIndex((t) => t.root === o.root && t.path === (o.path || ''));
+      if (at >= 0) this.switchTab(at); else this.newTab(o.root, o.path || '');
+    });
+  }
+
+  // ---- Tabs ----
+  get tab() { return this.tabs[this.tabIdx]; }
+  get root() { return this.tab.root; }
+  set root(v) { this.tab.root = v; }
+  get path() { return this.tab.path; }
+  set path(v) { this.tab.path = v; }
+  get history() { return this.tab.history; }
+  set history(v) { this.tab.history = v; }
+  get future() { return this.tab.future; }
+  set future(v) { this.tab.future = v; }
+  savedTabs() {
+    try {
+      const t = JSON.parse(localStorage.getItem('mediadesk.files.tabs') || 'null');
+      return Array.isArray(t) ? t.filter((x) => this.roots[x?.root] && typeof x.path === 'string').slice(0, 12) : null;
+    } catch { return null; }
+  }
+  saveTabs() {
+    try {
+      localStorage.setItem('mediadesk.files.tabs', JSON.stringify(this.tabs.map((t) => ({ root: t.root, path: t.path }))));
+      localStorage.setItem('mediadesk.files.tab', String(this.tabIdx));
+    } catch { /* full */ }
+  }
+  tabLabel(t) {
+    const r = this.roots[t.root];
+    return t.path ? t.path.split('/').pop() : r?.name || 'Folder';
+  }
+  drawTabs() {
+    const many = this.tabs.length > 1;
+    clear(this.tabBar, this.tabs.map((t, i) => {
+      const r = this.roots[t.root];
+      const el = h('div', { class: `fm-tab ${i === this.tabIdx ? 'active' : ''}`, role: 'tab', 'aria-selected': String(i === this.tabIdx), title: `${r?.name || ''}${t.path ? ` › ${t.path.split('/').join(' › ')}` : ''}`, dataset: { tab: i },
+        onclick: () => this.switchTab(i), onauxclick: (e) => { if (e.button === 1 && many) { e.preventDefault(); this.closeTab(i); } } },
+      h('span', { class: 'fm-tab-icon', html: r?.network ? NET_ICON : fileIcon('folder') }),
+      h('span', { class: 'fm-tab-name' }, this.tabLabel(t)),
+      many ? h('button', { class: 'fm-tab-close', title: 'Close tab', 'aria-label': 'Close tab', onclick: (e) => { e.stopPropagation(); this.closeTab(i); } }, '×') : null);
+      // Drop files on a tab to move (or copy) them there.
+      this.dropTarget(el, () => ({ root: t.root, path: t.path }));
+      return el;
+    }), h('button', { class: 'fm-tab-new', title: 'New tab', 'aria-label': 'New tab', onclick: () => this.newTab(this.root, this.path) }, '+'));
+    this.tabBar.querySelector('.fm-tab.active')?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  }
+  newTab(root, path = '') {
+    if (!this.roots[root]) return;
+    this.tabs.splice(this.tabIdx + 1, 0, { root, path, history: [], future: [] });
+    this.switchTab(this.tabIdx + 1);
+  }
+  switchTab(i) {
+    if (!this.tabs[i]) return;
+    this.tabIdx = i;
+    this.entries = [];
+    this.selected.clear();
+    this.filter.value = '';
+    this.drawTabs();
+    this.saveTabs();
+    this.refresh();
+  }
+  closeTab(i) {
+    if (this.tabs.length < 2) return;
+    this.tabs.splice(i, 1);
+    if (this.tabIdx > i || this.tabIdx >= this.tabs.length) this.tabIdx = Math.max(0, this.tabIdx - 1);
+    this.switchTab(this.tabIdx);
   }
 
   // ---- Layout ----
@@ -162,7 +239,9 @@ class FileBrowser {
     this.uploads = h('div', { class: 'fm-uploads', hidden: true });
     this.dropHint = h('div', { class: 'fm-drop' }, h('span', { html: icon.download }), 'Drop to upload here');
 
+    this.tabBar = h('div', { class: 'fm-tabs', role: 'tablist' });
     const main = h('div', { class: 'fm-main' },
+      this.tabBar,
       h('div', { class: 'fm-toolbar' }, this.backBtn, this.fwdBtn, this.upBtn, this.crumbs,
         b('Refresh', icon.refresh, () => this.refresh()), this.filter),
       h('div', { class: 'fm-actions' },
@@ -207,6 +286,7 @@ class FileBrowser {
   async loadRoots() {
     try { this.roots = await call('roots'); } catch (err) { this.roots = []; toastError(err); }
     this.drawRoots();
+    if (this.tabBar) this.drawTabs();
   }
 
   // Shared folders: alias (or folder name), the full path when there's an alias, tags, free space.
@@ -217,17 +297,25 @@ class FileBrowser {
     const shownTags = tags.filter((t) => used.has(t.id));
     if (this.tagFilter && !used.has(this.tagFilter)) this.tagFilter = null;
     const roots = this.roots.filter((r) => !this.tagFilter || (r.tags || []).includes(this.tagFilter));
+    const admin = window.mediadeskSession?.user?.role === 'admin' && !state.config?.mock;
     clear(this.sidebar,
-      h('div', { class: 'fm-side-title' }, 'Shared folders'),
+      h('div', { class: 'fm-side-title' }, 'Shared folders',
+        admin ? h('button', { class: 'fm-side-add', title: 'Connect a network share', 'aria-label': 'Connect a network share', html: NET_ICON + '<b>+</b>', onclick: () => this.connectShare() }) : null),
       shownTags.length ? h('div', { class: 'fm-tag-filter' },
         h('button', { class: `tag-chip ${this.tagFilter ? '' : 'on'}`, onclick: () => { this.tagFilter = null; this.drawRoots(); } }, 'All'),
         shownTags.map((t) => h('button', { class: `tag-chip ${this.tagFilter === t.id ? 'on' : ''}`, style: { '--tag': t.color }, onclick: () => { this.tagFilter = this.tagFilter === t.id ? null : t.id; this.drawRoots(); } }, h('span', { class: 'tag-dot' }), t.name))) : null,
       roots.map((r) => {
         const pct = r.total ? ((r.total - r.free) / r.total) * 100 : 0;
-        const btn = h('button', { class: `nav-item fm-root ${r.id === this.root ? 'active' : ''}`, dataset: { root: r.id }, title: r.path, onclick: () => this.go(r.id, '') },
-          h('span', { class: 'nav-icon', html: r.ok ? fileIcon('folder') : icon.alert }),
+        const btn = h('button', { class: `nav-item fm-root ${r.id === this.root ? 'active' : ''} ${r.offline ? 'offline' : ''}`, dataset: { root: r.id }, title: r.offline || (r.network ? r.network.label : r.path), onclick: (e) => (e.ctrlKey || e.metaKey ? this.newTab(r.id, '') : this.go(r.id, '')),
+          onauxclick: (e) => { if (e.button === 1) { e.preventDefault(); this.newTab(r.id, ''); } },
+          oncontextmenu: (e) => { e.preventDefault(); contextMenu(e.clientX, e.clientY, [
+            { label: 'Open', icon: icon.folder, action: () => this.go(r.id, '') },
+            { label: 'Open in new tab', icon: icon.plus, action: () => this.newTab(r.id, '') },
+            ...(r.network && admin ? ['-', { label: 'Network share settings…', icon: NET_ICON, action: () => openApp('settings', { tab: 'files' }) }] : []),
+          ]); } },
+          h('span', { class: 'nav-icon', html: r.offline ? icon.alert : r.network ? NET_ICON : r.ok ? fileIcon('folder') : icon.alert }),
           h('span', { class: 'fm-root-text' }, h('span', { class: 'fm-root-name' }, r.name),
-            r.alias ? h('span', { class: 'fm-root-path' }, r.path) : null,
+            r.network ? h('span', { class: 'fm-root-path' }, r.offline ? 'Not connected' : r.network.label) : r.alias ? h('span', { class: 'fm-root-path' }, r.path) : null,
             (r.tags || []).length ? h('span', { class: 'fm-root-tags' }, r.tags.map((id) => byId[id] && h('span', { class: 'tag-chip mini', style: { '--tag': byId[id].color } }, h('span', { class: 'tag-dot' }), byId[id].name))) : null,
             r.total ? h('span', { class: 'fm-root-free' }, progressBar(pct, pct > 90 ? 'bad' : pct > 75 ? 'warn' : ''), `${formatBytes(r.free)} free`) : null));
         this.dropTarget(btn, () => ({ root: r.id, path: '' }));
@@ -235,6 +323,18 @@ class FileBrowser {
       }),
       h('div', { class: 'spacer' }),
       h('button', { class: 'nav-item small', onclick: () => openApp('settings', { tab: 'files' }) }, h('span', { class: 'nav-icon', html: icon.sliders }), 'Manage folders'));
+  }
+
+  // Admins: connect a network share right here (it joins the shared folders).
+  async connectShare() {
+    let platform = '';
+    try { platform = (await fetch('/portal/netshares', { credentials: 'same-origin' }).then((r) => r.json())).platform || ''; } catch { /* fine */ }
+    const share = await shareDialog(null, { platform });
+    if (!share) return;
+    try { state.config = await portal.config(); } catch { /* later */ }
+    await this.loadRoots();
+    const at = this.roots.findIndex((r) => r.network?.id === share.id);
+    if (at >= 0) this.newTab(at, '');
   }
 
   // ---- Navigation ----
@@ -245,6 +345,8 @@ class FileBrowser {
     this.path = path;
     this.filter.value = '';
     this.selected.clear();
+    this.drawTabs();
+    this.saveTabs();
     await this.refresh();
     this.list.focus({ preventScroll: true });
   }
@@ -347,6 +449,7 @@ class FileBrowser {
       this.clickSelect(e.name, ev);
     });
     el.addEventListener('dblclick', () => this.open(e));
+    if (e.dir) el.addEventListener('auxclick', (ev) => { if (ev.button === 1) { ev.preventDefault(); this.newTab(this.root, join(this.path, e.name)); } });
     el.addEventListener('contextmenu', (ev) => {
       ev.preventDefault();
       if (!this.selected.has(e.name)) this.select([e.name]);
@@ -469,6 +572,7 @@ class FileBrowser {
     const many = this.selected.size > 1;
     contextMenu(ev.clientX, ev.clientY, [
       { label: e.dir ? 'Open' : kindOf(e) === 'text' ? 'Open in Notes' : 'Open in Preview', icon: e.dir ? icon.folder : icon.eye, disabled: many, action: () => this.open(e) },
+      e.dir ? { label: 'Open in new tab', icon: icon.plus, disabled: many, action: () => this.newTab(this.root, join(this.path, e.name)) } : null,
       !e.dir ? { label: 'Download', icon: icon.download, action: () => this.download() } : null,
       !e.dir && /\.(log|lo_|txt)$/i.test(e.name) ? { label: 'Open in Log Viewer', icon: appIcon.logs, disabled: many, action: () => openApp('logs', { root: this.root, path: join(this.path, e.name), key: `${this.root}:${join(this.path, e.name)}` }) } : null,
       !e.dir && BOOK_NAME.test(e.name) ? { label: 'Read in eBook Reader', icon: appIcon.ebooks, disabled: many, action: () => openApp('ebooks', { root: this.root, path: join(this.path, e.name), name: e.name }) } : null,

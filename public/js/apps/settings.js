@@ -1,5 +1,6 @@
 // Settings: a page per app (connection, notifications, preferences), plus general options.
 
+import { sharesSection } from '../netshares-ui.js';
 import { h, clear, toast, toastError, spinner, sidebarLayout, confirmDialog, contextMenu, debounce } from '../ui.js';
 import { icon, appIcon } from '../icons.js';
 import { portal, state, radarr, sonarr, nzbget, jellyfin, isConfigured } from '../api.js';
@@ -586,7 +587,9 @@ function renderFiles(container) {
   const files = cfg.files || { roots: [] };
   const area = h('textarea', { class: 'input fm-roots-input', rows: 6, spellcheck: 'false', disabled: cfg.mock,
     placeholder: 'One folder per line, for example:\nD:\\Media\nC:\\Users\\You\\Downloads' });
-  area.value = files.roots.join('\n');
+  // Network shares are listed in their own section (not typed here).
+  const netRoots = new Set((files.folders || []).filter((f) => f.network).map((f) => f.path));
+  area.value = files.roots.filter((r) => !netRoots.has(r)).join('\n');
   const suggestions = h('div', { class: 'chips' });
   const save = h('button', { class: 'btn btn-primary', disabled: cfg.mock }, h('span', { html: icon.check }), 'Save folders');
 
@@ -606,6 +609,9 @@ function renderFiles(container) {
       h('div', { class: 'small muted', style: { margin: '10px 0 6px' } }, 'Suggestions from your connected apps:'),
       suggestions,
       h('div', { class: 'btn-row' }, save)),
+    section('Network shares',
+      h('p', { class: 'muted small' }, 'Connect a share on another computer or NAS — a Windows / SMB share, an NFS export, an SFTP folder or a WebDAV folder (Nextcloud) — and it’s one of the shared folders above, in Files and every app that uses them. The MediaDesk server connects it (and reconnects it when it starts), so it needs to reach the share.'),
+      sharesSection(async () => { try { state.config = await portal.config(); window.dispatchEvent(new Event('mediadesk:folders')); } catch { /* later */ } })),
     folderDetails(cfg),
     view,
     previewHelpers(cfg));

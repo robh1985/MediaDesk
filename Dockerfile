@@ -4,9 +4,12 @@ FROM node:22-alpine
 # Calibre lets the eBook Reader open AZW3, Word, RTF, ODT and LIT books (converted to EPUB). It's
 # included unless you build with --build-arg WITH_CALIBRE=false (it adds a few hundred MB). Where
 # Alpine has no Calibre package for the platform, the image is built without it and says so.
+# cifs-utils, nfs-utils, sshfs and davfs2 connect network shares in Files (SMB, NFS, SFTP, WebDAV);
+# the container also needs permission to mount them (see docker-compose.yml).
 ARG WITH_OFFICE=false
 ARG WITH_CALIBRE=true
-RUN apk add --no-cache ffmpeg 7zip \
+RUN apk add --no-cache ffmpeg 7zip cifs-utils nfs-utils sshfs \
+ && (apk add --no-cache davfs2 || echo "WARNING: davfs2 isn't available; WebDAV shares can't be connected." >&2) \
  && if [ "$WITH_OFFICE" = "true" ]; then apk add --no-cache libreoffice ttf-dejavu ttf-liberation; fi \
  && if [ "$WITH_CALIBRE" = "true" ]; then \
       apk add --no-cache calibre \
@@ -15,7 +18,7 @@ RUN apk add --no-cache ffmpeg 7zip \
 # Calibre's tools run without a screen.
 ENV QT_QPA_PLATFORM=offscreen
 WORKDIR /app
-COPY package.json server.js files.js appsettings.js notify.js mock.js mock-plex.js mock-games.js mock-pikvm.js games.js pikvm.js wallpapers.js media.js archive.js family.js family-auth.js family-recipes.js ebooks.js mock-ebooks.js smtp.js users.js passkeys.js trips.js artmatch.js ./
+COPY package.json server.js files.js appsettings.js notify.js mock.js mock-plex.js mock-games.js mock-pikvm.js games.js pikvm.js wallpapers.js media.js archive.js family.js family-auth.js family-recipes.js ebooks.js mock-ebooks.js smtp.js users.js passkeys.js netshares.js trips.js artmatch.js ./
 COPY public ./public
 ENV NODE_ENV=production PORT=8080 CONFIG_PATH=/config/config.json
 VOLUME /config

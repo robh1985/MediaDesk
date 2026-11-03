@@ -59,6 +59,10 @@ const within = (child, parent) => {
   return c === pr || c.startsWith(pr.endsWith(path.sep) ? pr : pr + path.sep);
 };
 
+// Network shares (netshares.js): which shared folders are shares, and whether they're connected.
+let network = { offline: () => null, info: () => null };
+function setNetwork(n) { network = n; }
+
 function rootList(config) {
   const raw = Array.isArray(config.fileRoots) ? config.fileRoots : [];
   const info = config.fileRootInfo || {};
@@ -67,7 +71,7 @@ function rootList(config) {
     const abs = path.resolve(r.trim());
     const meta = info[abs] || {};
     // The alias (if any) is the name people see; the folder name is the fallback.
-    return { id, path: abs, folderName: path.basename(abs) || abs, name: meta.alias || path.basename(abs) || abs, alias: meta.alias || '', tags: (meta.tags || []).filter((t) => tagIds.has(t)) };
+    return { id, path: abs, folderName: path.basename(abs) || abs, name: meta.alias || path.basename(abs) || abs, alias: meta.alias || '', tags: (meta.tags || []).filter((t) => tagIds.has(t)), ...(network.info(abs) || {}) };
   });
 }
 
@@ -117,6 +121,9 @@ async function resolveIn(root, rel = '') {
   if (parts.some((p) => p === '..' || p === '.')) throw new FileError(400, 'Invalid path');
   const abs = path.resolve(root.path, ...parts);
   if (!within(abs, root.path)) throw new FileError(400, 'Path is outside the allowed folder');
+  // A network share that isn't connected: its folder is empty (and not the share), so not used.
+  const off = network.offline(root.path);
+  if (off) throw new FileError(503, off);
   // Follow symlinks/junctions on the deepest existing ancestor and make sure it stays inside.
   const realRoot = await fsp.realpath(root.path).catch(() => { throw new FileError(404, `Folder root ${root.path} is not reachable`); });
   let probe = abs;
@@ -507,4 +514,4 @@ async function resolveInShared(config, rootId, rel) {
   try { return await resolveIn(getRoot(config, rootId), rel); } catch (err) { throw toFileError(err); }
 }
 
-module.exports = { handle, rootList, validateRoots, resolveShared, resolveInShared, cleanTags, cleanRootInfo };
+module.exports = { handle, setNetwork, rootList, validateRoots, resolveShared, resolveInShared, cleanTags, cleanRootInfo };

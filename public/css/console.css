@@ -493,3 +493,30 @@
 .theme-spotlight .gc-theme.has-sysbg .sp-bg { opacity: .35; }
 .theme-mediacenter .gc-theme.has-sysbg .mce-glow { opacity: .35; }
 .gc-theme > .gc-sysbg-credit { position: absolute; inset: auto auto 6px 10px; z-index: 30; max-width: 60%; font-size: 10.5px; opacity: .65; pointer-events: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-shadow: 0 1px 3px rgba(0,0,0,.6); color: #fff; }
+
+/* Adding games: dropping them on the Game Console, and their progress. */
+.gc-drop { position: absolute; inset: 0; z-index: 60; display: flex; gap: 16px; padding: 22px; background: rgba(0, 0, 0, .55); backdrop-filter: blur(3px); }
+.gc-drop-zone { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; border: 3px dashed rgba(255, 255, 255, .5); border-radius: 22px; color: #fff; text-align: center; padding: 20px; transition: background .12s, border-color .12s; pointer-events: auto; }
+.gc-drop-zone * { pointer-events: none; }
+.gc-drop-zone b { font-size: 24px; }
+.gc-drop-zone span { opacity: .8; }
+.gc-drop-zone.over { background: color-mix(in srgb, var(--gc-accent) 28%, transparent); border-color: var(--gc-accent); }
+.gc-add { position: absolute; inset: 0; z-index: 61; display: grid; place-items: center; background: rgba(0, 0, 0, .6); padding: 18px; }
+.gc-add-box { width: min(640px, 100%); max-height: 100%; overflow: auto; background: var(--gc-panel); color: var(--gc-panel-fg); border-radius: 18px; padding: 22px; box-shadow: 0 20px 60px rgba(0, 0, 0, .5); display: flex; flex-direction: column; gap: 12px; }
+.gc-add-box h2 { margin: 0; }
+.gc-add-box p { margin: 0; }
+.gc-add-rows { display: flex; flex-direction: column; gap: 8px; }
+.gc-add-row { padding: 10px 12px; border-radius: 12px; background: rgba(255, 255, 255, .06); display: flex; flex-direction: column; gap: 6px; }
+.gc-add-name { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; }
+.gc-add-name b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.gc-add-name .gc-small { flex: none; max-width: 60%; text-align: right; }
+.gc-add-bar { height: 5px; border-radius: 3px; background: rgba(255, 255, 255, .12); overflow: hidden; }
+.gc-add-bar i { display: block; height: 100%; width: 0; background: var(--gc-accent); transition: width .2s; }
+.gc-add-row.ok .gc-small { color: #6ee7a0; }
+.gc-add-row.bad .gc-small { color: #ff8a8a; }
+.gc-add-row.ask .gc-small { color: var(--gc-accent); }
+.gc-add-row.ok .gc-add-bar, .gc-add-row.bad .gc-add-bar, .gc-add-row.skip .gc-add-bar, .gc-add-row.ask .gc-add-bar { display: none; }
+.gc-add-pick { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.gc-add-pick .gc-btn { padding: 7px 16px; font-size: 14px; }
+.gc-add-select { flex: 1; min-width: 200px; padding: 8px 10px; border-radius: 10px; border: 1px solid var(--gc-line); background: rgba(0, 0, 0, .3); color: inherit; font: inherit; }
+.gc-add-select option { color: #111; }

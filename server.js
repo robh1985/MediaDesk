@@ -23,6 +23,7 @@ const { createEbooks } = require('./ebooks');
 const { createTrips } = require('./trips');
 const { createUsers } = require('./users');
 const { sendMail } = require('./smtp');
+const { createNetShares } = require('./netshares');
 
 const ROOT = __dirname;
 
@@ -130,6 +131,17 @@ function loadConfig() {
   if (env.PORTAL_PASSWORD) cfg.portalPassword = env.PORTAL_PASSWORD;
   if (env.FILE_ROOTS) cfg.fileRoots = env.FILE_ROOTS.split(path.delimiter).filter(Boolean);
   if (MOCK) cfg.fileRoots = require('./mock').demoFileRoots();
+  // Network shares (Settings → Files) are shared folders too, named after the share.
+  if (!MOCK && Array.isArray(cfg.networkShares) && cfg.networkShares.length) {
+    const { rootFor } = require('./netshares');
+    cfg.fileRoots = Array.isArray(cfg.fileRoots) ? [...cfg.fileRoots] : [];
+    cfg.fileRootInfo = { ...(cfg.fileRootInfo || {}) };
+    for (const sh of cfg.networkShares) {
+      const r = path.resolve(rootFor(path.dirname(CONFIG_PATH), sh));
+      if (!cfg.fileRoots.some((x) => path.resolve(String(x)) === r)) cfg.fileRoots.push(r);
+      cfg.fileRootInfo[r] = { ...(cfg.fileRootInfo[r] || {}), alias: sh.name };
+    }
+  }
   if (env.GAMES_DIR) cfg.gamesFolder = env.GAMES_DIR;
   if (env.EBOOKS_DIR) cfg.ebooksFolder = env.EBOOKS_DIR;
   if (env.EBOOK_CONVERT_PATH) cfg.ebookConvertPath = env.EBOOK_CONVERT_PATH;
@@ -210,7 +222,7 @@ function filesStatus(u = reqUser()) {
   let reason = null;
   if (!users.enabled() && !MOCK) reason = 'password';
   else if (!roots.length) reason = 'roots';
-  return { enabled: !reason, reason, roots, folders: list.map(({ path: p, alias, tags, folderName }) => ({ path: p, alias, tags, folderName })), tags: config.fileTags || [] };
+  return { enabled: !reason, reason, roots, folders: list.map(({ path: p, alias, tags, folderName, network }) => ({ path: p, alias, tags, folderName, network: network || null })), tags: config.fileTags || [] };
 }
 
 // ---------------------------------------------------------------------------
@@ -470,13 +482,15 @@ async function updateConfig(req, res) {
   }
   if (body.appSettings) next.appSettings = appSettings.merge(next.appSettings, body.appSettings);
   if (Array.isArray(body.fileRoots)) {
-    const { roots, errors } = await files.validateRoots(body.fileRoots);
+    // Network shares' folders aren't kept in the list (they come from the shares themselves).
+    const netRoots = new Set(netShares.roots().map((r) => path.resolve(r)));
+    const { roots, errors } = await files.validateRoots(body.fileRoots.filter((r) => typeof r !== 'string' || !netRoots.has(path.resolve(r.trim()))));
     if (errors.length) return sendJson(res, 400, { error: `Check these folders: ${errors.join('; ')}` });
     next.fileRoots = roots;
   }
   if (Array.isArray(body.fileTags)) next.fileTags = files.cleanTags(body.fileTags);
   if (body.fileRootInfo || Array.isArray(body.fileTags) || Array.isArray(body.fileRoots)) {
-    next.fileRootInfo = files.cleanRootInfo(body.fileRootInfo || next.fileRootInfo, next.fileRoots || [], next.fileTags || []);
+    next.fileRootInfo = files.cleanRootInfo(body.fileRootInfo || next.fileRootInfo, [...(next.fileRoots || []), ...netShares.roots()], next.fileTags || []);
   }
   if (typeof body.gamesFolder === 'string') {
     const folder = body.gamesFolder.trim();
@@ -746,6 +760,13 @@ function gamesFor(u) {
 }
 const family = createFamily({ dataDir: MOCK ? path.join(require('node:os').tmpdir(), 'mediadesk-demo-data') : path.dirname(CONFIG_PATH), mock: MOCK });
 const archive = createArchive({ getConfig: () => filesConfigFor(reqUser()), resolveInShared: files.resolveInShared, filesEnabled: () => filesStatus(reqUser()).enabled });
+// Network shares (SMB, NFS, SFTP, WebDAV) mounted as shared folders for Files.
+const netShares = createNetShares({
+  dataDir: path.dirname(CONFIG_PATH), mock: MOCK,
+  getShares: () => (Array.isArray(config.networkShares) ? config.networkShares : []),
+  setShares: async (list) => { const next = fs.existsSync(CONFIG_PATH) ? readConfigFile() : {}; next.networkShares = list; saveConfig(next); },
+});
+files.setNetwork({ offline: (abs) => netShares.offline(abs), info: (abs) => netShares.info(abs) });
 const wallpapers = createWallpapers(MOCK ? path.join(require('node:os').tmpdir(), 'mediadesk-demo-wallpapers') : path.join(path.dirname(CONFIG_PATH), 'wallpapers'));
 
 // --- Notifications ------------------------------------------------------------
@@ -787,7 +808,7 @@ const ROUTE_APPS = [
 ];
 const appsFor = (p) => ROUTE_APPS.find(([prefix]) => p.startsWith(prefix))?.[1] || null;
 // Changing MediaDesk itself (connections, signing in to Plex, testing services).
-const ADMIN_ROUTES = ['/portal/test', '/portal/plex'];
+const ADMIN_ROUTES = ['/portal/test', '/portal/plex', '/portal/netshares'];
 // Notifications only about apps a person has.
 function notesFor(u, summary) {
   if (u.role === 'admin' || !summary || typeof summary !== 'object') return summary;
@@ -944,6 +965,10 @@ async function handle(req, res) {
     return gamesFor(me).handle(req, res, u2, { sendJson, readJson });
   }
   if (p === '/portal/ebooks/library' && personalOn(me)) await adoptPersonalBooks(me).catch((err) => console.error(`eBook Reader: ${err.message}`));
+  if (p === '/portal/netshares' || p.startsWith('/portal/netshares/')) {
+    if (MOCK && req.method !== 'GET') return sendJson(res, 400, { error: 'Network shares can’t be connected in demo mode' });
+    return netShares.handle(req, res, p, { sendJson, readJson });
+  }
   if (p.startsWith('/portal/games/')) return games.handle(req, res, url, { sendJson, readJson });
   if (p.startsWith('/portal/trips/')) return tripPlanner.handle(req, res, url, { sendJson, readJson });
   if (p.startsWith('/portal/ebooks/')) return ebooks.handle(req, res, url, { sendJson, readJson, readBody });
@@ -971,6 +996,9 @@ const server = http.createServer((req, res) => {
     else res.end();
   });
 });
+
+// Big uploads (disc images, videos) can take longer than Node's default 5 minutes.
+server.requestTimeout = 0;
 
 // WebSockets: only PiKVM's keyboard/mouse channel, for a logged-in MediaDesk page on this site.
 server.on('upgrade', (req, socket, head) => {
@@ -1002,6 +1030,7 @@ if (resetArg !== -1) {
     .then((u) => { console.log(`The password of ${u.username} was changed (and two-step sign-in turned off).`); exitAfterLog(0); })
     .catch((err) => { console.error(err.message); exitAfterLog(1); });
 } else users.migrate().catch((err) => console.error(`Accounts: ${err.message}`)).then(() => server.listen(PORT, HOST, () => {
+  netShares.connectAll().catch((err) => console.error(`Network shares: ${err.message}`));
   console.log(`MediaDesk ${VERSION} starting`);
   notifier.start();
   media.detect(config).then((t) => {

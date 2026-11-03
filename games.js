@@ -1110,6 +1110,137 @@ function createGames({ dataDir, getFolder, mock = false, sample = null, idSalt =
     return { moved: moved.length, skipped, bios: biosMoved };
   }
 
+  // ---- Adding games from a device ----
+  // Each drop is one or more batches: a game on its own, or a .cue / .gdi / .m3u with its track
+  // files. They're received into a hidden folder in the games folder (so placing them is just a
+  // rename), then the console is worked out as the library scan does it (the file type, what's
+  // inside a zip, a .bin's or disc image's first bytes) and the game goes into its console's
+  // folder: ROMS/<console>/ in the layout (disc games in a folder of their own), or the console's
+  // folder at the top of the games folder otherwise. BIOS files go to BIOS/<console>/.
+  const MAX_ROM = 16 * 1024 ** 3;
+  const stagingRoot = () => path.join(path.resolve(getFolder()), '.mediadesk-uploads');
+  const batchDir = (batch) => {
+    if (!/^[a-f0-9]{16}$/.test(batch || '')) throw new GameError(400, 'Which upload?');
+    return path.join(stagingRoot(), batch);
+  };
+  const uploadName = (n) => path.basename(String(n || '')).replace(/[\u0000-\u001f<>:"/\\|?*]+/g, '_').replace(/[. ]+$/, '').trim().slice(0, 200);
+  function checkUploadable() {
+    if (mock) throw new GameError(400, 'In the demo, games can’t be added (there’s no games folder to put them in)');
+    if (!getFolder()) throw new GameError(400, 'Choose the games folder in Settings → The Game Console first');
+  }
+  async function receiveRom(req, batch, name) {
+    checkUploadable();
+    const file = uploadName(name);
+    const ext = extOf(file);
+    if (!file || !ext) throw new GameError(400, 'That file has no name');
+    if (ART_EXT.includes(ext) || (!SERVE_EXT.has(ext) && !KNOWN_BIOS[lc(file)])) throw new GameError(415, `${file} isn’t a game file the Game Console plays`);
+    const dir = batchDir(batch);
+    // Old uploads that were never finished (a closed tab) go after a day.
+    const root = stagingRoot();
+    for (const e of await fsp.readdir(root, { withFileTypes: true }).catch(() => [])) {
+      const st = await fsp.stat(path.join(root, e.name)).catch(() => null);
+      if (st && Date.now() - st.mtimeMs > 864e5) await fsp.rm(path.join(root, e.name), { recursive: true, force: true }).catch(() => {});
+    }
+    try { await fsp.mkdir(dir, { recursive: true }); } catch (err) {
+      throw new GameError(403, `MediaDesk can’t write to the games folder (${err.code === 'EROFS' ? 'it’s read-only' : err.code || err.message}). Give it permission to write there.`);
+    }
+    const dest = path.join(dir, file);
+    let size = 0;
+    const { Transform } = require('node:stream');
+    const counter = new Transform({ transform(chunk, enc, cb) { size += chunk.length; if (size > MAX_ROM) cb(new GameError(413, 'That file is too big')); else cb(null, chunk); } });
+    try { await pipeline(req, counter, fs.createWriteStream(dest)); } catch (err) { await fsp.rm(dest, { force: true }).catch(() => {}); throw err; }
+    if (!size) { await fsp.rm(dest, { force: true }); throw new GameError(400, `${file} is empty`); }
+    return { name: file, size };
+  }
+
+  // Which console a batch is for (null: ask), and its main file.
+  async function classifyBatch(dir, files) {
+    const by = (exts) => files.find((f) => exts.includes(extOf(f.name)));
+    const sheet = by(['m3u']) || by(['cue']) || by(['gdi']);
+    if (files.every((f) => KNOWN_BIOS[lc(f.name)] && !EXT_TO_SYSTEM.has(extOf(f.name)))) return { bios: true, system: KNOWN_BIOS[lc(files[0].name)], main: files[0] };
+    const main = sheet || files.slice().sort((a, b) => b.size - a.size)[0];
+    const abs = path.join(dir, main.name);
+    const ext = extOf(main.name);
+    let system = EXT_TO_SYSTEM.get(ext) || null;
+    if (!system) {
+      if (ext === 'zip') system = await classifyZip(abs, main.size);
+      else if (ext === 'bin') system = await sniffBin(abs, main.size);
+      else if (['iso', 'img'].includes(ext)) system = await sniffDisc(abs);
+      else if (ext === 'gdi') system = 'dreamcast';
+      else if (ext === 'cue' || ext === 'm3u') {
+        let first = (await referencedFiles(abs, ext))[0];
+        if (first && ext === 'm3u' && extOf(first) === 'cue') first = (await referencedFiles(first, 'cue'))[0];
+        if (first && fs.existsSync(first)) system = await sniffDisc(first);
+      }
+    }
+    return { system, main };
+  }
+
+  async function finishUpload(batch, chosen) {
+    checkUploadable();
+    const dir = batchDir(batch);
+    const names = await fsp.readdir(dir).catch(() => null);
+    if (!names?.length) throw new GameError(404, 'That upload has gone. Add the game again.');
+    const files = [];
+    for (const n of names) files.push({ name: n, size: (await fsp.stat(path.join(dir, n))).size });
+    const found = await classifyBatch(dir, files);
+    const system = chosen && SYSTEMS[chosen] ? chosen : found.system;
+    if (!system && !found.bios) return { needsSystem: true, file: found.main.name };
+    const root = path.resolve(getFolder());
+    const top = await fsp.readdir(root, { withFileTypes: true }).catch(() => []);
+    const topDir = (n) => top.find((e) => e.isDirectory() && lc(e.name) === lc(n))?.name || null;
+    const structured = Boolean(topDir(LAYOUT.roms));
+    // The console's folder: one already there under any of its names, or a new one.
+    const consoleIn = async (parent) => {
+      const entries = await fsp.readdir(parent, { withFileTypes: true }).catch(() => []);
+      const have = entries.find((e) => e.isDirectory() && !e.name.startsWith('.') && systemFromFolder(e.name) === system);
+      return path.join(parent, have ? have.name : FOLDER_NAMES[system] || system);
+    };
+    let target;
+    if (found.bios) target = system ? await consoleIn(path.join(root, topDir(LAYOUT.bios) || LAYOUT.bios)) : path.join(root, topDir(LAYOUT.bios) || LAYOUT.bios);
+    else target = await consoleIn(structured ? path.join(root, topDir(LAYOUT.roms)) : root);
+    const main = found.main;
+    const mainExt = extOf(main.name);
+    const base = main.name.slice(0, -(mainExt.length + 1));
+    const disc = !found.bios && SYSTEMS[system]?.disc && (files.length > 1 || ['cue', 'gdi', 'cdi', 'chd', 'iso', 'pbp', 'cso', 'm3u', 'ccd', 'mds', 'img', 'bin'].includes(mainExt));
+    const sameFile = async (a, size) => (await fsp.stat(a).catch(() => null))?.size === size;
+    let existed = false;
+    if (disc) {
+      // A folder for the game; the same game already there (same main file, same size) is left as it is.
+      const title = safeName(cleanTitle(base).title || base);
+      let folder = path.join(target, title);
+      if (await sameFile(path.join(folder, main.name), main.size)) existed = true;
+      else for (let n = 2; fs.existsSync(folder); n++) folder = path.join(target, `${title} (${n})`);
+      target = folder;
+    }
+    const placed = [];
+    try {
+      await fsp.mkdir(target, { recursive: true });
+      for (const f of files) {
+        let dest = path.join(target, f.name);
+        if (existed || await sameFile(dest, f.size)) { if (f === main) existed = true; if (f === main) placed.push(dest); continue; }
+        const stem = f.name.slice(0, -(extOf(f.name).length + 1));
+        // Track files keep their names (the .cue points at them); only a loose game is renamed.
+        if (!disc) for (let n = 2; fs.existsSync(dest); n++) dest = path.join(target, `${stem} (${n}).${extOf(f.name)}`);
+        await fsp.rename(path.join(dir, f.name), dest);
+        if (f === main) placed.push(dest);
+      }
+    } catch (err) {
+      if (err instanceof GameError) throw err;
+      throw new GameError(403, `The game couldn’t be put in ${path.relative(root, target) || 'the games folder'} (${err.code === 'EROFS' ? 'the folder is read-only' : err.code || err.message})`);
+    } finally { await fsp.rm(dir, { recursive: true, force: true }).catch(() => {}); }
+    writable.clear();
+    cache = null;
+    const rel = path.relative(root, placed[0] || path.join(target, main.name)).split(path.sep).join('/');
+    const lib = await library(true);
+    const game = lib.games.find((g) => g.path === rel);
+    return {
+      bios: Boolean(found.bios), system: system || null, consoleName: system ? FOLDER_NAMES[system] || system : null,
+      folder: path.relative(root, target).split(path.sep).join('/'), path: rel, existed,
+      game: game ? { id: game.id, title: game.title } : null, guessed: !chosen && !found.system,
+    };
+  }
+
   // ---- HTTP ----
 
   async function handle(req, res, url, { sendJson, readJson }) {
@@ -1128,6 +1259,11 @@ function createGames({ dataDir, getFolder, mock = false, sample = null, idSalt =
           folderNames: FOLDER_NAMES,
         });
       }
+      // Adding games: each file of a batch, then "finish" (with the console, when asked for one).
+      const up = /^\/upload\/([a-f0-9]{16})(\/finish)?$/.exec(p);
+      if (up && !up[2] && req.method === 'PUT') return sendJson(res, 200, await receiveRom(req, up[1], q.get('name')));
+      if (up && up[2] && req.method === 'POST') return sendJson(res, 200, await finishUpload(up[1], (await readJson(req)).system));
+      if (up && !up[2] && req.method === 'DELETE') { checkUploadable(); await fsp.rm(batchDir(up[1]), { recursive: true, force: true }); return sendJson(res, 200, { ok: true }); }
       if (p === '/layout' && req.method === 'POST') {
         const body = await readJson(req);
         if (body.organize) return sendJson(res, 200, await organize());

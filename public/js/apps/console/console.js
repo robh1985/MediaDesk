@@ -12,6 +12,7 @@ import { Nav, blip } from './input.js';
 import { THEMES, THEME_LIST } from './themes.js';
 import { sectionBackground, peekBackground, forgetBackgrounds } from './consoleart.js';
 import { pickFile, fileUrl, filesEnabled } from '../../fileapi.js';
+import { addGames, dropZone, chooseGames } from './addgames.js';
 
 const UI_KEY = 'mediadesk.console.ui';
 const readUi = () => { try { return JSON.parse(localStorage.getItem(UI_KEY)) || {}; } catch { return {}; } };
@@ -88,7 +89,13 @@ class GameConsole {
     this.capturing = false;
     this.nav = new Nav(this.root, {
       onAction: (a, el, dir) => this.action(a, el, dir),
-      isActive: () => !this.player && !this.touchFrame && !this.capturing && this.isFocused(),
+      isActive: () => !this.player && !this.touchFrame && !this.capturing && !this.root.querySelector('.gc-add') && this.isFocused(),
+    });
+    // Games dropped on the Game Console are uploaded into their console's folder.
+    dropZone(this.root, {
+      canDrop: () => !this.player && Boolean(this.lib) && !this.root.querySelector('.gc-add'),
+      personal: () => Boolean(this.lib?.personal && this.lib?.folder),
+      onFiles: (files, { mine }) => this.addFiles(files, mine),
     });
     this.applyTheme();
     this.load().then(() => { if (opts.game) this.openGameById(opts.game); });
@@ -111,6 +118,20 @@ class GameConsole {
   }
 
   saveUi() { writeUi(this.ui); }
+
+  // Upload games (into your own library when mine, or when there's no shared games folder).
+  addFiles(files, mine = false) {
+    if (!this.lib?.folder && this.lib?.personal) mine = true;
+    if (!this.lib?.folder && !mine) { toastError(new Error('Choose the games folder in Settings first'), 'Games can’t be added yet'); return; }
+    addGames(this.root, files, {
+      mine,
+      onDone: async (added) => {
+        if (!added.length) return;
+        await this.load(true);
+        toast(added.length === 1 ? `${added[0].title} is ready to play` : `${added.length} games added`, { type: 'success', icon: appIcon.console, timeout: 2500 });
+      },
+    });
+  }
 
   // ---- Data ----
 
@@ -798,6 +819,11 @@ class GameConsole {
       h('div', { class: 'gc-row' },
         this.navBtn('Look for new games', async () => { toast('Scanning the games folder…', { timeout: 1500 }); await this.load(true); this.openSettings({ tab: 'library' }); }, 'lib:rescan', 'primary'),
         this.navBtn('Change folder (MediaDesk Settings)', () => openApp('settings', { tab: 'console' }), 'lib:folder')),
+      h('h3', {}, 'Add games'),
+      h('p', { class: 'gc-small' }, 'Drag game files onto the Game Console, or choose them here. Each one is uploaded to the MediaDesk server and put in its console’s folder (worked out from the file; you’re asked when it can’t be). Add a .cue, .gdi or .m3u together with its track files. BIOS files go into the BIOS folder.'),
+      h('div', { class: 'gc-row' },
+        lib.folder ? this.navBtn(lib.personal ? 'Add shared games…' : 'Add games from this device…', () => { this.closeLayer(); chooseGames((f) => this.addFiles(f, false)); }, 'lib:add', 'primary') : null,
+        lib.personal ? this.navBtn('Add games for just me…', () => { this.closeLayer(); chooseGames((f) => this.addFiles(f, true)); }, 'lib:addmine', lib.folder ? '' : 'primary') : null),
       h('div', { class: 'gc-counts' }, ORDER.filter((s) => counts[s]).map((s) => h('div', { class: 'gc-count' }, this.sysBadge(s), h('strong', {}, counts[s])))),
       ...this.layoutSection(lib),
       h('h3', {}, 'Emulators'),
