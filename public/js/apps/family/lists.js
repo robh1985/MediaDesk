@@ -98,14 +98,30 @@ export class ListsView {
   drawList(main, list) {
     const items = this.items(list.id);
     const done = items.filter((i) => i.done);
-    const entry = input({ placeholder: list.kind === 'grocery' ? 'Add an item (paste several, one per line)' : 'Add something', class: 'fam-input fam-list-entry', maxlength: 500, enterkeyhint: 'enter' });
+    const grocery = list.kind === 'grocery';
+    const entry = input({ placeholder: grocery ? 'Add an item (paste several, one per line)' : 'Add something', class: 'fam-input fam-list-entry', maxlength: 500, enterkeyhint: 'enter' });
+    // Groceries: how many or how much, and a brand if it matters (both optional).
+    const qtyIn = grocery ? input({ placeholder: 'Qty', class: 'fam-input fam-list-qty', maxlength: 40, enterkeyhint: 'enter', 'aria-label': 'Quantity', title: 'Quantity, like 2, 1 dozen or 500 g' }) : null;
+    const brandIn = grocery ? input({ placeholder: 'Brand (optional)', class: 'fam-input fam-list-brand', maxlength: 60, enterkeyhint: 'enter', 'aria-label': 'Brand', autocomplete: 'off' }) : null;
+    // Brands used before, offered as you type.
+    let brands = null;
+    if (brandIn) {
+      const used = [...new Set(this.store.all('listitems').map((x) => x.brand).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+      brands = h('datalist', { id: `fam-brands-${list.id}` }, used.map((b) => h('option', { value: b })));
+      brandIn.setAttribute('list', brands.id);
+    }
+    const extras = () => ({ qty: qtyIn?.value.trim() || '', brand: brandIn?.value.trim() || '' });
+    const resetExtras = () => { if (qtyIn) qtyIn.value = ''; if (brandIn) brandIn.value = ''; };
     const add = async () => {
       const lines = entry.value.split(/\n|,(?=\s*\S)/).map((s) => s.trim()).filter(Boolean);
-      if (!lines.length) return;
+      if (!lines.length) { entry.focus(); return; }
+      const ex = extras();
       entry.value = '';
-      await this.addItems(list, lines);
+      resetExtras();
+      await this.addItems(list, lines, ex);
       this.el.querySelector('.fam-list-entry')?.focus();
     };
+    for (const x of [qtyIn, brandIn]) x?.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); add(); } });
     // Grocery lists suggest foods from the food database as you type.
     const sugg = h('div', { class: 'fam-food-sugg', hidden: true });
     let picks = [];
@@ -125,10 +141,12 @@ export class ListsView {
     };
     const pickFood = async (f) => {
       const { qty } = splitIngredient(entry.value);
+      const ex = extras();
       entry.value = '';
+      resetExtras();
       hi = -1;
       drawSugg();
-      await this.addItems(list, [qty ? `${qty} ${f.name}` : f.name]);
+      await this.addItems(list, [qty ? `${qty} ${f.name}` : f.name], ex);
       this.el.querySelector('.fam-list-entry')?.focus();
     };
     entry.addEventListener('input', () => { hi = -1; drawSugg(); });
@@ -172,7 +190,7 @@ export class ListsView {
       if (ticked.length) body.append(h('div', { class: 'fam-aisle' }, '✓ In the cart'), ...ticked.map((i) => this.row(i, list)));
     } else body.append(...visible.map((i) => this.row(i, list)));
     if (!items.length) body.append(h('div', { class: 'fam-muted fam-list-empty' }, 'This list is empty.'));
-    clear(main, head, h('div', { class: 'fam-list-add' }, h('div', { class: 'fam-list-entry-wrap' }, entry, sugg), h('button', { class: 'fam-btn primary', onclick: add }, 'Add')), body);
+    clear(main, head, h('div', { class: `fam-list-add ${grocery ? 'grocery' : ''}` }, h('div', { class: 'fam-list-entry-wrap' }, entry, sugg), qtyIn, brandIn, brands, h('button', { class: 'fam-btn primary', onclick: add }, 'Add')), body);
   }
 
   row(i, list, aisle = null) {
@@ -183,6 +201,7 @@ export class ListsView {
       h('button', { class: 'fam-item-text', onclick: () => this.editItem(i, list) },
         h('span', {}, i.text),
         i.qty ? h('small', { class: 'fam-item-qty' }, i.qty) : null,
+        i.brand ? h('small', { class: 'fam-item-brand' }, i.brand) : null,
         i.notes ? h('small', {}, i.notes) : null,
         i.due ? h('small', { class: overdue ? 'overdue' : '' }, `Due ${fmtDate(parseYmd(i.due), { weekday: 'short', month: 'short', day: 'numeric' })}`) : null),
       m ? avatar(m, 'xs') : null,
@@ -190,18 +209,23 @@ export class ListsView {
       aisle ? h('button', { class: 'fam-item-aisle', title: `In ${aisle.name} — change the aisle`, 'aria-label': `Aisle: ${aisle.name}. Change`, onclick: () => this.pickAisle(i) }, aisle.emoji || '🛍️') : null);
   }
 
-  async addItems(list, lines) {
+  // lines: what was typed. extra: { qty, brand } from the boxes beside it (groceries).
+  async addItems(list, lines, extra = {}) {
     const base = Date.now();
     const grocery = list.kind === 'grocery';
-    const key = (t) => (grocery ? foodKey(t) : t.toLowerCase());
-    const known = new Set(this.items(list.id).filter((i) => !i.done).map((i) => key(i.text)));
+    // The same food from two brands is two items (Horizon milk and the store's own).
+    const key = (t, brand = '') => (grocery ? `${foodKey(t)}|${brand.toLowerCase()}` : t.toLowerCase());
+    const brand = grocery ? String(extra.brand || '').trim().slice(0, 60) : '';
+    const known = new Set(this.items(list.id).filter((i) => !i.done).map((i) => key(i.text, i.brand || '')));
     const ops = [];
     const learned = [];
     for (const line of lines) {
       // Groceries: "2 lb chicken thighs" is Chicken thighs, 2 lb; the food's own name is used.
       let { name, qty } = grocery ? splitIngredient(line) : { name: line, qty: '' };
-      if (!name || known.has(key(name))) continue;
-      known.add(key(name));
+      // The quantity box wins over one typed with the item.
+      if (grocery && extra.qty) qty = String(extra.qty).trim().slice(0, 40);
+      if (!name || known.has(key(name, brand))) continue;
+      known.add(key(name, brand));
       if (grocery) {
         const food = matchFood(this.store, name);
         if (food && food.key === foodKey(name)) name = food.name;
@@ -211,7 +235,7 @@ export class ListsView {
           ops.push({ op: 'put', col: 'foods', item: { name: name.slice(0, 80), aisle: guessAisle(name) } });
         }
       }
-      ops.push({ op: 'put', col: 'listitems', item: { list: list.id, text: name.slice(0, 300), qty: qty || undefined, done: false, order: base + ops.length } });
+      ops.push({ op: 'put', col: 'listitems', item: { list: list.id, text: name.slice(0, 300), qty: qty || undefined, brand: brand || undefined, done: false, order: base + ops.length } });
     }
     if (!ops.length) { toast('Already on the list', { timeout: 2000 }); return; }
     try {
@@ -438,6 +462,7 @@ export class ListsView {
   async editItem(i, list) {
     const text = input({ value: i.text, required: true, autofocus: true, maxlength: 300 });
     const qty = input({ value: i.qty || '', placeholder: 'e.g. 2 lb', maxlength: 40 });
+    const brand = input({ value: i.brand || '', placeholder: 'Any brand', maxlength: 60 });
     const notes = input({ value: i.notes || '', placeholder: 'Notes', maxlength: 300 });
     const who = this.assignPicker(i.member ? [i.member] : [], { single: true });
     const due = input({ type: 'date', value: i.due || '' });
@@ -447,10 +472,10 @@ export class ListsView {
     const out = await sheet(this.app.root, {
       title: 'Item',
       body: h('div', { class: 'fam-form' }, text,
-        list.kind === 'grocery' ? h('div', { class: 'fam-row-wrap' }, field('Amount', qty), field('Aisle', aisle)) : h('div', { class: 'fam-row-wrap' }, field('Due', due)),
+        list.kind === 'grocery' ? h('div', { class: 'fam-row-wrap' }, field('Quantity', qty), field('Brand', brand), field('Aisle', aisle)) : h('div', { class: 'fam-row-wrap' }, field('Due', due)),
         notes, field('For', who), field('List', moveTo)),
       actions: [{ label: 'Delete', danger: true, left: true, value: 'delete' }, { label: 'Cancel' }, { label: 'Save', primary: true, submit: true, onClick: (close) => close({
-        ...i, text: text.value.trim() || i.text, qty: qty.value.trim(), notes: notes.value.trim(), member: who.value().find((id) => id !== i.member) || who.value()[0] || null, due: due.value || null, section: list.kind === 'grocery' && aisle.value !== wasAisle && aisle.value !== '__new' ? aisle.value : i.section || null, list: moveTo.value,
+        ...i, text: text.value.trim() || i.text, qty: qty.value.trim(), brand: list.kind === 'grocery' ? brand.value.trim() : i.brand, notes: notes.value.trim(), member: who.value().find((id) => id !== i.member) || who.value()[0] || null, due: due.value || null, section: list.kind === 'grocery' && aisle.value !== wasAisle && aisle.value !== '__new' ? aisle.value : i.section || null, list: moveTo.value,
       }) }],
     });
     if (!out) return;
@@ -517,7 +542,7 @@ export async function addToGroceries(store, lines) {
 
 // "1.5 lb chicken thighs" -> { qty: '1.5 lb', name: 'Chicken thighs' }
 export function splitIngredient(line) {
-  const m = /^\s*((?:\d+[\d./\s–-]*[½⅓⅔¼¾⅛⅜⅝⅞]?|[½⅓⅔¼¾⅛⅜⅝⅞]|(?:a few|an|a|one|two|three|four|some)\b)\s*(?:(?:cups?|c|tbsp|tablespoons?|tsp|teaspoons?|lbs?|pounds?|oz|ounces?|g|grams?|kg|ml|l|liters?|litres?|cans?|jars?|packages?|pkgs?|bags?|boxes?|bunch(?:es)?|heads?|cloves?|slices?|sticks?|pinch(?:es)?|dash(?:es)?|stalks?|large|medium|small)\b\.?)?\s*(?:of\s+)?)?(.*)$/i.exec(String(line));
+  const m = /^\s*((?:\d+[\d./\s–-]*[½⅓⅔¼¾⅛⅜⅝⅞]?|[½⅓⅔¼¾⅛⅜⅝⅞]|(?:a few|an|a|one|two|three|four|some)\b)\s*(?:(?:cups?|c|tbsp|tablespoons?|tsp|teaspoons?|lbs?|pounds?|oz|ounces?|g|grams?|kg|ml|l|liters?|litres?|cans?|jars?|packages?|pkgs?|bags?|boxes?|bunch(?:es)?|heads?|cloves?|slices?|sticks?|pinch(?:es)?|dash(?:es)?|stalks?|dozens?|doz|gallons?|gal|quarts?|qt|pints?|pt|bottles?|cartons?|packs?|loaf|loaves|rolls?|containers?|tubs?|bars?|pieces?|pcs?|cases?|large|medium|small)\b\.?)?\s*(?:of\s+)?)?(.*)$/i.exec(String(line));
   let name = (m?.[2] || line).replace(/\s*\(.*?\)\s*/g, ' ').replace(/,.*$/, '').trim();
   name = name.charAt(0).toUpperCase() + name.slice(1);
   return { qty: (m?.[1] || '').trim(), name };

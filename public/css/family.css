@@ -850,3 +850,16 @@ h3.fam-bk-h { font-size: .9em; letter-spacing: .14em; text-transform: uppercase;
 .fam-lists-hidden { display: flex; flex-direction: column; align-items: center; gap: 2px; margin-top: 6px; padding: 8px 4px; border: 1px dashed var(--f-line); border-radius: 12px; background: none; cursor: pointer; font-size: 11.5px !important; color: var(--f-muted) !important; text-align: center; }
 .fam-lists-hidden b { color: var(--f-accent); font-size: 12px; }
 .fam-subrow .fam-lists-hidden { margin-top: 0; }
+
+/* Grocery items: quantity and brand */
+.fam-list-add.grocery { flex-wrap: wrap; }
+.fam-list-add.grocery .fam-list-entry-wrap { flex: 1 1 220px; }
+.fam-list-qty { flex: 0 0 78px; width: 78px; }
+.fam-list-brand { flex: 0 1 170px; width: 170px; min-width: 120px; }
+.fam-item-text small.fam-item-qty { color: var(--c); font-weight: 700; background: color-mix(in srgb, var(--c) 12%, transparent); padding: 1px 7px; border-radius: 999px; }
+.fam-item-text small.fam-item-brand { font-style: italic; }
+.fam-item-text small.fam-item-brand::before { content: '🏷️ '; font-style: normal; font-size: .9em; }
+@media (max-width: 560px) {
+  .fam-list-add.grocery .fam-list-entry-wrap { flex-basis: 100%; }
+  .fam-list-brand { flex: 1 1 auto; }
+}
