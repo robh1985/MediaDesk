@@ -1,6 +1,7 @@
 // Files: a file manager for the folders shared in Settings → Files.
 
 import { shareDialog, NET_ICON } from '../netshares-ui.js';
+import * as drive from './localdrive.js';
 import { h, clear, formatBytes, formatDuration, debounce, toast, toastError, confirmDialog, contextMenu, spinner, emptyState, errorState, progressBar, isTouch } from '../ui.js';
 import { icon, appIcon } from '../icons.js';
 import { state, appPref, portal } from '../api.js';
@@ -33,6 +34,9 @@ const UPLOAD_CHUNK = 8 * 1024 * 1024;
 const UPLOAD_RETRIES = 6;
 const join = (dir, name) => (dir ? `${dir}/${name}` : name);
 const parentOf = (p) => p.split('/').slice(0, -1).join('/');
+// Drives on this computer (localdrive.js) have ids like "L…" (shared folders have numbers).
+const isLocal = (root) => typeof root === 'string';
+const USB_ICON = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="9" width="10" height="13" rx="2"/><path d="M9 9V3h6v6M11 5.5v1M13 5.5v1"/></svg>';
 
 // Shared between windows so you can copy in one folder and paste in another.
 const clipboard = { mode: null, root: null, paths: [] };
@@ -125,9 +129,10 @@ class FileBrowser {
     // The checkbox remembers your choice in this browser; Settings → Files sets the starting point.
     const savedHidden = localStorage.getItem('mediadesk.files.hidden');
     this.showHidden = savedHidden === null ? Boolean(appPref('files', 'showHidden')) : savedHidden === '1';
+    this.drives = [];
     this.build();
-    this.loadRoots().then(() => {
-      if (!this.roots.length) { clear(this.list, emptyState('No shared folders', 'Choose folders in Settings → Files.')); return; }
+    drive.savedDrives().then((d) => { this.drives = d; }).then(() => this.loadRoots()).then(() => {
+      if (!this.roots.length && !this.drives.length) { clear(this.list, emptyState('No shared folders', 'Choose folders in Settings → Files, or connect a USB drive on this computer.')); return; }
       // The tabs open last time (unless Files was asked to show a particular folder).
       const saved = opts.root === undefined ? this.savedTabs() : null;
       if (saved?.length) {
@@ -135,7 +140,7 @@ class FileBrowser {
         this.tabIdx = Math.min(Math.max(0, Number(localStorage.getItem('mediadesk.files.tab')) || 0), this.tabs.length - 1);
         this.drawTabs();
         this.go(this.root, this.path, false);
-      } else this.go(this.roots[opts.root] ? opts.root : 0, opts.path ?? '', false);
+      } else this.go(this.roots[opts.root] ? opts.root : this.roots.length ? 0 : this.drives[0]?.id, opts.path ?? '', false);
     }).catch((err) => { console.error(err); clear(this.list, errorState(err, () => this.refresh())); });
     // Asked to show a folder while open: in a new tab, unless this one is already there.
     win.on('reopen', (o) => {
@@ -177,7 +182,7 @@ class FileBrowser {
       const r = this.roots[t.root];
       const el = h('div', { class: `fm-tab ${i === this.tabIdx ? 'active' : ''}`, role: 'tab', 'aria-selected': String(i === this.tabIdx), title: `${r?.name || ''}${t.path ? ` › ${t.path.split('/').join(' › ')}` : ''}`, dataset: { tab: i },
         onclick: () => this.switchTab(i), onauxclick: (e) => { if (e.button === 1 && many) { e.preventDefault(); this.closeTab(i); } } },
-      h('span', { class: 'fm-tab-icon', html: (r?.network ? NET_ICON : fileIcon('folder')).replace('<svg ', '<svg width="15" height="15" ') }),
+      h('span', { class: 'fm-tab-icon', html: (r?.local ? USB_ICON : r?.network ? NET_ICON : fileIcon('folder')).replace('<svg ', '<svg width="15" height="15" ') }),
       h('span', { class: 'fm-tab-name' }, this.tabLabel(t)),
       many ? h('button', { class: 'fm-tab-close', title: 'Close tab', 'aria-label': 'Close tab', onclick: (e) => { e.stopPropagation(); this.closeTab(i); } }, '×') : null);
       // Drop files on a tab to move (or copy) them there.
@@ -291,7 +296,8 @@ class FileBrowser {
   }
 
   async loadRoots() {
-    try { this.roots = await call('roots'); } catch (err) { this.roots = []; toastError(err); }
+    try { this.roots = await call('roots'); } catch (err) { this.roots = []; if (!this.drives.length) toastError(err); }
+    this.attachDrives();
     this.drawRoots();
     if (this.tabBar) this.drawTabs();
   }
@@ -328,9 +334,54 @@ class FileBrowser {
         this.dropTarget(btn, () => ({ root: r.id, path: '' }));
         return btn;
       }),
+      // USB drives (and folders) on the computer you're using.
+      h('div', { class: 'fm-side-title fm-side-local' }, 'This computer'),
+      this.drives.map((d) => {
+        const btn = h('button', { class: `nav-item fm-root fm-drive ${d.id === this.root ? 'active' : ''}`, dataset: { root: d.id }, title: d.readOnly ? `${d.name} (read-only)` : d.name,
+          onclick: (e) => (e.ctrlKey || e.metaKey ? this.newTab(d.id, '') : this.go(d.id, '')),
+          onauxclick: (e) => { if (e.button === 1) { e.preventDefault(); this.newTab(d.id, ''); } },
+          oncontextmenu: (e) => { e.preventDefault(); contextMenu(e.clientX, e.clientY, [
+            { label: 'Open', icon: icon.folder, action: () => this.go(d.id, '') },
+            { label: 'Open in new tab', icon: icon.plus, action: () => this.newTab(d.id, '') },
+            '-', { label: 'Disconnect', icon: icon.x, action: () => this.disconnectDrive(d) },
+          ]); } },
+        h('span', { class: 'nav-icon', html: USB_ICON }),
+        h('span', { class: 'fm-root-text' }, h('span', { class: 'fm-root-name' }, d.name), h('span', { class: 'fm-root-path' }, d.readOnly ? 'On this computer · read-only' : 'On this computer')),
+        h('span', { class: 'fm-drive-x', role: 'button', title: 'Disconnect', 'aria-label': `Disconnect ${d.name}`, html: icon.x, onclick: (e) => { e.stopPropagation(); this.disconnectDrive(d); } }));
+        if (!d.readOnly) this.dropTarget(btn, () => ({ root: d.id, path: '' }));
+        return btn;
+      }),
+      drive.canConnect() ? h('button', { class: 'nav-item small fm-connect-drive', onclick: () => this.connectDrive() }, h('span', { class: 'nav-icon', html: USB_ICON }), 'Connect a USB drive…')
+        : drive.canPickFolder() ? h('button', { class: 'nav-item small fm-connect-drive', title: 'This browser can only read files on your computer (Chrome or Edge can also copy onto a USB drive).', onclick: () => this.connectDrive(true) }, h('span', { class: 'nav-icon', html: USB_ICON }), 'Open a USB drive (read-only)…') : null,
       h('div', { class: 'spacer' }),
       h('button', { class: 'nav-item small', onclick: () => openApp('settings', { tab: 'files' }) }, h('span', { class: 'nav-icon', html: icon.sliders }), 'Manage folders'));
   }
+
+  // ---- Drives on this computer ----
+  async connectDrive(readOnly = false) {
+    let d;
+    try { d = readOnly ? await drive.pickFolderReadOnly() : await drive.connectDrive(); } catch (err) { toastError(err, 'The drive couldn’t be opened'); return; }
+    if (!d) return;
+    if (!this.drives.some((x) => x.id === d.id)) this.drives.push(d);
+    this.attachDrives();
+    this.drawRoots();
+    const at = this.tabs.findIndex((t) => t.root === d.id);
+    if (at >= 0) this.switchTab(at); else this.newTab(d.id, '');
+    toast(`${d.name} connected`, { body: d.readOnly ? 'Read-only: copy files from it to the server.' : 'Copy files to and from it like any folder: drag them, or Copy and Paste.', icon: appIcon.files, timeout: 3500 });
+  }
+  async disconnectDrive(d) {
+    await drive.forgetDrive(d.id);
+    this.drives = this.drives.filter((x) => x.id !== d.id);
+    delete this.roots[d.id];
+    // Its tabs close (keeping at least one).
+    for (let i = this.tabs.length - 1; i >= 0; i--) if (this.tabs[i].root === d.id && this.tabs.length > 1) this.tabs.splice(i, 1);
+    if (this.tabs.length === 1 && this.tabs[0].root === d.id) Object.assign(this.tabs[0], { root: this.roots.length ? 0 : this.drives[0]?.id, path: '', history: [], future: [] });
+    this.tabIdx = Math.min(this.tabIdx, this.tabs.length - 1);
+    this.drawRoots();
+    this.switchTab(this.tabIdx);
+    toast(`${d.name} disconnected`, { body: 'You can unplug it once anything copying to it has finished.', icon: appIcon.files, timeout: 3000 });
+  }
+  get local() { return isLocal(this.root) ? this.roots[this.root] : null; }
 
   // Admins: connect a network share right here (it joins the shared folders).
   async connectShare() {
@@ -363,12 +414,26 @@ class FileBrowser {
 
   async refresh() {
     const root = this.roots[this.root];
-    this.sidebar.querySelectorAll('.fm-root').forEach((el) => el.classList.toggle('active', Number(el.dataset.root) === this.root));
+    this.sidebar.querySelectorAll('.fm-root').forEach((el) => el.classList.toggle('active', String(el.dataset.root) === String(this.root)));
     this.win.setTitle(this.path ? `Files — ${this.path.split('/').pop()}` : `Files — ${root?.name || ''}`);
     this.renderCrumbs();
     if (!this.entries.length) clear(this.list, spinner());
     try {
-      const data = await call('list', { params: { root: this.root, path: this.path, hidden: this.showHidden ? 1 : 0 } });
+      let data;
+      if (this.local) {
+        // A remembered drive: the browser asks again (once) before MediaDesk can open it.
+        if (await drive.permission(this.local) !== 'granted') {
+          const d = this.local;
+          this.entries = [];
+          clear(this.list, h('div', { class: 'empty' }, h('div', { class: 'big-icon fm-usb-big', html: USB_ICON }), h('div', { class: 'empty-title' }, `Open ${d.name} again?`),
+            h('div', {}, 'Your browser asks before MediaDesk can use a drive on this computer again. Plug it in if it isn’t, then allow it.'),
+            h('div', { class: 'btn-row' }, h('button', { class: 'btn btn-primary', onclick: async () => { if (await drive.permission(d, true) === 'granted') this.refresh(); else toast('Not allowed', { body: 'Choose the drive again with “Connect a USB drive…”.', type: 'error' }); } }, 'Allow'),
+              h('button', { class: 'btn', onclick: () => this.disconnectDrive(d) }, 'Disconnect'))));
+          this.updateStatus();
+          return;
+        }
+        data = { entries: await drive.list(this.local, this.path, this.showHidden) };
+      } else data = await call('list', { params: { root: this.root, path: this.path, hidden: this.showHidden ? 1 : 0 } });
       this.entries = data.entries;
       const names = new Set(this.entries.map((e) => e.name));
       this.selected = new Set([...this.selected].filter((n) => names.has(n)));
@@ -476,7 +541,7 @@ class FileBrowser {
     el.addEventListener('dragover', (ev) => {
       if (!ev.dataTransfer.types.includes('application/x-mediadesk-files')) return;
       ev.preventDefault();
-      ev.dataTransfer.dropEffect = ev.ctrlKey || ev.altKey ? 'copy' : 'move';
+      ev.dataTransfer.dropEffect = ev.ctrlKey || ev.altKey || (!ev.shiftKey && dest().root !== this.root && (isLocal(dest().root) || isLocal(this.root))) ? 'copy' : 'move';
       el.classList.add('drop-over');
     });
     el.addEventListener('dragleave', () => el.classList.remove('drop-over'));
@@ -489,7 +554,10 @@ class FileBrowser {
       const src = JSON.parse(raw);
       const d = dest();
       if (src.paths.includes(d.path) && src.root === d.root) return;
-      this.transfer(ev.ctrlKey || ev.altKey ? 'copy' : 'move', src.root, src.paths, d.root, d.path);
+      // Within a place, dragging moves; between this computer and the server (or two drives), it
+      // copies, as file managers do between drives. Ctrl / Alt copies, Shift moves.
+      const crossing = isLocal(src.root) || isLocal(d.root) ? src.root !== d.root : false;
+      this.transfer(ev.shiftKey ? 'move' : ev.ctrlKey || ev.altKey || crossing ? 'copy' : 'move', src.root, src.paths, d.root, d.path);
     });
   }
 
@@ -577,6 +645,22 @@ class FileBrowser {
 
   rowMenu(ev, e) {
     const many = this.selected.size > 1;
+    if (this.local) {
+      // On a drive on this computer: what works without the server.
+      const ro = this.local.readOnly;
+      return contextMenu(ev.clientX, ev.clientY, [
+        { label: e.dir ? 'Open' : 'Open in Preview', icon: e.dir ? icon.folder : icon.eye, disabled: many, action: () => this.open(e) },
+        e.dir ? { label: 'Open in new tab', icon: icon.plus, disabled: many, action: () => this.newTab(this.root, join(this.path, e.name)) } : null,
+        !e.dir ? { label: 'Save a copy', icon: icon.download, action: () => this.download() } : null,
+        '-',
+        ro ? null : { label: 'Cut', icon: ICON_CUT, action: () => this.toClipboard('move') },
+        { label: 'Copy', icon: ICON_COPY, action: () => this.toClipboard('copy') },
+        !ro && e.dir && clipboard.paths.length ? { label: 'Paste into folder', icon: ICON_PASTE, action: () => this.paste(join(this.path, e.name)) } : null,
+        ro ? null : { label: 'Rename', icon: ICON_RENAME, disabled: many, action: () => this.rename() },
+        ro ? null : '-',
+        ro ? null : { label: many ? `Delete ${this.selected.size} items` : 'Delete', icon: icon.trash, action: () => this.remove() },
+      ].filter(Boolean));
+    }
     contextMenu(ev.clientX, ev.clientY, [
       { label: e.dir ? 'Open' : kindOf(e) === 'text' ? 'Open in Notes' : 'Open in Preview', icon: e.dir ? icon.folder : icon.eye, disabled: many, action: () => this.open(e) },
       e.dir ? { label: 'Open in new tab', icon: icon.plus, disabled: many, action: () => this.newTab(this.root, join(this.path, e.name)) } : null,
@@ -638,6 +722,7 @@ class FileBrowser {
   // ---- Actions ----
   open(e) {
     if (e.dir) return this.go(this.root, join(this.path, e.name));
+    if (this.local) return this.openLocal(e);
     // Log files open in the Log Viewer (Notes is still in the right-click menu).
     if (/\.(log|lo_)$/i.test(e.name)) return openApp('logs', { root: this.root, path: join(this.path, e.name), key: `${this.root}:${join(this.path, e.name)}` });
     // OpenRaster pictures (layered) open in Paint Pro.
@@ -647,10 +732,19 @@ class FileBrowser {
     this.preview(e);
   }
 
+  // A file on a drive on this computer: Preview shows it from here (the server never sees it).
+  async openLocal(e) {
+    try {
+      const file = await drive.getFile(this.local, join(this.path, e.name));
+      openApp('preview', { key: `${this.root}:${join(this.path, e.name)}`, file, name: e.name, from: this.local.name });
+    } catch (err) { toastError(err, 'Couldn’t open it'); }
+  }
+
   async newFolder() {
     const name = await promptName('New folder', 'Folder name', 'New folder');
     if (!name) return;
     try {
+      if (this.local) { await drive.mkdir(this.local, this.path, name); await this.refresh(); this.select([name]); return; }
       await call('mkdir', { method: 'POST', body: { root: this.root, path: this.path, name } });
       await this.refresh();
       this.select([name]);
@@ -663,7 +757,8 @@ class FileBrowser {
     const name = await promptName('Rename', 'New name', e.name, true);
     if (!name || name === e.name) return;
     try {
-      await call('rename', { method: 'POST', body: { root: this.root, path: join(this.path, e.name), name } });
+      if (this.local) await drive.rename(this.local, join(this.path, e.name), name);
+      else await call('rename', { method: 'POST', body: { root: this.root, path: join(this.path, e.name), name } });
       await this.refresh();
       this.select([name]);
     } catch (err) { toastError(err, 'Could not rename'); }
@@ -676,11 +771,12 @@ class FileBrowser {
     const what = sel.length === 1 ? `“${sel[0].name}”` : `${sel.length} items`;
     const ok = await confirmDialog({
       title: `Delete ${what}?`, danger: true, confirm: 'Delete permanently',
-      message: `This can’t be undone — files are deleted from the server, not moved to a recycle bin.${folders ? ' Folders are deleted with everything inside them.' : ''}`,
+      message: `This can’t be undone — files are deleted from ${this.local ? this.local.name : 'the server'}, not moved to a recycle bin.${folders ? ' Folders are deleted with everything inside them.' : ''}`,
     });
     if (!ok) return;
     try {
-      await call('delete', { method: 'POST', body: { root: this.root, paths: this.selectedPaths() } });
+      if (this.local) await drive.remove(this.local, this.selectedPaths());
+      else await call('delete', { method: 'POST', body: { root: this.root, paths: this.selectedPaths() } });
       toast(`Deleted ${what}`, { icon: appIcon.files });
       this.selected.clear();
       this.refresh();
@@ -704,6 +800,7 @@ class FileBrowser {
   }
 
   async transfer(mode, root, paths, destRoot, destPath) {
+    if (isLocal(root) || isLocal(destRoot)) return this.transferLocal(mode, root, paths, destRoot, destPath);
     const label = `${mode === 'move' ? 'Moving' : 'Copying'} ${paths.length} item${paths.length > 1 ? 's' : ''}`;
     const busy = h('div', { class: 'fm-busy' }, h('div', { class: 'spinner sm' }), `${label}…`);
     this.uploads.hidden = false;
@@ -723,18 +820,117 @@ class FileBrowser {
     }
   }
 
+  // Progress for copying to or from a drive on this computer (in the uploads panel).
+  job(title) {
+    const bar = progressBar(0);
+    const label = h('span', { class: 'small muted fm-upload-status' }, 'Starting…');
+    const item = h('div', { class: 'fm-upload' }, h('span', { class: 'fm-icon', html: USB_ICON }), h('div', { class: 'grow' }, h('div', { class: 'fm-upload-name' }, title), bar, label));
+    this.uploads.hidden = false;
+    this.uploads.append(item);
+    let name = '', n = 0, of = 1;
+    return {
+      step: (nm, i, total) => { name = nm; n = i; of = total; label.textContent = `${nm} (${i + 1} of ${total})`; bar.firstChild.style.width = `${(i / total) * 100}%`; },
+      bytes: (done, size) => { label.textContent = `${name} (${n + 1} of ${of}) · ${formatBytes(done)}${size ? ` of ${formatBytes(size)}` : ''}`; bar.firstChild.style.width = `${((n + (size ? done / size : 0)) / of) * 100}%`; },
+      done: () => { item.remove(); if (!this.uploads.children.length) this.uploads.hidden = true; },
+    };
+  }
+
+  // Copying or moving to, from or between drives on this computer.
+  async transferLocal(mode, root, paths, destRoot, destPath) {
+    const src = this.roots[root], dest = this.roots[destRoot];
+    if (!src || !dest) { toastError(new Error('That drive isn’t connected any more')); return false; }
+    if (isLocal(destRoot) && dest.readOnly) { toastError(new Error('That drive was opened read-only')); return false; }
+    if (mode === 'move' && isLocal(root) && src.readOnly) mode = 'copy';
+    for (const d of [src, dest]) if (d.local && await drive.permission(d, true) !== 'granted') { toastError(new Error(`${d.name} needs your permission again: open it in the sidebar and allow it`)); return false; }
+    const where = (r) => (isLocal(r) ? this.roots[r].name : 'the server');
+    const job = this.job(`${mode === 'move' ? 'Moving' : 'Copying'} ${paths.length} item${paths.length > 1 ? 's' : ''} to ${where(destRoot)}`);
+    const release = await keepAwake();
+    let ok = true;
+    try {
+      if (isLocal(root) && isLocal(destRoot)) {
+        // Drive to drive (or within one).
+        for (const [i, p] of paths.entries()) {
+          job.step(p.split('/').pop(), i, paths.length);
+          if (root === destRoot && parentOf(p) === destPath) continue;
+          await drive.copyWithin(src, p, dest, destPath, null, (f) => job.bytes(0, f.size));
+          if (mode === 'move') await drive.remove(src, [p]);
+        }
+      } else if (isLocal(root)) {
+        // Drive to the server: folders made, files uploaded (resumable, as any upload).
+        const items = [];
+        for (const p of paths) items.push(...await drive.walk(src, p));
+        const files = items.filter((x) => x.file);
+        let i = 0;
+        for (const it of items) {
+          if (it.dir) {
+            try { await call('mkdir', { method: 'POST', body: { root: destRoot, path: join(destPath, parentOf(it.dir)), name: it.dir.split('/').pop() } }); } catch (err) { if (err.status !== 409) throw err; }
+            continue;
+          }
+          job.step(it.file.name, i++, files.length);
+          await this.uploadOne(it.file, destRoot, join(destPath, it.rel), false, { onProgress: (f) => job.bytes(f * it.file.size, it.file.size) });
+        }
+        if (mode === 'move') await drive.remove(src, paths);
+      } else {
+        // The server to a drive: each file downloaded straight onto it.
+        const files = [];
+        const gather = async (p, rel) => {
+          const parent = await call('list', { params: { root, path: parentOf(p), hidden: 1 } });
+          const e = parent.entries.find((x) => x.name === p.split('/').pop());
+          if (!e) return;
+          if (!e.dir) { files.push({ path: p, rel, size: e.size }); return; }
+          const here = rel ? `${rel}/${e.name}` : e.name;
+          files.push({ dir: here });
+          const sub = await call('list', { params: { root, path: p, hidden: 1 } });
+          for (const c of sub.entries) await gather(join(p, c.name), here);
+        };
+        for (const p of paths) await gather(p, '');
+        const total = files.filter((f) => !f.dir).length;
+        const existing = new Set((await drive.list(dest, destPath, true)).map((e) => e.name));
+        const clash = paths.map((p) => p.split('/').pop()).filter((n) => existing.has(n));
+        if (clash.length && !await confirmDialog({ title: `Replace ${clash.length === 1 ? `“${clash[0]}”` : `${clash.length} items`} on ${dest.name}?`, message: 'Files with the same names are already there.', confirm: 'Replace', danger: true })) { ok = false; return false; }
+        let i = 0;
+        for (const f of files) {
+          if (f.dir) { await drive.mkdir(dest, join(destPath, parentOf(f.dir)), f.dir.split('/').pop()).catch((err) => { if (err.status !== 409) throw err; }); continue; }
+          const name = f.path.split('/').pop();
+          job.step(name, i++, total);
+          const res = await fetch(fileUrl(root, f.path), { credentials: 'same-origin' });
+          if (!res.ok) throw new Error(`${name}: HTTP ${res.status}`);
+          await drive.writeFile(dest, join(destPath, f.rel), name, res, { size: f.size, onProgress: job.bytes });
+        }
+        if (mode === 'move') await call('delete', { method: 'POST', body: { root, paths } });
+      }
+      toast(`${mode === 'move' ? 'Moved' : 'Copied'} ${paths.length} item${paths.length > 1 ? 's' : ''} to ${where(destRoot)}`, { icon: appIcon.files, type: 'success', timeout: 3000 });
+      return true;
+    } catch (err) {
+      toastError(err, `${mode === 'move' ? 'Move' : 'Copy'} failed`);
+      ok = false;
+      return false;
+    } finally {
+      release();
+      job.done();
+      void ok;
+      this.refresh();
+      this.loadRootsQuiet();
+    }
+  }
+
   download() {
     const files = this.selectedEntries().filter((e) => !e.dir);
     if (!files.length) return toast('Select one or more files to download (folders can’t be downloaded).', { type: 'error' });
-    files.forEach((e, i) => setTimeout(() => {
-      const a = h('a', { href: fileUrl(this.root, join(this.path, e.name)), download: e.name });
+    const local = this.local, path = this.path;
+    files.forEach((e, i) => setTimeout(async () => {
+      let href = fileUrl(this.root, join(path, e.name));
+      if (local) { try { href = URL.createObjectURL(await drive.getFile(local, join(path, e.name))); setTimeout(() => URL.revokeObjectURL(href), 60e3); } catch (err) { toastError(err); return; } }
+      const a = h('a', { href, download: e.name });
       document.body.append(a); a.click(); a.remove();
     }, i * 400));
   }
 
   loadRootsQuiet() {
-    call('roots').then((r) => { this.roots = r; this.updateStatus(); }).catch(() => {});
+    call('roots').then((r) => { this.roots = r; this.attachDrives(); this.updateStatus(); }).catch(() => {});
   }
+  // Drives on this computer sit alongside the shared folders (by their "L…" ids).
+  attachDrives() { for (const d of this.drives) this.roots[d.id] = d; }
 
   // ---- Kindle ----
   // A book file sent to the Kindle app (downloaded for it, or emailed by Send to Kindle).
@@ -751,6 +947,7 @@ class FileBrowser {
   }
   // Books on this device (a Kindle Fire, say) copied into this folder, skipping ones already here.
   backupBooks() {
+    if (this.local) { toast('Choose a folder on the server first', { body: 'Books are backed up into a shared folder on the MediaDesk server.' }); return; }
     const root = this.root;
     const base = this.path;
     const r = this.roots[root];
@@ -770,6 +967,16 @@ class FileBrowser {
   // ---- Upload ----
   async upload(fileList) {
     if (!fileList.length) return;
+    if (this.local) {
+      // Files dropped from the computer onto a drive: written straight to it.
+      const d = this.local, path = this.path;
+      const job = this.job(`Copying ${fileList.length} file${fileList.length > 1 ? 's' : ''} to ${d.name}`);
+      try {
+        for (const [i, f] of fileList.entries()) { job.step(f.name, i, fileList.length); await drive.writeFile(d, path, f.name, f, { onProgress: job.bytes }); }
+      } catch (err) { toastError(err, 'Copy failed'); } finally { job.done(); }
+      if (this.local === d && this.path === path) this.refresh();
+      return;
+    }
     const root = this.root, path = this.path;
     this.uploads.hidden = false;
     const release = await keepAwake();

@@ -2219,3 +2219,15 @@ button.notes-st:hover { background: var(--hover); color: var(--text); }
 .sc-on { display: flex; align-items: center; gap: 8px; flex: 1 1 220px; cursor: pointer; }
 .sc-teams { flex: 0 1 240px; }
 @media (max-width: 640px) { .tray-nfl .sc-league, .tray-nfl .mlb-diamond { display: none; } }
+.pv-text { margin: 0; padding: 16px 20px; overflow: auto; height: 100%; box-sizing: border-box; font: 12.5px/1.5 var(--mono, monospace); white-space: pre-wrap; word-break: break-word; }
+
+/* Files: drives on this computer */
+.fm-side-local { margin-top: 10px; }
+.fm-drive { position: relative; }
+.fm-drive-x { opacity: 0; width: 20px; height: 20px; border-radius: 5px; display: grid; place-items: center; flex: none; color: var(--text-muted); }
+.fm-drive-x svg { width: 13px; height: 13px; }
+.fm-drive:hover .fm-drive-x, .fm-drive:focus-visible .fm-drive-x { opacity: 1; }
+.fm-drive-x:hover { background: var(--hover); color: var(--text); }
+@media (pointer: coarse) { .fm-drive-x { opacity: .7; } }
+.fm-connect-drive { color: var(--accent); }
+.fm-usb-big svg { width: 48px; height: 48px; }

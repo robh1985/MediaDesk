@@ -59,8 +59,9 @@ class Preview {
     this.body = h('div', { class: 'pv-body' });
     clear(win.body, h('div', { class: 'pv' }, this.head, this.body));
     win.on('close', () => this.dispose());
-    win.on('reopen', (o) => { if (o?.path) this.load(o); });
-    if (opts.path) this.load(opts);
+    win.on('reopen', (o) => { if (o?.file) this.loadLocal(o); else if (o?.path) this.load(o); });
+    if (opts.file) this.loadLocal(opts);
+    else if (opts.path) this.load(opts);
     else clear(this.body, emptyState('Nothing to preview', 'Open a file from Files.'));
   }
 
@@ -97,7 +98,40 @@ class Preview {
     }
   }
 
-  url(inline = true) { return fileUrl(this.root, this.path, inline); }
+  url(inline = true) { return this.blobUrl || fileUrl(this.root, this.path, inline); }
+
+  // A file on this computer (a USB drive opened in Files): shown straight from it, without the
+  // server (so formats that need the server's help, such as Office documents, can't be shown).
+  async loadLocal({ file, name, from }) {
+    this.dispose();
+    this.blobUrl = URL.createObjectURL(file);
+    const url = this.blobUrl;
+    this.cleanup.push(() => { URL.revokeObjectURL(url); this.blobUrl = null; });
+    this.name = name || file.name;
+    this.kind = previewKind(this.name);
+    this.ext = extOf(this.name);
+    this.meta = { size: file.size, modified: file.lastModified };
+    this.win.setTitle(this.name);
+    const m = this.meta;
+    clear(this.head,
+      h('div', { class: 'pv-title' }, h('strong', {}, this.name),
+        h('span', { class: 'small muted' }, [LABEL[this.kind], formatBytes(m.size), new Date(m.modified).toLocaleString(), from ? `on ${from}` : 'on this computer'].filter(Boolean).join(' · '))),
+      h('div', { class: 'pv-actions' }, h('a', { class: 'btn btn-sm btn-icon', title: 'Save a copy', 'aria-label': 'Save a copy', href: url, download: this.name, html: icon.download })));
+    clear(this.body, spinner());
+    const cant = (why) => clear(this.body, h('div', { class: 'empty' }, h('div', { class: 'pv-file-icon', html: icon.file || appIcon.preview }), h('div', { class: 'empty-title' }, why), h('div', {}, 'Copy it to a folder on the MediaDesk server (in Files) to open it there.'), this.downloadBtn()));
+    try {
+      if (this.kind === 'image' && !KIND.imageConvert.includes(this.ext)) await this.showImage();
+      else if (this.kind === 'video' || this.kind === 'audio') {
+        if (!NATIVE[this.kind].includes(this.ext)) return cant(`Browsers can’t play .${this.ext} files by themselves`);
+        await this.nativePlayer(this.kind === 'video', null);
+      } else if (this.kind === 'pdf') await this.showPdf(url);
+      else if (file.size < 4 * 1024 * 1024 && (this.kind === 'other' || ['csv', 'tsv'].includes(this.ext)) && /^[\x09\x0a\x0d\x20-\x7e\u00a0-\uffff]*$/.test((await file.slice(0, 4096).text()).replace(/\ufffd/g, ''))) {
+        clear(this.body, h('pre', { class: 'pv-text' }, await file.text()));
+      } else cant(this.kind === 'other' ? 'No preview for this kind of file' : 'This needs the MediaDesk server to show it');
+    } catch (err) {
+      clear(this.body, h('div', { class: 'empty error' }, h('div', { class: 'empty-title' }, 'Couldn’t open this file'), h('div', {}, err.message), this.downloadBtn()));
+    }
+  }
   downloadBtn() { return h('a', { class: 'btn', href: this.url(false), download: this.name }, h('span', { html: icon.download }), 'Download'); }
 
   renderHead() {
