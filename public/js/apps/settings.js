@@ -69,6 +69,7 @@ const connected = (version) => `Connected${version ? ` · ${/^\d/.test(version) 
 async function savePref(app, patch, status) {
   try {
     state.config = await portal.saveConfig({ appSettings: { [app]: patch } });
+    dispatchEvent(new CustomEvent('mediadesk:prefs', { detail: { app } }));
     if (status) {
       clear(status, h('span', { html: icon.check }), 'Saved');
       status.classList.add('show');
@@ -110,6 +111,16 @@ function renderGeneral(container, nav) {
   sec = section('Pop-ups',
     h('label', { class: 'pref-row' }, popups, h('span', {}, h('span', {}, 'Show a pop-up to confirm things I do'),
       h('span', { class: 'small muted pref-help' }, 'For example “Movie added” or “Downloads paused”. Errors always pop up.'))));
+  // Live NFL scores in the menu bar.
+  let nflSec;
+  const nfl = h('input', { type: 'checkbox', checked: prefs('general').nflScores !== false });
+  const teams = h('input', { class: 'input', value: prefs('general').nflTeams || '', placeholder: 'All teams — or for example KC, BUF', spellcheck: 'false', autocapitalize: 'characters', disabled: !nfl.checked });
+  nfl.addEventListener('change', () => { teams.disabled = !nfl.checked; savePref('general', { nflScores: nfl.checked }, nflSec.status); });
+  teams.addEventListener('change', () => { const v = teams.value.toUpperCase().split(/[^A-Za-z]+/).filter(Boolean).join(', '); teams.value = v; savePref('general', { nflTeams: v }, nflSec.status); });
+  nflSec = section('Menu bar',
+    h('label', { class: 'pref-row' }, nfl, h('span', {}, h('span', {}, 'Show live NFL scores in the menu bar'),
+      h('span', { class: 'small muted pref-help' }, 'While games are on, each one shows in turn with the teams’ logos and scores. Click the score for all of this week’s games.'))),
+    h('label', { class: 'pref-row pref-select' }, h('span', {}, h('span', {}, 'Only these teams'), h('span', { class: 'small muted pref-help' }, 'Their abbreviations (KC, BUF, DAL…). Blank for every game.')), teams));
 
   container.append(
     h('div', { class: 'pane-header' }, h('h2', {}, 'General')),
@@ -120,7 +131,7 @@ function renderGeneral(container, nav) {
       h('div', { class: 'btn-row' }, h('button', { class: 'btn', onclick: () => testAll() }, h('span', { html: icon.heartPulse }), 'Test all connections'))),
     section('Notifications',
       h('p', { class: 'small muted' }, 'Things that happen in your apps, such as a finished download, add to the number on that app’s icon instead of popping up. Opening the app clears its number, and the bell in the menu bar lists everything. MediaDesk keeps counting even when no browser is open. Choose what counts on each app’s page.')),
-    sec);
+    sec, nflSec);
 
   const testAll = async () => {
     clear(statusList, Object.entries(SERVICES).map(([svc, s]) => h('div', { class: 'conn-row' }, h('span', { class: 'service-icon', html: appIcon[svc] }), s.name, h('span', { class: 'conn-status' }, h('span', { class: 'spinner sm' })))));

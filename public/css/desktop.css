@@ -2161,3 +2161,43 @@ button.notes-st:hover { background: var(--hover); color: var(--text); }
 .fm-side-add b { font-size: 13px; }
 .fm-root.offline .nav-icon { color: #e03131; }
 .fm-root.offline .fm-root-path { color: #e03131; }
+
+/* Live NFL scores in the menu bar */
+.tray-nfl { padding: 2px 9px; font-variant-numeric: tabular-nums; overflow: hidden; }
+.nfl-game { display: inline-flex; align-items: center; gap: 6px; }
+.nfl-game.in { animation: nfl-in .35s ease-out; }
+@keyframes nfl-in { from { opacity: 0; transform: translateY(60%); } to { opacity: 1; transform: none; } }
+.nfl-side { display: inline-flex; align-items: center; gap: 5px; position: relative; }
+.nfl-logo { width: 18px; height: 18px; object-fit: contain; flex: none; }
+.nfl-abbr { font-weight: 600; font-size: 12px; opacity: .85; }
+.nfl-score { font-size: 13.5px; min-width: 1.2em; text-align: center; }
+.nfl-dash { opacity: .5; }
+.nfl-side.ball .nfl-abbr::after { content: ''; display: inline-block; width: 6px; height: 4px; margin-left: 3px; vertical-align: middle; border-radius: 50%; background: #c2783d; box-shadow: 0 0 0 1px rgba(255, 255, 255, .5); }
+.nfl-clock { font-size: 11.5px; opacity: .75; margin-left: 2px; }
+.nfl-count { font-size: 10px; opacity: .5; }
+.nfl-game.redzone .nfl-clock { color: #e03131; opacity: 1; font-weight: 600; }
+.nfl-game.scored { animation: nfl-in .35s ease-out, nfl-flash 1.2s ease-in-out 3; border-radius: 6px; }
+@keyframes nfl-flash { 50% { background: color-mix(in srgb, #f59f00 35%, transparent); } }
+.nfl-side.up .nfl-score { color: #f59f00; }
+.nfl-panel { position: fixed; z-index: 9000; width: min(380px, calc(100vw - 16px)); max-height: min(70vh, 620px); overflow: auto; padding: 12px 14px; border-radius: 14px; display: flex; flex-direction: column; gap: 10px; color: var(--text); }
+.nfl-panel-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.nfl-group { display: flex; flex-direction: column; gap: 6px; }
+.nfl-group-title { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: var(--text-muted); }
+.nfl-row { display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; padding: 8px 10px; border-radius: 10px; background: var(--surface-2); }
+.nfl-row.in { box-shadow: inset 3px 0 0 #e03131; }
+.nfl-row-teams { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.nfl-row-team { display: flex; align-items: center; gap: 8px; }
+.nfl-row-team .nfl-logo { width: 26px; height: 26px; }
+.nfl-row-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13.5px; }
+.nfl-row-name small { color: var(--text-muted); }
+.nfl-row-team b { font-size: 16px; font-variant-numeric: tabular-nums; }
+.nfl-row.post .nfl-row-team:not(.won) { opacity: .6; }
+.nfl-row-team.ball .nfl-row-name::after { content: ' 🏈'; font-size: 11px; }
+.nfl-row-status { display: flex; flex-direction: column; align-items: flex-end; justify-content: center; gap: 2px; font-size: 12px; text-align: right; }
+.nfl-rz { color: #e03131; font-weight: 700; }
+.nfl-row-play { grid-column: 1 / -1; }
+.nfl-credit { margin-top: 2px; }
+@media (max-width: 640px) {
+  .tray-nfl .nfl-abbr, .tray-nfl .nfl-count { display: none; }
+  .tray-nfl .nfl-clock { font-size: 10.5px; }
+}

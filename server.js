@@ -25,6 +25,7 @@ const { createUsers } = require('./users');
 const { sendMail } = require('./smtp');
 const { createNetShares } = require('./netshares');
 const { createMaps } = require('./maps');
+const { createSports } = require('./sports');
 
 const ROOT = __dirname;
 
@@ -772,6 +773,7 @@ function gamesFor(u) {
   return personalGames.get(u.id);
 }
 const maps = createMaps({ geo: tripPlanner.geo, mock: MOCK });
+const sports = createSports({ dataDir: MOCK ? path.join(require('node:os').tmpdir(), 'mediadesk-demo-data') : path.dirname(CONFIG_PATH), mock: MOCK });
 const family = createFamily({ dataDir: MOCK ? path.join(require('node:os').tmpdir(), 'mediadesk-demo-data') : path.dirname(CONFIG_PATH), mock: MOCK });
 const archive = createArchive({ getConfig: () => filesConfigFor(reqUser()), resolveInShared: files.resolveInShared, filesEnabled: () => filesStatus(reqUser()).enabled });
 // Network shares (SMB, NFS, SFTP, WebDAV) mounted as shared folders for Files.
@@ -983,6 +985,7 @@ async function handle(req, res) {
     if (MOCK && req.method !== 'GET') return sendJson(res, 400, { error: 'Network shares can’t be connected in demo mode' });
     return netShares.handle(req, res, p, { sendJson, readJson });
   }
+  if (p.startsWith('/portal/sports/')) return sports.handle(req, res, p, { sendJson });
   if (p.startsWith('/portal/maps/')) return maps.handle(req, res, url, { sendJson });
   if (p.startsWith('/portal/games/')) return games.handle(req, res, url, { sendJson, readJson });
   if (p.startsWith('/portal/trips/')) return tripPlanner.handle(req, res, url, { sendJson, readJson });

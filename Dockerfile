@@ -18,7 +18,7 @@ RUN apk add --no-cache ffmpeg 7zip cifs-utils nfs-utils sshfs \
 # Calibre's tools run without a screen.
 ENV QT_QPA_PLATFORM=offscreen
 WORKDIR /app
-COPY package.json server.js files.js appsettings.js notify.js mock.js mock-plex.js mock-games.js mock-pikvm.js games.js pikvm.js wallpapers.js media.js archive.js family.js family-auth.js family-recipes.js ebooks.js mock-ebooks.js smtp.js users.js passkeys.js netshares.js maps.js trips.js artmatch.js ./
+COPY package.json server.js files.js appsettings.js notify.js mock.js mock-plex.js mock-games.js mock-pikvm.js games.js pikvm.js wallpapers.js media.js archive.js family.js family-auth.js family-recipes.js ebooks.js mock-ebooks.js smtp.js users.js passkeys.js netshares.js maps.js sports.js trips.js artmatch.js ./
 COPY public ./public
 ENV NODE_ENV=production PORT=8080 CONFIG_PATH=/config/config.json
 VOLUME /config
