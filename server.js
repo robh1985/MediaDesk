@@ -91,7 +91,16 @@ const HOST = process.env.HOST || '0.0.0.0';
 const MOCK = process.env.MOCK === '1' || process.argv.includes('--mock');
 const SERVICES = ['radarr', 'sonarr', 'nzbget', 'jellyfin', 'plex', 'pikvm'];
 const SESSION_DAYS = 30;
-const BUILD_ID = computeBuildId();
+let BUILD_ID = computeBuildId();
+// MediaDesk updated without restarting (new files in public/): a new build, so browsers fetch the
+// new scripts and styles instead of mixing new code with styles they kept from before.
+let buildCheckedAt = Date.now();
+function checkBuild() {
+  if (Date.now() - buildCheckedAt < 10e3) return;
+  buildCheckedAt = Date.now();
+  const now = computeBuildId();
+  if (now !== BUILD_ID) { BUILD_ID = now; indexHtml = familyHtml = tripShareHtml = null; }
+}
 // Lets the server's own notification watcher call the service proxies without a login cookie.
 const INTERNAL_TOKEN = crypto.randomBytes(24).toString('hex');
 
@@ -307,6 +316,7 @@ const MIME = {
 // so they may be kept for a long time; the page itself is never cached.
 let indexHtml = null;
 function serveIndex(req, res) {
+  checkBuild();
   if (!indexHtml) {
     indexHtml = fs.readFileSync(path.join(PUBLIC_DIR, 'index.html'), 'utf8')
       .replace(/(href|src)="(css|js)\//g, `$1="v/${BUILD_ID}/$2/`);
@@ -322,6 +332,7 @@ function serveIndex(req, res) {
 // The Family Organizer on its own page, with the same versioned assets as MediaDesk.
 let familyHtml = null;
 function serveFamilyPage(req, res) {
+  checkBuild();
   familyHtml ||= fs.readFileSync(path.join(PUBLIC_DIR, 'family.html'), 'utf8').replace(/(href|src)="(css|js)\//g, `$1="/v/${BUILD_ID}/$2/`);
   res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store, max-age=0' });
   res.end(req.method === 'HEAD' ? undefined : familyHtml);
@@ -330,6 +341,7 @@ function serveFamilyPage(req, res) {
 // A shared trip's page (read-only, no sign-in), with the same versioned assets.
 let tripShareHtml = null;
 function serveTripSharePage(req, res) {
+  checkBuild();
   tripShareHtml ||= fs.readFileSync(path.join(PUBLIC_DIR, 'trip-share.html'), 'utf8').replace(/(href|src)="(css|js)\//g, `$1="/v/${BUILD_ID}/$2/`);
   res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store, max-age=0', 'X-Robots-Tag': 'noindex', 'Referrer-Policy': 'no-referrer' });
   res.end(req.method === 'HEAD' ? undefined : tripShareHtml);
@@ -849,7 +861,7 @@ async function handle(req, res) {
   if (p === '/portal/session') {
     const me = currentUser(req);
     const only = users.enabled() && users.all().length === 1 ? users.all()[0] : null;
-    return sendJson(res, 200, { authed: Boolean(me), locked: isLocked(req) && isAuthed(req, { ignoreLock: true }), auth: users.enabled(), user: me ? { ...users.publicUser(me), owner: me.id === users.ownerId() || Boolean(me.open) } : null, lockedUser: !me && isLocked(req) ? users.publicUser(currentUser(req, { ignoreLock: true })) : null, usernameHint: only?.migrated ? only.username : null, resetByEmail: users.enabled() && users.emailReady(), passkeys: users.enabled() && users.hasPasskeys(), build: BUILD_ID });
+    return sendJson(res, 200, { authed: Boolean(me), locked: isLocked(req) && isAuthed(req, { ignoreLock: true }), auth: users.enabled(), user: me ? { ...users.publicUser(me), owner: me.id === users.ownerId() || Boolean(me.open) } : null, lockedUser: !me && isLocked(req) ? users.publicUser(currentUser(req, { ignoreLock: true })) : null, usernameHint: only?.migrated ? only.username : null, resetByEmail: users.enabled() && users.emailReady(), passkeys: users.enabled() && users.hasPasskeys(), build: (checkBuild(), BUILD_ID) });
   }
   if (p === '/portal/lock' && req.method === 'POST') {
     if (!users.enabled()) return sendJson(res, 400, { error: 'Turn on sign-in (Settings → Users) to lock MediaDesk' });

@@ -11,7 +11,7 @@ async function api(path, { method = 'GET', body } = {}) {
 }
 export const listShares = () => api('/portal/netshares');
 
-export const NET_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="7" rx="2"/><rect x="3" y="14" width="18" height="7" rx="2"/><path d="M7 6.5h.01M7 17.5h.01"/></svg>';
+export const NET_ICON = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="7" rx="2"/><rect x="3" y="14" width="18" height="7" rx="2"/><path d="M7 6.5h.01M7 17.5h.01"/></svg>';
 
 const KINDS = [
   ['smb', 'Windows / NAS share', 'SMB: Windows computers, Synology, QNAP, TrueNAS, Unraid, a router’s USB drive…'],

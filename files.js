@@ -436,7 +436,9 @@ async function handle(req, res, url, { config, sendJson, readJson }) {
   const q = url.searchParams;
   try {
     if (route === 'roots') {
-      const roots = await Promise.all(rootList(config).map(async (r) => ({ ...r, ...(await diskSpace(r.path)), ok: await exists(r.path) })));
+      // A network share that's slow to answer doesn't hold up the list (a few seconds at most).
+      const quick = (r, work, fallback) => (r.network ? Promise.race([work, new Promise((res) => setTimeout(() => res(fallback), 3000))]) : work);
+      const roots = await Promise.all(rootList(config).map(async (r) => (r.offline ? { ...r, ok: false } : { ...r, ...(await quick(r, diskSpace(r.path), null)), ok: await quick(r, exists(r.path), false) })));
       return sendJson(res, 200, roots);
     }
     if (route === 'list') return sendJson(res, 200, await listDir(getRoot(config, q.get('root')), q.get('path'), q.get('hidden') === '1'));

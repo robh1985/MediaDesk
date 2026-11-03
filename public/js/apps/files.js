@@ -127,6 +127,7 @@ class FileBrowser {
     this.showHidden = savedHidden === null ? Boolean(appPref('files', 'showHidden')) : savedHidden === '1';
     this.build();
     this.loadRoots().then(() => {
+      if (!this.roots.length) { clear(this.list, emptyState('No shared folders', 'Choose folders in Settings → Files.')); return; }
       // The tabs open last time (unless Files was asked to show a particular folder).
       const saved = opts.root === undefined ? this.savedTabs() : null;
       if (saved?.length) {
@@ -134,8 +135,8 @@ class FileBrowser {
         this.tabIdx = Math.min(Math.max(0, Number(localStorage.getItem('mediadesk.files.tab')) || 0), this.tabs.length - 1);
         this.drawTabs();
         this.go(this.root, this.path, false);
-      } else this.go(opts.root ?? 0, opts.path ?? '', false);
-    });
+      } else this.go(this.roots[opts.root] ? opts.root : 0, opts.path ?? '', false);
+    }).catch((err) => { console.error(err); clear(this.list, errorState(err, () => this.refresh())); });
     // Asked to show a folder while open: in a new tab, unless this one is already there.
     win.on('reopen', (o) => {
       if (o?.root === undefined) return;
@@ -176,14 +177,20 @@ class FileBrowser {
       const r = this.roots[t.root];
       const el = h('div', { class: `fm-tab ${i === this.tabIdx ? 'active' : ''}`, role: 'tab', 'aria-selected': String(i === this.tabIdx), title: `${r?.name || ''}${t.path ? ` › ${t.path.split('/').join(' › ')}` : ''}`, dataset: { tab: i },
         onclick: () => this.switchTab(i), onauxclick: (e) => { if (e.button === 1 && many) { e.preventDefault(); this.closeTab(i); } } },
-      h('span', { class: 'fm-tab-icon', html: r?.network ? NET_ICON : fileIcon('folder') }),
+      h('span', { class: 'fm-tab-icon', html: (r?.network ? NET_ICON : fileIcon('folder')).replace('<svg ', '<svg width="15" height="15" ') }),
       h('span', { class: 'fm-tab-name' }, this.tabLabel(t)),
       many ? h('button', { class: 'fm-tab-close', title: 'Close tab', 'aria-label': 'Close tab', onclick: (e) => { e.stopPropagation(); this.closeTab(i); } }, '×') : null);
       // Drop files on a tab to move (or copy) them there.
       this.dropTarget(el, () => ({ root: t.root, path: t.path }));
       return el;
     }), h('button', { class: 'fm-tab-new', title: 'New tab', 'aria-label': 'New tab', onclick: () => this.newTab(this.root, this.path) }, '+'));
-    this.tabBar.querySelector('.fm-tab.active')?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    // Keep the current tab in sight (scrolling only the tab strip itself).
+    const at = this.tabBar.querySelector('.fm-tab.active');
+    if (at) {
+      const bar = this.tabBar;
+      if (at.offsetLeft < bar.scrollLeft) bar.scrollLeft = at.offsetLeft - 8;
+      else if (at.offsetLeft + at.offsetWidth > bar.scrollLeft + bar.clientWidth) bar.scrollLeft = at.offsetLeft + at.offsetWidth - bar.clientWidth + 40;
+    }
   }
   newTab(root, path = '') {
     if (!this.roots[root]) return;

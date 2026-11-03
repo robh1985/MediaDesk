@@ -71,9 +71,21 @@ function createNetShares({ dataDir, getShares, setShares, log = console.log, moc
   const label = (s) => ({ smb: `\\\\${s.host}\\${s.share}${s.path ? `\\${s.path}` : ''}`, nfs: `${s.host}:${s.share}`, sftp: `sftp://${s.username ? `${s.username}@` : ''}${s.host}${s.port ? `:${s.port}` : ''}${s.share || '/'}`, webdav: s.url }[s.type]);
 
   // Mounted: the folder is on another device than the folder it's in.
+  // On Linux this reads the list of mounts, never the share itself: a share whose server stopped
+  // answering can hang anything that looks inside it (and stat-ing it would hang the server).
+  let mountsAt = 0, mountList = null;
+  function mountPoints() {
+    if (Date.now() - mountsAt > 1500 || !mountList) {
+      mountsAt = Date.now();
+      try { mountList = new Set(fs.readFileSync('/proc/self/mounts', 'utf8').split('\n').map((l) => (l.split(' ')[1] || '').replace(/\\040/g, ' ').replace(/\\011/g, '\t').replace(/\\134/g, '\\'))); } catch { mountList = false; }
+    }
+    return mountList;
+  }
   function mounted(s) {
     if (mock) return state.get(s.id)?.status === 'connected';
     if (isWin) return state.get(s.id)?.status === 'connected';
+    const list = mountPoints();
+    if (list) return list.has(path.resolve(rootOf(s)));
     try { return fs.statSync(rootOf(s)).dev !== fs.statSync(base).dev; } catch { return false; }
   }
 
@@ -125,6 +137,7 @@ function createNetShares({ dataDir, getShares, setShares, log = console.log, moc
     } finally {
       if (s.type === 'smb' && !isWin && !isMac) await fsp.rm(secret, { force: true }).catch(() => {});
     }
+    mountsAt = 0; // look at the mounts afresh
     if (r.code === 0 && (isWin || mounted(s))) { state.set(s.id, { status: 'connected', at: Date.now() }); return; }
     const error = explain(s, r);
     state.set(s.id, { status: 'error', error, at: Date.now() });
@@ -139,6 +152,7 @@ function createNetShares({ dataDir, getShares, setShares, log = console.log, moc
       if (r.code !== 0 && s.type === 'sftp') r = await run('fusermount', ['-u', rootOf(s)]);
       if (r.code !== 0) r = await run('umount', ['-l', rootOf(s)]); // busy: let go once nothing uses it
     }
+    mountsAt = 0;
     state.set(s.id, { status: 'off', at: Date.now() });
     for (const f of [path.join(base, `.${s.id}`), path.join(base, `.${s.id}.conf`)]) await fsp.rm(f, { force: true }).catch(() => {});
   }
