@@ -863,6 +863,19 @@ h3.fam-bk-h { font-size: .9em; letter-spacing: .14em; text-transform: uppercase;
   .fam-list-add.grocery .fam-list-entry-wrap { flex-basis: 100%; }
   .fam-list-brand { flex: 1 1 auto; }
 }
-.fam-list-kind { flex: 0 1 190px; width: 190px; min-width: 130px; }
-.fam-item-text small.fam-item-kind { color: var(--f-text, inherit); font-weight: 600; background: color-mix(in srgb, var(--f-muted) 14%, transparent); padding: 1px 7px; border-radius: 6px; }
-@media (max-width: 560px) { .fam-list-kind { flex: 1 1 140px; } }
+.fam-flavor-wrap { position: relative; flex: 0 1 280px; min-width: 160px; }
+.fam-flavor-box { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; min-height: 40px; padding: 4px 8px !important; cursor: text; box-sizing: border-box; height: auto !important; }
+.fam-flavor-chips { display: contents; }
+.fam-flavor-chip { display: inline-flex; align-items: center; gap: 2px; padding: 2px 4px 2px 9px; border-radius: 999px; background: color-mix(in srgb, var(--f-accent, #2f9e44) 15%, transparent); font-size: 13px; font-weight: 600; white-space: nowrap; }
+.fam-flavor-x { border: 0; background: none; cursor: pointer; font-size: 15px; line-height: 1; padding: 0 4px; color: inherit; opacity: .6; }
+.fam-flavor-x:hover { opacity: 1; }
+.fam-flavor-text { flex: 1; min-width: 90px; border: 0; outline: 0; background: none; font: inherit; color: inherit; padding: 4px 2px; }
+.fam-flavor-offers { position: absolute; left: 0; right: 0; top: calc(100% + 4px); z-index: 20; display: flex; flex-wrap: wrap; gap: 5px; padding: 8px; border-radius: 12px; background: var(--f-panel, #fff); box-shadow: var(--f-shadow, 0 6px 20px rgba(0,0,0,.18)); }
+.fam-flavor-offers[hidden] { display: none; }
+.fam-flavor-offer { border: 1px dashed var(--f-line, #ccc); background: none; border-radius: 999px; padding: 3px 10px; font: inherit; font-size: 13px; cursor: pointer; color: inherit; }
+.fam-flavor-offer:hover { border-style: solid; }
+.fam-sheet .fam-flavor-wrap, .fam-form .fam-flavor-wrap { flex: 1 1 auto; width: 100%; }
+.fam-item-text small.fam-item-kind { color: var(--f-text, inherit); font-weight: 600; background: color-mix(in srgb, var(--f-muted) 14%, transparent); padding: 1px 7px; border-radius: 6px; cursor: pointer; }
+.fam-item-text small.fam-item-kind:hover { background: color-mix(in srgb, var(--f-muted) 24%, transparent); }
+.fam-item-text small.fam-item-kind.got { text-decoration: line-through; opacity: .55; }
+@media (max-width: 560px) { .fam-flavor-wrap { flex: 1 1 100%; } }

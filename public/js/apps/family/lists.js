@@ -104,10 +104,16 @@ export class ListsView {
     const qtyIn = grocery ? input({ placeholder: 'Qty', class: 'fam-input fam-list-qty', maxlength: 40, enterkeyhint: 'enter', 'aria-label': 'Quantity', title: 'Quantity, like 2, 1 dozen or 500 g' }) : null;
     const brandIn = grocery ? input({ placeholder: 'Brand (optional)', class: 'fam-input fam-list-brand', maxlength: 60, enterkeyhint: 'enter', 'aria-label': 'Brand', autocomplete: 'off' }) : null;
     // And which kind or flavor (ice cream, chips, cereal…).
-    const kindIn = grocery ? input({ placeholder: 'Kind / flavor (optional)', class: 'fam-input fam-list-kind', maxlength: 60, enterkeyhint: 'enter', 'aria-label': 'Kind or flavor', autocomplete: 'off' }) : null;
+    // Several of them, as chips (cookie dough and mint chip).
+    const pastFlavors = () => {
+      const k = foodKey(splitIngredient(entry.value).name || entry.value);
+      if (!k) return [];
+      return [...new Set(this.store.all('listitems').filter((x) => foodKey(x.text) === k).flatMap(varietiesOf))].sort((a, b) => a.localeCompare(b));
+    };
+    const kindIn = grocery ? flavorBox({ suggest: pastFlavors, onSubmit: () => add(), cls: 'fam-list-kind' }) : null;
     // Brands used before, offered as you type.
-    // Suggestions: brands used before (that food's first), and that food's kinds and flavors.
-    let brands = null, kinds = null;
+    // Suggestions: brands used before (that food's first).
+    let brands = null;
     const fillSuggestions = () => {
       if (!grocery) return;
       const k = foodKey(splitIngredient(entry.value).name || entry.value);
@@ -116,19 +122,15 @@ export class ListsView {
       const uniq = (xs) => [...new Set(xs.filter(Boolean))];
       const byName = (a, b) => a.localeCompare(b);
       clear(brands, uniq([...all.filter(mine).map((x) => x.brand).sort(byName), ...all.map((x) => x.brand).sort(byName)]).map((b) => h('option', { value: b })));
-      clear(kinds, uniq(all.filter(mine).map((x) => x.variety)).sort(byName).map((v) => h('option', { value: v })));
     };
     if (grocery) {
       brands = h('datalist', { id: `fam-brands-${list.id}` });
-      kinds = h('datalist', { id: `fam-kinds-${list.id}` });
       brandIn.setAttribute('list', brands.id);
-      kindIn.setAttribute('list', kinds.id);
       brandIn.addEventListener('focus', fillSuggestions);
-      kindIn.addEventListener('focus', fillSuggestions);
       fillSuggestions();
     }
-    const extras = () => ({ qty: qtyIn?.value.trim() || '', brand: brandIn?.value.trim() || '', variety: kindIn?.value.trim() || '' });
-    const resetExtras = () => { for (const x of [qtyIn, brandIn, kindIn]) if (x) x.value = ''; };
+    const extras = () => ({ qty: qtyIn?.value.trim() || '', brand: brandIn?.value.trim() || '', varieties: kindIn?.value() || [] });
+    const resetExtras = () => { for (const x of [qtyIn, brandIn]) if (x) x.value = ''; kindIn?.clear(); };
     const add = async () => {
       const lines = entry.value.split(/\n|,(?=\s*\S)/).map((s) => s.trim()).filter(Boolean);
       if (!lines.length) { entry.focus(); return; }
@@ -138,7 +140,7 @@ export class ListsView {
       await this.addItems(list, lines, ex);
       this.el.querySelector('.fam-list-entry')?.focus();
     };
-    for (const x of [qtyIn, brandIn, kindIn]) x?.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); add(); } });
+    for (const x of [qtyIn, brandIn]) x?.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); add(); } });
     // Grocery lists suggest foods from the food database as you type.
     const sugg = h('div', { class: 'fam-food-sugg', hidden: true });
     let picks = [];
@@ -207,7 +209,7 @@ export class ListsView {
       if (ticked.length) body.append(h('div', { class: 'fam-aisle' }, '✓ In the cart'), ...ticked.map((i) => this.row(i, list)));
     } else body.append(...visible.map((i) => this.row(i, list)));
     if (!items.length) body.append(h('div', { class: 'fam-muted fam-list-empty' }, 'This list is empty.'));
-    clear(main, head, h('div', { class: `fam-list-add ${grocery ? 'grocery' : ''}` }, h('div', { class: 'fam-list-entry-wrap' }, entry, sugg), qtyIn, brandIn, kindIn, brands, kinds, h('button', { class: 'fam-btn primary', onclick: add }, 'Add')), body);
+    clear(main, head, h('div', { class: `fam-list-add ${grocery ? 'grocery' : ''}` }, h('div', { class: 'fam-list-entry-wrap' }, entry, sugg), qtyIn, brandIn, kindIn?.el, brands, h('button', { class: 'fam-btn primary', onclick: add }, 'Add')), body);
   }
 
   row(i, list, aisle = null) {
@@ -218,7 +220,12 @@ export class ListsView {
       h('button', { class: 'fam-item-text', onclick: () => this.editItem(i, list) },
         h('span', {}, i.text),
         i.qty ? h('small', { class: 'fam-item-qty' }, i.qty) : null,
-        i.variety ? h('small', { class: 'fam-item-kind' }, i.variety) : null,
+        ...varietiesOf(i).map((v) => {
+          const got = (i.gotVarieties || []).some((x) => sameText(x, v));
+          // At the store: tap a flavor once it's in the cart.
+          return h('small', { class: `fam-item-kind ${got ? 'got' : ''}`, role: 'button', tabindex: 0, title: got ? `${v}: got it (tap to undo)` : `${v}: tap when it’s in the cart`,
+            onclick: (e) => { e.stopPropagation(); this.toggleFlavor(i, v); }, onkeydown: (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); this.toggleFlavor(i, v); } } }, got ? `✓ ${v}` : v);
+        }),
         i.brand ? h('small', { class: 'fam-item-brand' }, i.brand) : null,
         i.notes ? h('small', {}, i.notes) : null,
         i.due ? h('small', { class: overdue ? 'overdue' : '' }, `Due ${fmtDate(parseYmd(i.due), { weekday: 'short', month: 'short', day: 'numeric' })}`) : null),
@@ -227,25 +234,45 @@ export class ListsView {
       aisle ? h('button', { class: 'fam-item-aisle', title: `In ${aisle.name} — change the aisle`, 'aria-label': `Aisle: ${aisle.name}. Change`, onclick: () => this.pickAisle(i) }, aisle.emoji || '🛍️') : null);
   }
 
-  // lines: what was typed. extra: { qty, brand } from the boxes beside it (groceries).
+  // A flavor got (or not); with every flavor got, the item is ticked.
+  async toggleFlavor(i, v) {
+    const got = (i.gotVarieties || []).filter((x) => !sameText(x, v));
+    if (got.length === (i.gotVarieties || []).length) got.push(v);
+    const all = varietiesOf(i).every((x) => got.some((y) => sameText(x, y)));
+    try { await this.store.put('listitems', { ...i, gotVarieties: got, ...(all && !i.done ? { done: true, doneAt: Date.now() } : !all && i.done ? { done: false, doneAt: null } : {}) }); } catch (err) { toastError(err); }
+  }
+
+  // lines: what was typed. extra: { qty, brand, varieties } from the boxes beside it (groceries).
   async addItems(list, lines, extra = {}) {
     const base = Date.now();
     const grocery = list.kind === 'grocery';
-    // The same food from two brands is two items (Horizon milk and the store's own).
-    // And two kinds or flavors are two items too (cookie dough and mint chip ice cream).
-    const key = (t, brand = '', variety = '') => (grocery ? `${foodKey(t)}|${brand.toLowerCase()}|${variety.toLowerCase()}` : t.toLowerCase());
+    // The same food from two brands is two items (Horizon milk and the store's own). Kinds and
+    // flavors are on the one item: more of them for one already on the list join it.
+    const key = (t, brand = '') => (grocery ? `${foodKey(t)}|${brand.toLowerCase()}` : t.toLowerCase());
     const brand = grocery ? String(extra.brand || '').trim().slice(0, 60) : '';
-    const variety = grocery ? String(extra.variety || '').trim().slice(0, 60) : '';
-    const known = new Set(this.items(list.id).filter((i) => !i.done).map((i) => key(i.text, i.brand || '', i.variety || '')));
+    const varieties = grocery ? (extra.varieties || []).map((x) => String(x).trim().slice(0, 60)).filter(Boolean).slice(0, 30) : [];
+    const open = new Map(this.items(list.id).filter((i) => !i.done).map((i) => [key(i.text, i.brand || ''), i]));
+    const known = new Set(open.keys());
     const ops = [];
+    let joined = 0;
     const learned = [];
     for (const line of lines) {
       // Groceries: "2 lb chicken thighs" is Chicken thighs, 2 lb; the food's own name is used.
       let { name, qty } = grocery ? splitIngredient(line) : { name: line, qty: '' };
       // The quantity box wins over one typed with the item.
       if (grocery && extra.qty) qty = String(extra.qty).trim().slice(0, 40);
-      if (!name || known.has(key(name, brand, variety))) continue;
-      known.add(key(name, brand, variety));
+      if (!name) continue;
+      if (known.has(key(name, brand))) {
+        // Already on the list: new flavors (and a new quantity) go on that item.
+        const there = open.get(key(name, brand));
+        const more = there ? mergeVarieties(varietiesOf(there), varieties) : null;
+        if (there && (more.length > varietiesOf(there).length || (extra.qty && extra.qty !== there.qty))) {
+          ops.push({ op: 'put', col: 'listitems', item: { ...there, varieties: more, variety: undefined, qty: extra.qty ? qty : there.qty } });
+          joined++;
+        }
+        continue;
+      }
+      known.add(key(name, brand));
       if (grocery) {
         const food = matchFood(this.store, name);
         if (food && food.key === foodKey(name)) name = food.name;
@@ -255,9 +282,10 @@ export class ListsView {
           ops.push({ op: 'put', col: 'foods', item: { name: name.slice(0, 80), aisle: guessAisle(name) } });
         }
       }
-      ops.push({ op: 'put', col: 'listitems', item: { list: list.id, text: name.slice(0, 300), qty: qty || undefined, brand: brand || undefined, variety: variety || undefined, done: false, order: base + ops.length } });
+      ops.push({ op: 'put', col: 'listitems', item: { list: list.id, text: name.slice(0, 300), qty: qty || undefined, brand: brand || undefined, varieties: varieties.length ? varieties : undefined, done: false, order: base + ops.length } });
     }
     if (!ops.length) { toast('Already on the list', { timeout: 2000 }); return; }
+    if (joined && ops.length === joined) toast('Added to the one already on the list', { timeout: 2000 });
     try {
       await this.store.batch(ops);
       if (learned.length) toast(`Added ${learned.length === 1 ? `“${learned[0]}”` : `${learned.length} new foods`} to the foods`, { timeout: 3000, body: 'Put in the wrong aisle? Tap its aisle button to move it.' });
@@ -483,7 +511,7 @@ export class ListsView {
     const text = input({ value: i.text, required: true, autofocus: true, maxlength: 300 });
     const qty = input({ value: i.qty || '', placeholder: 'e.g. 2 lb', maxlength: 40 });
     const brand = input({ value: i.brand || '', placeholder: 'Any brand', maxlength: 60 });
-    const variety = input({ value: i.variety || '', placeholder: 'e.g. cookie dough, BBQ', maxlength: 60 });
+    const flavors = flavorBox({ values: varietiesOf(i), placeholder: 'e.g. cookie dough, BBQ', suggest: () => [...new Set(this.store.all('listitems').filter((x) => foodKey(x.text) === foodKey(i.text)).flatMap(varietiesOf))].sort((a, b) => a.localeCompare(b)) });
     const notes = input({ value: i.notes || '', placeholder: 'Notes', maxlength: 300 });
     const who = this.assignPicker(i.member ? [i.member] : [], { single: true });
     const due = input({ type: 'date', value: i.due || '' });
@@ -493,10 +521,10 @@ export class ListsView {
     const out = await sheet(this.app.root, {
       title: 'Item',
       body: h('div', { class: 'fam-form' }, text,
-        list.kind === 'grocery' ? h('div', { class: 'fam-row-wrap' }, field('Quantity', qty), field('Brand', brand), field('Kind / flavor', variety), field('Aisle', aisle)) : h('div', { class: 'fam-row-wrap' }, field('Due', due)),
+        list.kind === 'grocery' ? [h('div', { class: 'fam-row-wrap' }, field('Quantity', qty), field('Brand', brand), field('Aisle', aisle)), h('div', { class: 'fam-row-wrap' }, field('Kinds / flavors', flavors.el))] : h('div', { class: 'fam-row-wrap' }, field('Due', due)),
         notes, field('For', who), field('List', moveTo)),
       actions: [{ label: 'Delete', danger: true, left: true, value: 'delete' }, { label: 'Cancel' }, { label: 'Save', primary: true, submit: true, onClick: (close) => close({
-        ...i, text: text.value.trim() || i.text, qty: qty.value.trim(), brand: list.kind === 'grocery' ? brand.value.trim() : i.brand, variety: list.kind === 'grocery' ? variety.value.trim() : i.variety, notes: notes.value.trim(), member: who.value().find((id) => id !== i.member) || who.value()[0] || null, due: due.value || null, section: list.kind === 'grocery' && aisle.value !== wasAisle && aisle.value !== '__new' ? aisle.value : i.section || null, list: moveTo.value,
+        ...i, text: text.value.trim() || i.text, qty: qty.value.trim(), brand: list.kind === 'grocery' ? brand.value.trim() : i.brand, ...(list.kind === 'grocery' ? { varieties: flavors.value(), variety: undefined, gotVarieties: (i.gotVarieties || []).filter((g) => flavors.value().some((v) => sameText(v, g))) } : {}), notes: notes.value.trim(), member: who.value().find((id) => id !== i.member) || who.value()[0] || null, due: due.value || null, section: list.kind === 'grocery' && aisle.value !== wasAisle && aisle.value !== '__new' ? aisle.value : i.section || null, list: moveTo.value,
       }) }],
     });
     if (!out) return;
@@ -567,4 +595,59 @@ export function splitIngredient(line) {
   let name = (m?.[2] || line).replace(/\s*\(.*?\)\s*/g, ' ').replace(/,.*$/, '').trim();
   name = name.charAt(0).toUpperCase() + name.slice(1);
   return { qty: (m?.[1] || '').trim(), name };
+}
+
+// An item's kinds or flavors (a list; older items kept one as text).
+export const varietiesOf = (i) => (Array.isArray(i?.varieties) ? i.varieties : i?.variety ? [i.variety] : []);
+const sameText = (a, b) => a.trim().toLowerCase() === b.trim().toLowerCase();
+// Join two lists of flavors, keeping the first spelling of each.
+export const mergeVarieties = (a, b) => [...a, ...b.filter((x) => !a.some((y) => sameText(x, y)))];
+
+// A box for several kinds or flavors: type one and press Enter or comma (or pick a suggestion) and
+// it becomes a chip; × takes it off. Enter in an empty box does onSubmit. Suggestions come from
+// suggest() (shown as chips to tap, and as the box's own suggestions).
+export function flavorBox({ values = [], placeholder = 'Kind / flavor (optional)', suggest = () => [], onSubmit = null, cls = '' } = {}) {
+  let list = [...values];
+  const chips = h('span', { class: 'fam-flavor-chips' });
+  const id = `fam-flavors-${Math.random().toString(36).slice(2, 8)}`;
+  const dl = h('datalist', { id });
+  const text = h('input', { class: 'fam-flavor-text', placeholder, maxlength: 60, enterkeyhint: 'enter', autocomplete: 'off', list: id, 'aria-label': 'Kinds or flavors' });
+  const offers = h('div', { class: 'fam-flavor-offers', hidden: true });
+  const box = h('div', { class: `fam-input fam-flavor-box ${cls}`, onclick: (e) => { if (e.target === box || e.target === chips) text.focus(); } }, chips, text, dl);
+  const wrap = h('div', { class: 'fam-flavor-wrap' }, box, offers);
+  const drawOffers = () => {
+    const all = suggest().filter((x) => !list.some((y) => sameText(x, y)));
+    clear(dl, all.map((v) => h('option', { value: v })));
+    clear(offers, all.slice(0, 12).map((v) => h('button', { type: 'button', class: 'fam-flavor-offer', onpointerdown: (e) => e.preventDefault(), onclick: () => { push(v); text.focus(); } }, `+ ${v}`)));
+    offers.hidden = !all.length || document.activeElement !== text;
+  };
+  const draw = () => {
+    clear(chips, list.map((v, n) => h('span', { class: 'fam-flavor-chip' }, v,
+      h('button', { type: 'button', class: 'fam-flavor-x', 'aria-label': `Remove ${v}`, onclick: (e) => { e.stopPropagation(); list.splice(n, 1); draw(); text.focus(); } }, '×'))));
+    text.placeholder = list.length ? 'Another?' : placeholder;
+    drawOffers();
+  };
+  const push = (v) => {
+    for (const one of String(v).split(',').map((x) => x.trim()).filter(Boolean)) if (!list.some((y) => sameText(y, one))) list.push(one.slice(0, 60));
+    text.value = '';
+    draw();
+  };
+  text.addEventListener('keydown', (e) => {
+    if ((e.key === 'Enter' || e.key === ',') && text.value.trim()) { e.preventDefault(); push(text.value); return; }
+    if (e.key === 'Enter') { e.preventDefault(); onSubmit?.(); return; }
+    if (e.key === 'Backspace' && !text.value && list.length) { list.pop(); draw(); }
+  });
+  // Picking one from the browser's suggestions.
+  text.addEventListener('input', (e) => { if ((e.inputType === 'insertReplacementText' || e.inputType === undefined) && suggest().some((x) => sameText(x, text.value))) push(text.value); });
+  text.addEventListener('focus', drawOffers);
+  text.addEventListener('blur', () => setTimeout(() => { offers.hidden = true; }, 150));
+  draw();
+  return {
+    el: wrap,
+    input: text,
+    // What's chosen, with anything still being typed.
+    value: () => (text.value.trim() ? mergeVarieties(list, text.value.split(',').map((x) => x.trim()).filter(Boolean)) : [...list]),
+    clear: () => { list = []; text.value = ''; draw(); },
+    refresh: drawOffers,
+  };
 }
