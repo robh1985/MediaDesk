@@ -863,3 +863,6 @@ h3.fam-bk-h { font-size: .9em; letter-spacing: .14em; text-transform: uppercase;
   .fam-list-add.grocery .fam-list-entry-wrap { flex-basis: 100%; }
   .fam-list-brand { flex: 1 1 auto; }
 }
+.fam-list-kind { flex: 0 1 190px; width: 190px; min-width: 130px; }
+.fam-item-text small.fam-item-kind { color: var(--f-text, inherit); font-weight: 600; background: color-mix(in srgb, var(--f-muted) 14%, transparent); padding: 1px 7px; border-radius: 6px; }
+@media (max-width: 560px) { .fam-list-kind { flex: 1 1 140px; } }

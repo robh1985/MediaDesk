@@ -103,15 +103,32 @@ export class ListsView {
     // Groceries: how many or how much, and a brand if it matters (both optional).
     const qtyIn = grocery ? input({ placeholder: 'Qty', class: 'fam-input fam-list-qty', maxlength: 40, enterkeyhint: 'enter', 'aria-label': 'Quantity', title: 'Quantity, like 2, 1 dozen or 500 g' }) : null;
     const brandIn = grocery ? input({ placeholder: 'Brand (optional)', class: 'fam-input fam-list-brand', maxlength: 60, enterkeyhint: 'enter', 'aria-label': 'Brand', autocomplete: 'off' }) : null;
+    // And which kind or flavor (ice cream, chips, cereal…).
+    const kindIn = grocery ? input({ placeholder: 'Kind / flavor (optional)', class: 'fam-input fam-list-kind', maxlength: 60, enterkeyhint: 'enter', 'aria-label': 'Kind or flavor', autocomplete: 'off' }) : null;
     // Brands used before, offered as you type.
-    let brands = null;
-    if (brandIn) {
-      const used = [...new Set(this.store.all('listitems').map((x) => x.brand).filter(Boolean))].sort((a, b) => a.localeCompare(b));
-      brands = h('datalist', { id: `fam-brands-${list.id}` }, used.map((b) => h('option', { value: b })));
+    // Suggestions: brands used before (that food's first), and that food's kinds and flavors.
+    let brands = null, kinds = null;
+    const fillSuggestions = () => {
+      if (!grocery) return;
+      const k = foodKey(splitIngredient(entry.value).name || entry.value);
+      const all = this.store.all('listitems');
+      const mine = (x) => k && foodKey(x.text) === k;
+      const uniq = (xs) => [...new Set(xs.filter(Boolean))];
+      const byName = (a, b) => a.localeCompare(b);
+      clear(brands, uniq([...all.filter(mine).map((x) => x.brand).sort(byName), ...all.map((x) => x.brand).sort(byName)]).map((b) => h('option', { value: b })));
+      clear(kinds, uniq(all.filter(mine).map((x) => x.variety)).sort(byName).map((v) => h('option', { value: v })));
+    };
+    if (grocery) {
+      brands = h('datalist', { id: `fam-brands-${list.id}` });
+      kinds = h('datalist', { id: `fam-kinds-${list.id}` });
       brandIn.setAttribute('list', brands.id);
+      kindIn.setAttribute('list', kinds.id);
+      brandIn.addEventListener('focus', fillSuggestions);
+      kindIn.addEventListener('focus', fillSuggestions);
+      fillSuggestions();
     }
-    const extras = () => ({ qty: qtyIn?.value.trim() || '', brand: brandIn?.value.trim() || '' });
-    const resetExtras = () => { if (qtyIn) qtyIn.value = ''; if (brandIn) brandIn.value = ''; };
+    const extras = () => ({ qty: qtyIn?.value.trim() || '', brand: brandIn?.value.trim() || '', variety: kindIn?.value.trim() || '' });
+    const resetExtras = () => { for (const x of [qtyIn, brandIn, kindIn]) if (x) x.value = ''; };
     const add = async () => {
       const lines = entry.value.split(/\n|,(?=\s*\S)/).map((s) => s.trim()).filter(Boolean);
       if (!lines.length) { entry.focus(); return; }
@@ -121,7 +138,7 @@ export class ListsView {
       await this.addItems(list, lines, ex);
       this.el.querySelector('.fam-list-entry')?.focus();
     };
-    for (const x of [qtyIn, brandIn]) x?.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); add(); } });
+    for (const x of [qtyIn, brandIn, kindIn]) x?.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); add(); } });
     // Grocery lists suggest foods from the food database as you type.
     const sugg = h('div', { class: 'fam-food-sugg', hidden: true });
     let picks = [];
@@ -190,7 +207,7 @@ export class ListsView {
       if (ticked.length) body.append(h('div', { class: 'fam-aisle' }, '✓ In the cart'), ...ticked.map((i) => this.row(i, list)));
     } else body.append(...visible.map((i) => this.row(i, list)));
     if (!items.length) body.append(h('div', { class: 'fam-muted fam-list-empty' }, 'This list is empty.'));
-    clear(main, head, h('div', { class: `fam-list-add ${grocery ? 'grocery' : ''}` }, h('div', { class: 'fam-list-entry-wrap' }, entry, sugg), qtyIn, brandIn, brands, h('button', { class: 'fam-btn primary', onclick: add }, 'Add')), body);
+    clear(main, head, h('div', { class: `fam-list-add ${grocery ? 'grocery' : ''}` }, h('div', { class: 'fam-list-entry-wrap' }, entry, sugg), qtyIn, brandIn, kindIn, brands, kinds, h('button', { class: 'fam-btn primary', onclick: add }, 'Add')), body);
   }
 
   row(i, list, aisle = null) {
@@ -201,6 +218,7 @@ export class ListsView {
       h('button', { class: 'fam-item-text', onclick: () => this.editItem(i, list) },
         h('span', {}, i.text),
         i.qty ? h('small', { class: 'fam-item-qty' }, i.qty) : null,
+        i.variety ? h('small', { class: 'fam-item-kind' }, i.variety) : null,
         i.brand ? h('small', { class: 'fam-item-brand' }, i.brand) : null,
         i.notes ? h('small', {}, i.notes) : null,
         i.due ? h('small', { class: overdue ? 'overdue' : '' }, `Due ${fmtDate(parseYmd(i.due), { weekday: 'short', month: 'short', day: 'numeric' })}`) : null),
@@ -214,9 +232,11 @@ export class ListsView {
     const base = Date.now();
     const grocery = list.kind === 'grocery';
     // The same food from two brands is two items (Horizon milk and the store's own).
-    const key = (t, brand = '') => (grocery ? `${foodKey(t)}|${brand.toLowerCase()}` : t.toLowerCase());
+    // And two kinds or flavors are two items too (cookie dough and mint chip ice cream).
+    const key = (t, brand = '', variety = '') => (grocery ? `${foodKey(t)}|${brand.toLowerCase()}|${variety.toLowerCase()}` : t.toLowerCase());
     const brand = grocery ? String(extra.brand || '').trim().slice(0, 60) : '';
-    const known = new Set(this.items(list.id).filter((i) => !i.done).map((i) => key(i.text, i.brand || '')));
+    const variety = grocery ? String(extra.variety || '').trim().slice(0, 60) : '';
+    const known = new Set(this.items(list.id).filter((i) => !i.done).map((i) => key(i.text, i.brand || '', i.variety || '')));
     const ops = [];
     const learned = [];
     for (const line of lines) {
@@ -224,8 +244,8 @@ export class ListsView {
       let { name, qty } = grocery ? splitIngredient(line) : { name: line, qty: '' };
       // The quantity box wins over one typed with the item.
       if (grocery && extra.qty) qty = String(extra.qty).trim().slice(0, 40);
-      if (!name || known.has(key(name, brand))) continue;
-      known.add(key(name, brand));
+      if (!name || known.has(key(name, brand, variety))) continue;
+      known.add(key(name, brand, variety));
       if (grocery) {
         const food = matchFood(this.store, name);
         if (food && food.key === foodKey(name)) name = food.name;
@@ -235,7 +255,7 @@ export class ListsView {
           ops.push({ op: 'put', col: 'foods', item: { name: name.slice(0, 80), aisle: guessAisle(name) } });
         }
       }
-      ops.push({ op: 'put', col: 'listitems', item: { list: list.id, text: name.slice(0, 300), qty: qty || undefined, brand: brand || undefined, done: false, order: base + ops.length } });
+      ops.push({ op: 'put', col: 'listitems', item: { list: list.id, text: name.slice(0, 300), qty: qty || undefined, brand: brand || undefined, variety: variety || undefined, done: false, order: base + ops.length } });
     }
     if (!ops.length) { toast('Already on the list', { timeout: 2000 }); return; }
     try {
@@ -463,6 +483,7 @@ export class ListsView {
     const text = input({ value: i.text, required: true, autofocus: true, maxlength: 300 });
     const qty = input({ value: i.qty || '', placeholder: 'e.g. 2 lb', maxlength: 40 });
     const brand = input({ value: i.brand || '', placeholder: 'Any brand', maxlength: 60 });
+    const variety = input({ value: i.variety || '', placeholder: 'e.g. cookie dough, BBQ', maxlength: 60 });
     const notes = input({ value: i.notes || '', placeholder: 'Notes', maxlength: 300 });
     const who = this.assignPicker(i.member ? [i.member] : [], { single: true });
     const due = input({ type: 'date', value: i.due || '' });
@@ -472,10 +493,10 @@ export class ListsView {
     const out = await sheet(this.app.root, {
       title: 'Item',
       body: h('div', { class: 'fam-form' }, text,
-        list.kind === 'grocery' ? h('div', { class: 'fam-row-wrap' }, field('Quantity', qty), field('Brand', brand), field('Aisle', aisle)) : h('div', { class: 'fam-row-wrap' }, field('Due', due)),
+        list.kind === 'grocery' ? h('div', { class: 'fam-row-wrap' }, field('Quantity', qty), field('Brand', brand), field('Kind / flavor', variety), field('Aisle', aisle)) : h('div', { class: 'fam-row-wrap' }, field('Due', due)),
         notes, field('For', who), field('List', moveTo)),
       actions: [{ label: 'Delete', danger: true, left: true, value: 'delete' }, { label: 'Cancel' }, { label: 'Save', primary: true, submit: true, onClick: (close) => close({
-        ...i, text: text.value.trim() || i.text, qty: qty.value.trim(), brand: list.kind === 'grocery' ? brand.value.trim() : i.brand, notes: notes.value.trim(), member: who.value().find((id) => id !== i.member) || who.value()[0] || null, due: due.value || null, section: list.kind === 'grocery' && aisle.value !== wasAisle && aisle.value !== '__new' ? aisle.value : i.section || null, list: moveTo.value,
+        ...i, text: text.value.trim() || i.text, qty: qty.value.trim(), brand: list.kind === 'grocery' ? brand.value.trim() : i.brand, variety: list.kind === 'grocery' ? variety.value.trim() : i.variety, notes: notes.value.trim(), member: who.value().find((id) => id !== i.member) || who.value()[0] || null, due: due.value || null, section: list.kind === 'grocery' && aisle.value !== wasAisle && aisle.value !== '__new' ? aisle.value : i.section || null, list: moveTo.value,
       }) }],
     });
     if (!out) return;
