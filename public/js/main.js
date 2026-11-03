@@ -27,6 +27,7 @@ import { familyApp } from './apps/family/family.js';
 import { pikvmApp } from './apps/pikvm.js';
 import { ebooksApp } from './apps/ebooks/ebooks.js';
 import { tripsApp } from './apps/trips/trips.js';
+import { mapsApp } from './apps/maps.js';
 
 applyAppearance();
 
@@ -40,7 +41,7 @@ const session = window.mediadeskSession || {};
 const allowed = new Set(session.user?.allowed || []);
 const mayUse = (app) => !session.user || allowed.has(app.id);
 state.me = session.user || null;
-[dashboardApp, makeArrApp('radarr'), makeArrApp('sonarr'), nzbgetApp, jellyfinApp, plexApp, plexViewerApp, pikvmApp, consoleApp, musicApp, filesApp, notesApp, logViewerApp, archiveApp, convertApp, paintApp, paintProApp, familyApp, ebooksApp, tripsApp, previewApp, calculatorApp, settingsApp, webviewApp,
+[dashboardApp, makeArrApp('radarr'), makeArrApp('sonarr'), nzbgetApp, jellyfinApp, plexApp, plexViewerApp, pikvmApp, consoleApp, musicApp, filesApp, notesApp, logViewerApp, archiveApp, convertApp, paintApp, paintProApp, familyApp, ebooksApp, tripsApp, mapsApp, previewApp, calculatorApp, settingsApp, webviewApp,
   { id: 'launcher', name: 'Search', icon: '', open() {} }].filter(mayUse).forEach(registerApp);
 
 async function boot() {

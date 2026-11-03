@@ -23,7 +23,7 @@ const ROLES = ['admin', 'standard', 'custom'];
 const APPS = {
   dashboard: 'Dashboard', radarr: 'Radarr', sonarr: 'Sonarr', nzbget: 'NZBGet', jellyfin: 'Jellyfin', plex: 'Plex', plexviewer: 'Plex Viewer',
   pikvm: 'PiKVM', console: 'The Game Console', music: 'Music', files: 'Files', notes: 'Notes', logs: 'Log Viewer', archive: 'Archive Expander',
-  convert: 'Convert', paint: 'Paint', paintpro: 'Paint Pro', family: 'Family Organizer', ebooks: 'eBook Reader', trips: 'Trip Planner',
+  convert: 'Convert', paint: 'Paint', paintpro: 'Paint Pro', family: 'Family Organizer', ebooks: 'eBook Reader', trips: 'Trip Planner', maps: 'Maps',
   calculator: 'Calculator', webview: 'Web UI windows',
 };
 const ALWAYS = new Set(['settings', 'launcher', 'preview']);

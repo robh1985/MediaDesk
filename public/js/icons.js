@@ -72,6 +72,7 @@ export const appIcon = {
   archive: tile('#f9a8d4', '#9d174d', '<rect x="16" y="12" width="32" height="40" rx="4"/><path d="M32 12v6M28 18h4M32 22h4M28 26h4M32 30h4"/><rect x="27.5" y="34" width="9" height="9" rx="2"/>'),
   convert: tile('#67e8f9', '#0e7490', '<path d="M16 24h30M38 16l8 8-8 8"/><path d="M48 40H18M26 32l-8 8 8 8"/>'),
   paint: tile('#ffd75e', '#e8590c', '<path d="M40 12l12 12-16 16-12-12z"/><path d="M24 28c-6 0-10 4-10 9 0 4-2 6-4 8 9 1 17-2 18-11"/><circle cx="44" cy="46" r="3.5" fill="#fff" stroke-width="1"/><circle cx="52" cy="38" r="2.5" fill="#fff" stroke-width="1"/>'),
+  maps: tile('#8ce99a', '#2b8a3e', '<path d="M12 18l13-5 14 5 13-5v33l-13 5-14-5-13 5z"/><path d="M25 13v33M39 18v33"/><path d="M12 34c6-3 9 2 13 0s8-6 14-2 9 1 13-1" stroke-width="2.2"/>'),
   trips: tile('#a5d8ff', '#1864ab', '<path d="M32 50s-14-13.5-14-24a14 14 0 0 1 28 0c0 10.5-14 24-14 24z"/><circle cx="32" cy="26" r="5"/><path d="M12 54h10M42 54h10M26 54h12" stroke-width="2.2"/>'),
   ebooks: tile('#ffd8a8', '#c2410c', '<path d="M32 18c-5-3.5-12-4.5-19-3v31c7-1.5 14-.5 19 3 5-3.5 12-4.5 19-3V15c-7-1.5-14-.5-19 3z"/><path d="M32 18v31"/><path d="M38 24c3-1 6-1.3 8-1M38 30c3-1 6-1.3 8-1M18 24c2-.3 5 0 8 1M18 30c2-.3 5 0 8 1" stroke-width="2.2"/>'),
   family: tile('#ffa8a8', '#e03131', '<rect x="12" y="15" width="40" height="36" rx="5"/><path d="M12 25h40M22 11v8M42 11v8"/><path d="M32 46s-8-4.6-8-10a4.3 4.3 0 0 1 8-2.2 4.3 4.3 0 0 1 8 2.2c0 5.4-8 10-8 10z" fill="#fff" stroke-width="1.5"/>'),

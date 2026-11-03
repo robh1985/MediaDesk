@@ -24,6 +24,7 @@ const { createTrips } = require('./trips');
 const { createUsers } = require('./users');
 const { sendMail } = require('./smtp');
 const { createNetShares } = require('./netshares');
+const { createMaps } = require('./maps');
 
 const ROOT = __dirname;
 
@@ -758,6 +759,7 @@ function gamesFor(u) {
   if (!personalGames.has(u.id)) personalGames.set(u.id, createGames({ dataDir: userDataDir(u), getFolder: () => personalDir(users.byId(u.id) || u, 'Games'), idSalt: `mine:${u.id}` }));
   return personalGames.get(u.id);
 }
+const maps = createMaps({ geo: tripPlanner.geo, mock: MOCK });
 const family = createFamily({ dataDir: MOCK ? path.join(require('node:os').tmpdir(), 'mediadesk-demo-data') : path.dirname(CONFIG_PATH), mock: MOCK });
 const archive = createArchive({ getConfig: () => filesConfigFor(reqUser()), resolveInShared: files.resolveInShared, filesEnabled: () => filesStatus(reqUser()).enabled });
 // Network shares (SMB, NFS, SFTP, WebDAV) mounted as shared folders for Files.
@@ -803,7 +805,7 @@ const FILE_APPS = ['files', 'music', 'notes', 'paint', 'paintpro', 'logs', 'arch
 const FILE_WRITERS = ['files', 'notes', 'paint', 'paintpro', 'archive'];
 const ROUTE_APPS = [
   ['/api/radarr/', ['radarr']], ['/api/sonarr/', ['sonarr']], ['/api/nzbget', ['nzbget']], ['/api/jellyfin/', ['jellyfin', 'music']],
-  ['/api/plex/', ['plex', 'plexviewer']], ['/api/pikvm/', ['pikvm']], ['/portal/games/', ['console']], ['/portal/trips/', ['trips']],
+  ['/api/plex/', ['plex', 'plexviewer']], ['/api/pikvm/', ['pikvm']], ['/portal/games/', ['console']], ['/portal/trips/', ['trips']], ['/portal/maps/', ['maps']],
   ['/portal/ebooks/', ['ebooks', 'files']], ['/portal/archive/', ['archive', 'files']], ['/portal/files/', FILE_APPS],
 ];
 const appsFor = (p) => ROUTE_APPS.find(([prefix]) => p.startsWith(prefix))?.[1] || null;
@@ -969,6 +971,7 @@ async function handle(req, res) {
     if (MOCK && req.method !== 'GET') return sendJson(res, 400, { error: 'Network shares can’t be connected in demo mode' });
     return netShares.handle(req, res, p, { sendJson, readJson });
   }
+  if (p.startsWith('/portal/maps/')) return maps.handle(req, res, url, { sendJson });
   if (p.startsWith('/portal/games/')) return games.handle(req, res, url, { sendJson, readJson });
   if (p.startsWith('/portal/trips/')) return tripPlanner.handle(req, res, url, { sendJson, readJson });
   if (p.startsWith('/portal/ebooks/')) return ebooks.handle(req, res, url, { sendJson, readJson, readBody });
