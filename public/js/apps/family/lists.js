@@ -4,6 +4,7 @@
 import { h, clear, toast, toastError } from '../../ui.js';
 import { ymd, parseYmd, fmtDate, todayYmd } from './dates.js';
 import { sheet, field, input, select, avatar, memberPicker, emojiButton, colorPicker, ICONS } from './shared.js';
+import { shoppingMode } from './shopping.js';
 import { DEFAULT_AISLES, aisles, aisleFor, findAisle, seedAisles, foods, matchFood, ownFood, searchFoods, guessAisle, foodKey, OTHER } from './groceries.js';
 
 // Which aisle a grocery item is in, from the food database; the family's aisles and foods.
@@ -190,6 +191,7 @@ export class ListsView {
       h('div', { class: 'fam-toolbar-title' }, h('span', {}, list.emoji || '📝'), ' ', list.title),
       (list.members || []).length ? h('span', { class: 'fam-list-for' }, 'For ', list.members.map((id) => this.store.member(id)).filter(Boolean).map((m) => h('span', {}, avatar(m, 'xs'), m.name))) : null,
       h('div', { class: 'fam-spacer' }),
+      items.length ? h('button', { class: 'fam-btn primary fam-shop-btn', title: 'The list on the whole screen, big, for the store', onclick: () => shoppingMode(this, list) }, list.kind === 'grocery' ? '🛒 Shopping' : '⛶ Full screen') : null,
       done.length ? h('button', { class: 'fam-btn', onclick: () => { this.showDone = !this.showDone; this.render(this.el); } }, this.showDone ? 'Hide ticked' : `Show ticked (${done.length})`) : null,
       done.length ? h('button', { class: 'fam-btn', onclick: () => this.clearDone(list, done) }, 'Clear ticked') : null,
       list.kind === 'grocery' ? h('button', { class: 'fam-btn', onclick: () => this.browseFoods(list) }, '🥕 Foods') : null,

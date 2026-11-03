@@ -879,3 +879,50 @@ h3.fam-bk-h { font-size: .9em; letter-spacing: .14em; text-transform: uppercase;
 .fam-item-text small.fam-item-kind:hover { background: color-mix(in srgb, var(--f-muted) 24%, transparent); }
 .fam-item-text small.fam-item-kind.got { text-decoration: line-through; opacity: .55; }
 @media (max-width: 560px) { .fam-flavor-wrap { flex: 1 1 100%; } }
+
+/* Shopping mode: the list on the whole screen */
+.fam-shop { --shop-size: 1; position: fixed; inset: 0; z-index: 9500; display: flex; flex-direction: column; background: var(--f-bg, #f6f3ee); color: var(--f-text, #1d1d1f); font-size: calc(19px * var(--shop-size)); }
+.fam-shop-head { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; padding: max(12px, env(safe-area-inset-top)) 18px 10px; background: var(--f-panel, #fff); box-shadow: 0 2px 10px rgba(0, 0, 0, .08); }
+.fam-shop-title { display: flex; align-items: center; gap: 10px; font-size: 1.3em; min-width: 0; }
+.fam-shop-title b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fam-shop-progress { color: var(--f-muted); font-size: .8em; font-weight: 600; }
+.fam-shop-tools { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+.fam-shop-size { min-width: 46px; height: 46px; border-radius: 12px; border: 1px solid var(--f-line, #ddd); background: none; color: inherit; font: 700 16px/1 inherit; cursor: pointer; }
+.fam-shop-done { height: 46px; padding: 0 22px; border-radius: 12px; border: 0; background: var(--c) !important; color: #fff !important; font: 700 17px/1 inherit; cursor: pointer; }
+.fam-shop-bar { height: 5px; background: color-mix(in srgb, var(--c) 18%, transparent); flex: none; }
+.fam-shop-bar i { display: block; height: 100%; width: 0; background: var(--c); transition: width .3s; }
+.fam-shop-nav { display: flex; gap: 8px; overflow-x: auto; padding: 10px 16px; flex: none; scrollbar-width: none; background: var(--f-bg, #f6f3ee); }
+.fam-shop-nav::-webkit-scrollbar { display: none; }
+.fam-shop-nav[hidden] { display: none; }
+.fam-shop-chip { flex: none; display: inline-flex; align-items: center; gap: 7px; padding: 9px 14px; border-radius: 999px; border: 1px solid var(--f-line, #ddd); background: var(--f-panel, #fff); color: inherit; font: 600 15px/1 inherit; cursor: pointer; white-space: nowrap; }
+.fam-shop-chip span { font-size: 12px; font-weight: 800; background: color-mix(in srgb, var(--c) 18%, transparent); color: var(--c); border-radius: 999px; padding: 2px 7px; }
+.fam-shop-chip.on { background: var(--c); color: #fff; border-color: var(--c); }
+.fam-shop-chip.on span { background: rgba(255, 255, 255, .25); color: #fff; }
+.fam-shop-scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 0 16px max(24px, env(safe-area-inset-bottom)); position: relative; -webkit-overflow-scrolling: touch; }
+.fam-shop-aisle { position: sticky; top: 0; z-index: 2; background: var(--f-bg, #f6f3ee); font-size: .78em; font-weight: 800; text-transform: uppercase; letter-spacing: .05em; color: var(--f-muted); padding: 16px 4px 8px; }
+.fam-shop-item { display: flex; align-items: flex-start; gap: 16px; padding: .7em .6em; margin: 6px 0; border-radius: 16px; background: var(--f-panel, #fff); box-shadow: 0 1px 3px rgba(0, 0, 0, .06); cursor: pointer; user-select: none; -webkit-tap-highlight-color: transparent; transition: transform .1s, opacity .2s; }
+.fam-shop-item:active { transform: scale(.985); }
+.fam-shop-check { flex: none; width: 1.6em; height: 1.6em; border-radius: .45em; border: 3px solid color-mix(in srgb, var(--c) 60%, transparent); display: grid; place-items: center; color: #fff; font-weight: 900; font-size: .95em; margin-top: .05em; }
+.fam-shop-item.done .fam-shop-check { background: var(--c); border-color: var(--c); }
+.fam-shop-text { display: flex; flex-direction: column; gap: .3em; min-width: 0; flex: 1; }
+.fam-shop-name { font-size: 1.2em; font-weight: 650; line-height: 1.25; overflow-wrap: anywhere; }
+.fam-shop-item.done .fam-shop-name { text-decoration: line-through; color: var(--f-muted); }
+.fam-shop-item.done { opacity: .65; }
+.fam-shop-meta { display: flex; gap: .7em; flex-wrap: wrap; align-items: center; font-size: .85em; color: var(--f-muted); }
+.fam-shop-qty { color: var(--c); background: color-mix(in srgb, var(--c) 13%, transparent); padding: .1em .55em; border-radius: 999px; }
+.fam-shop-brand { font-style: italic; }
+.fam-shop-kinds { display: flex; gap: .45em; flex-wrap: wrap; }
+.fam-shop-kind { border: 2px solid color-mix(in srgb, var(--f-muted) 35%, transparent); background: none; color: inherit; font: 600 .85em/1.2 inherit; padding: .35em .8em; border-radius: 999px; cursor: pointer; }
+.fam-shop-kind.got { background: var(--c); border-color: var(--c); color: #fff; }
+.fam-shop-cart-head { width: 100%; display: flex; justify-content: space-between; align-items: center; margin: 18px 0 4px; padding: 14px 6px; border: 0; border-top: 1px solid var(--f-line, #ddd); background: none; color: var(--f-muted); font: 800 .8em/1 inherit; text-transform: uppercase; letter-spacing: .05em; cursor: pointer; }
+.fam-shop-finished { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 48px 12px 20px; text-align: center; font-size: 1.1em; }
+.fam-shop-party { font-size: 3em; }
+.fam-shop-finish-btns { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }
+.fam-shop-finish-btns .fam-btn { font-size: 16px; padding: 12px 20px; }
+@media (max-width: 560px) {
+  .fam-shop-head { gap: 8px; padding-left: 12px; padding-right: 12px; }
+  .fam-shop-title { font-size: 1.1em; flex: 1; }
+  .fam-shop-progress { order: 3; width: 100%; }
+  .fam-shop-size { min-width: 40px; height: 40px; }
+  .fam-shop-scroll { padding-left: 10px; padding-right: 10px; }
+}
