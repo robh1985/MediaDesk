@@ -2201,3 +2201,21 @@ button.notes-st:hover { background: var(--hover); color: var(--text); }
   .tray-nfl .nfl-abbr, .tray-nfl .nfl-count { display: none; }
   .tray-nfl .nfl-clock { font-size: 10.5px; }
 }
+
+/* Scores: other leagues */
+.sc-league { font-size: 9.5px; font-weight: 800; letter-spacing: .04em; padding: 1px 5px; border-radius: 4px; background: rgba(127, 127, 127, .22); }
+.sc-nfl { color: #1c7ed6; } .sc-nba { color: #e8590c; } .sc-nhl { color: #5c7cfa; } .sc-mlb { color: #e03131; }
+.mlb-diamond { display: inline-flex; align-items: center; gap: 3px; }
+.mlb-diamond > span:first-child { display: inline-flex; }
+.mlb-outs { display: inline-flex; flex-direction: column; gap: 1.5px; }
+.mlb-outs i { width: 4px; height: 4px; border-radius: 50%; border: 1px solid currentColor; opacity: .7; }
+.mlb-outs i.on { background: currentColor; opacity: 1; }
+.mlb-line { display: inline-flex; align-items: center; gap: 6px; }
+.sc-tabs { display: flex; gap: 4px; background: var(--surface-2); padding: 3px; border-radius: 10px; }
+.sc-tab { flex: 1; border: 0; background: none; color: var(--text-muted); padding: 6px 4px; border-radius: 8px; font: 700 12.5px/1 inherit; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 5px; }
+.sc-tab.on { background: var(--surface); color: var(--text); box-shadow: 0 1px 4px rgba(0, 0, 0, .12); }
+.sc-live { background: #e03131; color: #fff; font-size: 10px; min-width: 16px; height: 16px; border-radius: 8px; display: inline-grid; place-items: center; padding: 0 4px; }
+.sc-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.sc-on { display: flex; align-items: center; gap: 8px; flex: 1 1 220px; cursor: pointer; }
+.sc-teams { flex: 0 1 240px; }
+@media (max-width: 640px) { .tray-nfl .sc-league, .tray-nfl .mlb-diamond { display: none; } }

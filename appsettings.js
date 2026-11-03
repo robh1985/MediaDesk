@@ -6,8 +6,12 @@
 const DEFAULTS = {
   general: {
     actionPopups: true,            // pop-up confirmations for things you do (errors always show)
-    nflScores: true,               // live NFL scores cycling in the menu bar while games are on
-    nflTeams: '',                  // only these teams' games there ("KC, BUF"); blank for all
+    // Live scores cycling in the menu bar while games are on, per league, and only these teams'
+    // games there ("KC, BUF"; blank for all).
+    nflScores: true, nflTeams: '',
+    nbaScores: true, nbaTeams: '',
+    nhlScores: true, nhlTeams: '',
+    mlbScores: true, mlbTeams: '',
   },
   radarr: {
     notifyHealth: true, notifyImported: true, notifyGrabbed: false,

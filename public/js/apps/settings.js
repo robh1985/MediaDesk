@@ -1,6 +1,7 @@
 // Settings: a page per app (connection, notifications, preferences), plus general options.
 
 import { sharesSection } from '../netshares-ui.js';
+import { LEAGUES } from '../scores.js';
 import { h, clear, toast, toastError, spinner, sidebarLayout, confirmDialog, contextMenu, debounce } from '../ui.js';
 import { icon, appIcon } from '../icons.js';
 import { portal, state, radarr, sonarr, nzbget, jellyfin, isConfigured } from '../api.js';
@@ -111,16 +112,18 @@ function renderGeneral(container, nav) {
   sec = section('Pop-ups',
     h('label', { class: 'pref-row' }, popups, h('span', {}, h('span', {}, 'Show a pop-up to confirm things I do'),
       h('span', { class: 'small muted pref-help' }, 'For example “Movie added” or “Downloads paused”. Errors always pop up.'))));
-  // Live NFL scores in the menu bar.
+  // Live scores in the menu bar: each league on or off, and only some teams.
   let nflSec;
-  const nfl = h('input', { type: 'checkbox', checked: prefs('general').nflScores !== false });
-  const teams = h('input', { class: 'input', value: prefs('general').nflTeams || '', placeholder: 'All teams — or for example KC, BUF', spellcheck: 'false', autocapitalize: 'characters', disabled: !nfl.checked });
-  nfl.addEventListener('change', () => { teams.disabled = !nfl.checked; savePref('general', { nflScores: nfl.checked }, nflSec.status); });
-  teams.addEventListener('change', () => { const v = teams.value.toUpperCase().split(/[^A-Za-z]+/).filter(Boolean).join(', '); teams.value = v; savePref('general', { nflTeams: v }, nflSec.status); });
+  const leagueRow = ([l, name]) => {
+    const on = h('input', { type: 'checkbox', checked: prefs('general')[`${l}Scores`] !== false });
+    const teams = h('input', { class: 'input sc-teams', value: prefs('general')[`${l}Teams`] || '', placeholder: { nfl: 'All teams — or e.g. KC, BUF', nba: 'All teams — or e.g. BOS, LAL', nhl: 'All teams — or e.g. TOR, EDM', mlb: 'All teams — or e.g. NYY, LAD' }[l], spellcheck: 'false', autocapitalize: 'characters', disabled: !on.checked, 'aria-label': `${name} teams` });
+    on.addEventListener('change', () => { teams.disabled = !on.checked; savePref('general', { [`${l}Scores`]: on.checked }, nflSec.status); });
+    teams.addEventListener('change', () => { const v = teams.value.toUpperCase().split(/[^A-Za-z]+/).filter(Boolean).join(', '); teams.value = v; savePref('general', { [`${l}Teams`]: v }, nflSec.status); });
+    return h('div', { class: 'pref-row sc-row', dataset: { league: l } }, h('label', { class: 'sc-on' }, on, h('span', {}, `Show live ${name} scores`)), teams);
+  };
   nflSec = section('Menu bar',
-    h('label', { class: 'pref-row' }, nfl, h('span', {}, h('span', {}, 'Show live NFL scores in the menu bar'),
-      h('span', { class: 'small muted pref-help' }, 'While games are on, each one shows in turn with the teams’ logos and scores. Click the score for all of this week’s games.'))),
-    h('label', { class: 'pref-row pref-select' }, h('span', {}, h('span', {}, 'Only these teams'), h('span', { class: 'small muted pref-help' }, 'Their abbreviations (KC, BUF, DAL…). Blank for every game.')), teams));
+    h('p', { class: 'small muted' }, 'While games are on, each one shows in turn in the menu bar with the teams’ logos and scores. Click the score for the day’s games. Type team abbreviations to show only their games there (blank for every game).'),
+    LEAGUES.map(leagueRow));
 
   container.append(
     h('div', { class: 'pane-header' }, h('h2', {}, 'General')),

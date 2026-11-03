@@ -1,6 +1,6 @@
 // The desktop shell: wallpaper, menu bar, dock, desktop icons, widgets and the launcher.
 
-import { nflTicker } from './nflticker.js';
+import { scoresTicker } from './scores.js';
 import { personHtml } from './people.js';
 import { h, clear, formatSpeed, formatBytes, timeOf, debounce, toast, toastError, contextMenu, timeAgo } from './ui.js';
 import { icon, appIcon } from './icons.js';
@@ -196,7 +196,7 @@ function buildMenuBar() {
       appName,
       h('button', { class: 'menu-link', onclick: openLauncher }, 'Apps'),
       h('button', { class: 'menu-link', onclick: () => openApp('dashboard') }, 'Overview')),
-    h('div', { class: 'menu-right' }, nflTicker(), nowPlaying, speed, streams, bell, theme, clock));
+    h('div', { class: 'menu-right' }, scoresTicker(), nowPlaying, speed, streams, bell, theme, clock));
 
   onChange(() => {
     document.body.classList.toggle('has-window', openWindows().some((x) => !x.minimized));
