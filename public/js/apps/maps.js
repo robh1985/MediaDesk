@@ -7,6 +7,8 @@
 import { h, clear, toast, toastError, debounce } from '../ui.js';
 import { appIcon, icon } from '../icons.js';
 import { loadLeaflet } from './trips/map.js';
+import { RoutePlanner } from './maps-route.js';
+import { contextMenu } from '../ui.js';
 
 const OSM = '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors';
 const ESRI = 'Tiles &copy; <a href="https://www.esri.com" target="_blank" rel="noopener">Esri</a>';
@@ -132,6 +134,9 @@ class MapsApp {
     if (!BASES[this.prefs.base]) this.prefs.base = 'streets';
     this.layers = {};
     this.measure = null;
+    // For the route planner.
+    this.api = api;
+    this.fmtDist = fmtDist;
     this.build();
     this.start(opts).catch((err) => clear(this.mapEl, h('div', { class: 'empty error' }, err.message)));
   }
@@ -146,11 +151,13 @@ class MapsApp {
     this.layersBtn = tool('Map layers', '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="m12 3 9 5-9 5-9-5 9-5z"/><path d="m3 13 9 5 9-5"/></svg>', () => this.togglePanel());
     this.measureBtn = tool('Measure distance and area', '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 17 17 3l4 4L7 21z"/><path d="m7 13 2 2M10 10l2 2M13 7l2 2"/></svg>', () => this.toggleMeasure());
     this.locateBtn = tool('Show where I am', '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg>', () => this.locate());
+    this.routeBtn = tool('Directions', '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2 2 12l10 10 10-10z"/><path d="M9 14v-2a2 2 0 0 1 2-2h4M13 8l2 2-2 2"/></svg>', () => (this.planner.open ? this.planner.hide() : this.planner.show()), 'mp-route-btn');
     this.unitsBtn = h('button', { class: 'mp-tool mp-units', type: 'button', title: 'Miles or kilometres', onclick: () => { this.prefs.miles = !this.prefs.miles; this.save(); this.drawUnits(); } });
     const bar = h('div', { class: 'mp-bar' }, h('div', { class: 'mp-searchbox' }, h('span', { class: 'mp-searchicon', html: icon.search }), this.search, this.results),
-      h('div', { class: 'mp-tools' }, this.layersBtn, this.measureBtn, this.locateBtn, this.unitsBtn));
+      h('div', { class: 'mp-tools' }, this.routeBtn, this.layersBtn, this.measureBtn, this.locateBtn, this.unitsBtn));
     this.measureBox = h('div', { class: 'mp-measure', hidden: true });
-    this.win.body.append(h('div', { class: 'mp' }, this.mapEl, bar, this.panel, this.measureBox, this.status));
+    this.planner = new RoutePlanner(this);
+    this.win.body.append(h('div', { class: 'mp' }, this.mapEl, bar, this.panel, this.planner.el, this.measureBox, this.status));
     this.drawUnits();
     this.search.addEventListener('input', debounce(() => this.suggest(), 250));
     this.search.addEventListener('keydown', (e) => {
@@ -172,12 +179,27 @@ class MapsApp {
     this.win.on?.('close', () => ro.disconnect());
     map.on('moveend zoomend', () => { const c = map.getCenter(); this.prefs.center = [+c.lat.toFixed(5), +c.lng.toFixed(5)]; this.prefs.zoom = map.getZoom(); this.save(); this.drawStatus(); });
     map.on('mousemove', (e) => { this.cursor = e.latlng; this.drawStatus(); });
-    map.on('click', (e) => (this.measure ? this.addMeasurePoint(e.latlng) : this.whatsHere(e.latlng)));
+    map.on('click', (e) => (this.planner.picking >= 0 ? this.planner.pick(e.latlng) : this.measure ? this.addMeasurePoint(e.latlng) : this.whatsHere(e.latlng)));
+    // Right-click (or long-press): directions from or to here, what's here.
+    map.on('contextmenu', (e) => {
+      const ev = e.originalEvent;
+      ev.preventDefault();
+      const here = () => ({ lat: +e.latlng.lat.toFixed(6), lon: +L.Util.wrapNum(e.latlng.lng, [-180, 180], true).toFixed(6), name: '' });
+      const put = (which) => { const p = here(); this.planner.setPoint(which, p); this.planner.nameIt(p); };
+      contextMenu(ev.clientX, ev.clientY, [
+        { label: 'Directions from here', icon: icon.arrowUp, action: () => put('from') },
+        { label: 'Directions to here', icon: icon.download, action: () => put('to') },
+        ...(this.planner.points.filter(Boolean).length >= 2 ? [{ label: 'Add a stop here', icon: icon.plus, action: () => put('stop') }] : []),
+        '-',
+        { label: 'What’s here?', icon: icon.search, action: () => this.whatsHere(e.latlng) },
+        { label: 'Copy coordinates', action: () => { navigator.clipboard?.writeText(`${here().lat}, ${here().lon}`); toast('Copied', { timeout: 1200 }); } },
+      ]);
+    });
     this.drawStatus();
     if (opts.lat != null && opts.lon != null) this.show({ lat: opts.lat, lon: opts.lon, name: opts.name || '' }, opts.zoom || 15);
   }
 
-  save() { writePrefs({ base: this.prefs.base, overlays: this.prefs.overlays, center: this.prefs.center, zoom: this.prefs.zoom, miles: this.prefs.miles }); }
+  save() { writePrefs({ base: this.prefs.base, overlays: this.prefs.overlays, center: this.prefs.center, zoom: this.prefs.zoom, miles: this.prefs.miles, routeMode: this.prefs.routeMode, routeAvoid: this.prefs.routeAvoid }); }
 
   // ---- Layers ----
   setBase(key) {
@@ -294,6 +316,9 @@ class MapsApp {
       h('div', { class: 'mp-pop-row mp-mono' }, coord, h('button', { class: 'mp-copy', type: 'button', title: 'Copy', onclick: () => { navigator.clipboard?.writeText(coord); toast('Copied', { timeout: 1200 }); } }, 'Copy')),
       h('div', { class: 'mp-pop-row mp-mono small' }, `${dms(lat, 'N', 'S')} ${dms(lon, 'E', 'W')}`),
       height,
+      h('div', { class: 'mp-pop-dir' },
+        h('button', { type: 'button', class: 'btn btn-sm btn-primary', onclick: () => { this.map.closePopup(); this.planner.setPoint('to', { lat, lon, name: place.querySelector('b')?.textContent && place.querySelector('b').textContent !== 'Here' ? place.querySelector('b').textContent : coord }); } }, 'Directions to here'),
+        h('button', { type: 'button', class: 'btn btn-sm', onclick: () => { this.map.closePopup(); this.planner.setPoint('from', { lat, lon, name: place.querySelector('b')?.textContent && place.querySelector('b').textContent !== 'Here' ? place.querySelector('b').textContent : coord }); } }, 'From here')),
       h('div', { class: 'mp-pop-links' },
         h('a', { href: `https://www.openstreetmap.org/?mlat=${lat}&mlon=${lon}#map=17/${lat}/${lon}`, target: '_blank', rel: 'noopener' }, 'OpenStreetMap'),
         h('a', { href: `https://www.google.com/maps/search/?api=1&query=${lat},${lon}`, target: '_blank', rel: 'noopener' }, 'Google Maps')));
@@ -365,6 +390,7 @@ class MapsApp {
     this.unitsBtn.textContent = this.prefs.miles ? 'mi' : 'km';
     if (this.scale && this.map) { this.scale.remove(); this.scale = this.L.control.scale({ position: 'bottomleft', imperial: this.prefs.miles, metric: !this.prefs.miles }).addTo(this.map); }
     if (this.measure) this.drawMeasure();
+    if (this.planner?.open) this.planner.draw();
   }
   drawStatus() {
     if (!this.map) return;
