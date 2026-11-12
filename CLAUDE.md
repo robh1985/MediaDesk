@@ -9,6 +9,11 @@ every future session", and record any new standing request I give in both this
 file and The Index.
 <!-- end The Index bootstrap -->
 
+## Global preferences
+
+My global preferences, such as researching existing open-source projects before building, live
+only in The Index's `CLAUDE.md`, under "Global preferences". Follow them from there. Don't copy
+them into this file: keep only rules specific to this project here.
 
 ## Attaching repositories
 
