@@ -9,3 +9,9 @@ every future session", and record any new standing request I give in both this
 file and The Index.
 <!-- end The Index bootstrap -->
 
+
+## Attaching repositories
+
+`.claude/settings.json` runs `.claude/hooks/add-repo-gate.mjs` before any repository is attached
+(`add_repo`): The Index (`robh1985/The-Index`) is attached without a prompt, and any other repository
+asks first. Claude Code reads that file only in sessions started with this one repository.

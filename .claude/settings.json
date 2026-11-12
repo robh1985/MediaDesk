@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "mcp__claude-code-remote__add_repo",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/add-repo-gate.mjs\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}
