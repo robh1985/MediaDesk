@@ -15,6 +15,11 @@ My global preferences, such as researching existing open-source projects before 
 only in The Index's `CLAUDE.md`, under "Global preferences". Follow them from there. Don't copy
 them into this file: keep only rules specific to this project here.
 
+## Branches and commits
+
+Commit and push every change straight to `main`. Only use another branch (or a pull request) if you
+ask first and I agree. Commit as `robh1985`, and keep model names out of commit messages and code.
+
 ## Attaching repositories
 
 `.claude/settings.json` runs `.claude/hooks/add-repo-gate.mjs` before any repository is attached
