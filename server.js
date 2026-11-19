@@ -24,6 +24,7 @@ const { createTrips } = require('./trips');
 const { createUsers } = require('./users');
 const { sendMail } = require('./smtp');
 const { createNetShares } = require('./netshares');
+const { createCloudStorage } = require('./cloudstorage');
 const { createMaps } = require('./maps');
 const { createSports } = require('./sports');
 
@@ -776,9 +777,10 @@ const maps = createMaps({ geo: tripPlanner.geo, mock: MOCK });
 const sports = createSports({ dataDir: MOCK ? path.join(require('node:os').tmpdir(), 'mediadesk-demo-data') : path.dirname(CONFIG_PATH), mock: MOCK });
 const family = createFamily({ dataDir: MOCK ? path.join(require('node:os').tmpdir(), 'mediadesk-demo-data') : path.dirname(CONFIG_PATH), mock: MOCK });
 const archive = createArchive({ getConfig: () => filesConfigFor(reqUser()), resolveInShared: files.resolveInShared, filesEnabled: () => filesStatus(reqUser()).enabled });
-// Network shares (SMB, NFS, SFTP, WebDAV) mounted as shared folders for Files.
+// Network shares (SMB, NFS, SFTP, WebDAV) and cloud storage (through rclone) mounted as shared folders for Files.
+const cloudStorage = createCloudStorage({ dataDir: path.dirname(CONFIG_PATH), mock: MOCK, getRclonePath: () => config.rclonePath || '' });
 const netShares = createNetShares({
-  dataDir: path.dirname(CONFIG_PATH), mock: MOCK,
+  dataDir: path.dirname(CONFIG_PATH), mock: MOCK, cloud: cloudStorage,
   getShares: () => (Array.isArray(config.networkShares) ? config.networkShares : []),
   setShares: async (list) => { const next = fs.existsSync(CONFIG_PATH) ? readConfigFile() : {}; next.networkShares = list; saveConfig(next); },
 });

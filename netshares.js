@@ -3,7 +3,8 @@
 // Files' shared folders. The server mounts each one into a folder of its own (next to config.json),
 // so every app that reads shared folders (Files, Music, Preview, the eBook Reader…) can use it like
 // any other folder. On Windows, an SMB share is connected with `net use` and used by its
-// \\server\share address instead.
+// \\server\share address instead. Cloud storage (Google Drive, OneDrive, iCloud Drive, Dropbox…) is a
+// share too: cloudstorage.js signs in and mounts it with rclone.
 //
 // Mounting needs the tools for it on the server (cifs-utils, nfs-common, sshfs, davfs2 — the Docker
 // image has them) and permission to mount (root, or a Docker container with the SYS_ADMIN
@@ -16,18 +17,21 @@ const fsp = require('node:fs/promises');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const { spawn } = require('node:child_process');
+const { PROVIDERS, CloudError } = require('./cloudstorage');
 
 const TYPES = {
   smb: 'Windows share (SMB)',
   nfs: 'NFS',
   sftp: 'SFTP (SSH)',
   webdav: 'WebDAV',
+  ...Object.fromEntries(Object.entries(PROVIDERS).map(([k, v]) => [k, v.name])),
 };
+const isCloud = (s) => Boolean(PROVIDERS[s?.type]);
 const isWin = process.platform === 'win32';
 const isMac = process.platform === 'darwin';
 
 // Where a share's files are: its own folder in <config folder>/network, or on Windows its \\server\share address.
-const rootFor = (dataDir, s) => (isWin ? `\\\\${s.host}\\${s.share}${s.path ? `\\${s.path.replace(/\//g, '\\')}` : ''}` : path.join(dataDir, 'network', s.id));
+const rootFor = (dataDir, s) => (isWin && !isCloud(s) ? `\\\\${s.host}\\${s.share}${s.path ? `\\${s.path.replace(/\//g, '\\')}` : ''}` : path.join(dataDir, 'network', s.id));
 
 class ShareError extends Error { constructor(status, message) { super(message); this.status = status; } }
 
@@ -63,12 +67,13 @@ function explain(share, r) {
   return (r.out || 'It couldn’t be connected').split('\n').filter(Boolean).slice(-2).join(' ').slice(0, 300);
 }
 
-function createNetShares({ dataDir, getShares, setShares, log = console.log, mock = false }) {
+function createNetShares({ dataDir, getShares, setShares, cloud = null, log = console.log, mock = false }) {
   const base = path.join(dataDir, 'network');
   const state = new Map(); // id -> { status: 'connected' | 'connecting' | 'error' | 'off', error, at }
 
   const rootOf = (s) => rootFor(dataDir, s);
-  const label = (s) => ({ smb: `\\\\${s.host}\\${s.share}${s.path ? `\\${s.path}` : ''}`, nfs: `${s.host}:${s.share}`, sftp: `sftp://${s.username ? `${s.username}@` : ''}${s.host}${s.port ? `:${s.port}` : ''}${s.share || '/'}`, webdav: s.url }[s.type]);
+  const label = (s) => (isCloud(s) ? [TYPES[s.type], cloud?.accountOf(s.id), s.type === 's3' ? (s.endpoint || '').replace(/^https?:\/\//, '') : '', [s.bucket, s.path].filter(Boolean).join('/')].filter(Boolean).join(' · ') : { smb: `\\\\${s.host}\\${s.share}${s.path ? `\\${s.path}` : ''}`, nfs: `${s.host}:${s.share}`, sftp: `sftp://${s.username ? `${s.username}@` : ''}${s.host}${s.port ? `:${s.port}` : ''}${s.share || '/'}`, webdav: s.url }[s.type]);
+  const inMounts = (mp) => { mountsAt = 0; const list = mountPoints(); return list ? list.has(path.resolve(mp)) : false; };
 
   // Mounted: the folder is on another device than the folder it's in.
   // On Linux this reads the list of mounts, never the share itself: a share whose server stopped
@@ -83,6 +88,12 @@ function createNetShares({ dataDir, getShares, setShares, log = console.log, moc
   }
   function mounted(s) {
     if (mock) return state.get(s.id)?.status === 'connected';
+    if (isCloud(s)) {
+      if (!cloud?.running(s.id)) return false;
+      if (isWin) return fs.existsSync(rootOf(s));
+      const list = mountPoints();
+      return list ? list.has(path.resolve(rootOf(s))) : true;
+    }
     if (isWin) return state.get(s.id)?.status === 'connected';
     const list = mountPoints();
     if (list) return list.has(path.resolve(rootOf(s)));
@@ -93,6 +104,15 @@ function createNetShares({ dataDir, getShares, setShares, log = console.log, moc
     if (mock) { state.set(s.id, { status: 'connected', at: Date.now() }); return; }
     const mp = rootOf(s);
     state.set(s.id, { status: 'connecting', at: Date.now() });
+    if (isCloud(s)) {
+      if (!cloud) throw new ShareError(503, 'Cloud storage isn’t available on this server');
+      try { await cloud.mount(s, mp, { inMounts }); } catch (err) {
+        state.set(s.id, { status: 'error', error: err.message, at: Date.now() });
+        throw new ShareError(err.status || 502, err.message);
+      }
+      state.set(s.id, { status: 'connected', at: Date.now() });
+      return;
+    }
     if (!isWin) {
       await fsp.mkdir(mp, { recursive: true });
       if (mounted(s)) { state.set(s.id, { status: 'connected', at: Date.now() }); return; }
@@ -146,6 +166,7 @@ function createNetShares({ dataDir, getShares, setShares, log = console.log, moc
 
   async function unmountOne(s) {
     if (mock) { state.set(s.id, { status: 'off', at: Date.now() }); return; }
+    if (isCloud(s)) { await cloud?.unmount(s, rootOf(s), { inMounts }); state.set(s.id, { status: 'off', at: Date.now() }); return; }
     if (isWin) await run('net', ['use', `\\\\${s.host}\\${s.share}`, '/delete', '/y']);
     else if (mounted(s)) {
       let r = await run('umount', [rootOf(s)]);
@@ -165,6 +186,21 @@ function createNetShares({ dataDir, getShares, setShares, log = console.log, moc
     s.name = clean(body.name ?? prev.name, 60);
     s.readOnly = body.readOnly !== undefined ? Boolean(body.readOnly) : Boolean(prev.readOnly);
     s.username = clean(body.username ?? prev.username, 120);
+    if (isCloud(s)) {
+      // Sign-in details go to rclone.conf (cloudstorage.js), never here.
+      delete s.username;
+      const sub = (v) => clean(v, 500).replace(/\\/g, '/').split('/').filter((x) => x && x !== '.' && x !== '..').join('/');
+      s.path = sub(body.path ?? prev.path);
+      if (type === 's3') {
+        s.bucket = clean(body.bucket ?? prev.bucket, 100).replace(/^\/+|\/+$/g, '');
+        if (!/^[a-z0-9][a-z0-9.\-_]{1,98}[a-z0-9]$/i.test(s.bucket)) throw new ShareError(400, 'Enter the bucket’s name');
+        s.endpoint = clean(body.endpoint ?? prev.endpoint, 300);
+        s.region = clean(body.region ?? prev.region, 60);
+      }
+      if (!s.name) s.name = TYPES[type];
+      if (getShares().some((x) => x.id !== s.id && x.name.toLowerCase() === s.name.toLowerCase())) throw new ShareError(409, `There’s a shared folder called “${s.name}” already: give this one another name.`);
+      return s;
+    }
     s.password = typeof body.password === 'string' && body.password !== '' ? String(body.password).slice(0, 300) : body.clearPassword ? '' : prev.password || '';
     if (type === 'webdav') {
       s.url = clean(body.url ?? prev.url, 500);
@@ -207,19 +243,36 @@ function createNetShares({ dataDir, getShares, setShares, log = console.log, moc
 
   const view = (s) => ({
     id: s.id, type: s.type, typeName: TYPES[s.type], name: s.name, host: s.host, share: s.share || '', path: s.path || '', url: s.url || '', port: s.port || null,
-    username: s.username || '', domain: s.domain || '', version: s.version || 'auto', readOnly: Boolean(s.readOnly), hasPassword: Boolean(s.password),
-    label: label(s), root: rootOf(s), ...(mounted(s) ? { status: 'connected' } : { status: state.get(s.id)?.status === 'connecting' ? 'connecting' : 'error', error: state.get(s.id)?.error || 'Not connected' }),
+    username: (isCloud(s) ? cloud?.accountOf(s.id) : s.username) || '', domain: s.domain || '', version: s.version || 'auto', readOnly: Boolean(s.readOnly), hasPassword: Boolean(s.password),
+    ...(isCloud(s) ? { cloud: true, bucket: s.bucket || '', endpoint: s.endpoint || '', region: s.region || '' } : {}),
+    label: label(s), root: rootOf(s), ...(mounted(s) ? { status: 'connected' } : { status: state.get(s.id)?.status === 'connecting' ? 'connecting' : 'error', error: (state.get(s.id)?.status === 'connected' ? cloud?.lastError(s.id) : state.get(s.id)?.error) || cloud?.lastError(s.id) || 'Not connected' }),
   });
 
   async function add(body) {
-    const s = fromBody(body);
+    const waiting = body.pending ? cloud?.pendingShare(body.pending) : null;
+    if (body.pending && !waiting) throw new ShareError(400, 'That sign-in has ended. Start again.');
+    const s = waiting ? fromBody({ ...body, type: waiting.type }, { id: waiting.id, created: waiting.created }) : fromBody(body);
+    if (isCloud(s)) {
+      if (!cloud) throw new ShareError(503, 'Cloud storage isn’t available on this server');
+      if (mock) throw new ShareError(400, 'Cloud storage can’t be connected in demo mode');
+      try { await cloud.setUp(s, body); } catch (err) {
+        if (!err.needCode && !waiting) cloud.forget(s.id); // a wrong code can be tried again
+        throw err;
+      }
+    }
     try { await mountOne(s); } catch (err) {
       if (!isWin && !mounted(s)) await fsp.rmdir(rootOf(s)).catch(() => {});
+      if (isCloud(s) && err.status !== 503) {
+        // Signed in, but it wouldn't mount (no FUSE yet, say): keep it, so Reconnect can try again.
+        await setShares([...getShares(), s]);
+        throw new ShareError(err.status || 502, `${err.message} “${s.name}” is saved: press Reconnect once that’s fixed.`);
+      }
       state.delete(s.id);
+      if (isCloud(s)) cloud.forget(s.id);
       throw err;
     }
     await setShares([...getShares(), s]);
-    log(`Network share “${s.name}” (${label(s)}) connected`);
+    log(`${isCloud(s) ? 'Cloud storage' : 'Network share'} “${s.name}” (${label(s)}) connected`);
     return view(s);
   }
   async function update(id, body) {
@@ -227,7 +280,14 @@ function createNetShares({ dataDir, getShares, setShares, log = console.log, moc
     if (!prev) throw new ShareError(404, 'That network share isn’t there any more');
     const s = fromBody(body, prev);
     await unmountOne(prev);
+    if (isCloud(s)) {
+      try { await cloud.setUp(s, body, { replacing: true }); } catch (err) { // a new sign-in, if one was given
+        if (!err.needCode) await mountOne(prev).catch(() => {});
+        throw err;
+      }
+    }
     try { await mountOne(s); } catch (err) {
+      if (isCloud(s)) { await setShares(getShares().map((x) => (x.id === id ? s : x))); throw err; } // keep the new sign-in; Reconnect retries
       await mountOne(prev).catch(() => {}); // put the old one back
       throw err;
     }
@@ -238,14 +298,15 @@ function createNetShares({ dataDir, getShares, setShares, log = console.log, moc
     const s = getShares().find((x) => x.id === id);
     if (!s) throw new ShareError(404, 'That network share isn’t there any more');
     await unmountOne(s);
-    if (!isWin && !mounted(s)) await fsp.rmdir(rootOf(s)).catch(() => {});
+    if ((!isWin || isCloud(s)) && !mounted(s)) await fsp.rmdir(rootOf(s)).catch(() => {});
+    if (isCloud(s)) cloud?.forget(s.id);
     await setShares(getShares().filter((x) => x.id !== id));
     state.delete(id);
   }
   async function reconnect(id) {
     const s = getShares().find((x) => x.id === id);
     if (!s) throw new ShareError(404, 'That network share isn’t there any more');
-    if (!isWin && mounted(s)) await unmountOne(s);
+    if ((!isWin || isCloud(s)) && mounted(s)) await unmountOne(s);
     await mountOne(s);
     return view(s);
   }
@@ -273,11 +334,17 @@ function createNetShares({ dataDir, getShares, setShares, log = console.log, moc
     const st = state.get(s.id);
     return st?.status === 'connecting' ? `The network share “${s.name}” is connecting… try again in a moment.` : `The network share “${s.name}” isn’t connected${st?.error ? `: ${st.error}` : ''}.`;
   }
-  const info = (abs) => { const s = byRoot(abs); return s ? { network: { id: s.id, type: s.type, label: label(s) }, offline: offline(abs) } : null; };
+  const info = (abs) => { const s = byRoot(abs); return s ? { network: { id: s.id, type: s.type, label: label(s), ...(isCloud(s) ? { cloud: true } : {}) }, offline: offline(abs) } : null; };
 
   async function handle(req, res, p, { sendJson, readJson }) {
     try {
-      if (p === '/portal/netshares' && req.method === 'GET') return sendJson(res, 200, { shares: getShares().map(view), types: TYPES, platform: process.platform });
+      if (p === '/portal/netshares' && req.method === 'GET') return sendJson(res, 200, { shares: getShares().map(view), types: TYPES, platform: process.platform, cloud: cloud ? await cloud.status() : { available: false } });
+      // Signing in to a cloud service in the browser (see cloudstorage.js).
+      if (p === '/portal/netshares/cloud/auth' && req.method === 'POST') return sendJson(res, 200, await cloud.startAuth(await readJson(req)));
+      const a = /^\/portal\/netshares\/cloud\/auth\/([a-f0-9]{18})$/.exec(p);
+      if (a && req.method === 'GET') return sendJson(res, 200, cloud.authStatus(a[1]));
+      if (a && req.method === 'POST') return sendJson(res, 200, await cloud.finishAuth(a[1], (await readJson(req)).url));
+      if (a && req.method === 'DELETE') { cloud.cancelAuth(a[1]); return sendJson(res, 200, { ok: true }); }
       if (p === '/portal/netshares' && req.method === 'POST') return sendJson(res, 200, { share: await add(await readJson(req)) });
       const m = /^\/portal\/netshares\/([a-f0-9]{12})(\/reconnect)?$/.exec(p);
       if (m && !m[2] && req.method === 'PUT') return sendJson(res, 200, { share: await update(m[1], await readJson(req)) });
@@ -285,7 +352,8 @@ function createNetShares({ dataDir, getShares, setShares, log = console.log, moc
       if (m && m[2] && req.method === 'POST') return sendJson(res, 200, { share: await reconnect(m[1]) });
       return sendJson(res, 404, { error: 'Unknown endpoint' });
     } catch (err) {
-      if (err instanceof ShareError) return sendJson(res, err.status, { error: err.message });
+      if (err instanceof CloudError && err.needCode) return sendJson(res, 200, { needCode: true, pending: err.pending, message: err.message });
+      if (err instanceof ShareError || err instanceof CloudError) return sendJson(res, err.status, { error: err.message });
       throw err;
     }
   }

@@ -9,13 +9,13 @@ services:
     restart: unless-stopped
     ports:
       - "8080:8080"
-    # Network shares in Files (Settings → Files → Network shares) are mounted by MediaDesk inside
+    # Network shares and cloud storage in Files (Settings → Files) are mounted by MediaDesk inside
     # the container, which needs permission for it. Uncomment these to use them:
     # cap_add:
-    #   - SYS_ADMIN          # mounting (SMB, NFS, SFTP, WebDAV)
+    #   - SYS_ADMIN          # mounting (SMB, NFS, SFTP, WebDAV, cloud storage)
     #   - DAC_READ_SEARCH    # SMB
     # devices:
-    #   - /dev/fuse          # SFTP and WebDAV
+    #   - /dev/fuse          # SFTP, WebDAV and cloud storage
     # security_opt:
     #   - apparmor:unconfined  # Ubuntu / Debian hosts: AppArmor otherwise blocks mounting
     volumes:

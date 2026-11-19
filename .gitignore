@@ -2,3 +2,7 @@ node_modules/
 config/config.json
 config/notifications.json
 logs/
+# Cloud storage sign-ins (rclone), its cache, and mounted shares: never commit these.
+config/rclone.conf
+config/rclone-cache/
+config/network/

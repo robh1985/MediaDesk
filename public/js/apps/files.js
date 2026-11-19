@@ -1,6 +1,6 @@
 // Files: a file manager for the folders shared in Settings → Files.
 
-import { shareDialog, NET_ICON } from '../netshares-ui.js';
+import { shareDialog, NET_ICON, CLOUD_ICON } from '../netshares-ui.js';
 import * as drive from './localdrive.js';
 import { h, clear, formatBytes, formatDuration, debounce, toast, toastError, confirmDialog, contextMenu, spinner, emptyState, errorState, progressBar, isTouch } from '../ui.js';
 import { icon, appIcon } from '../icons.js';
@@ -182,7 +182,7 @@ class FileBrowser {
       const r = this.roots[t.root];
       const el = h('div', { class: `fm-tab ${i === this.tabIdx ? 'active' : ''}`, role: 'tab', 'aria-selected': String(i === this.tabIdx), title: `${r?.name || ''}${t.path ? ` › ${t.path.split('/').join(' › ')}` : ''}`, dataset: { tab: i },
         onclick: () => this.switchTab(i), onauxclick: (e) => { if (e.button === 1 && many) { e.preventDefault(); this.closeTab(i); } } },
-      h('span', { class: 'fm-tab-icon', html: (r?.local ? USB_ICON : r?.network ? NET_ICON : fileIcon('folder')).replace('<svg ', '<svg width="15" height="15" ') }),
+      h('span', { class: 'fm-tab-icon', html: (r?.local ? USB_ICON : r?.network ? (r.network.cloud ? CLOUD_ICON : NET_ICON) : fileIcon('folder')).replace('<svg ', '<svg width="15" height="15" ') }),
       h('span', { class: 'fm-tab-name' }, this.tabLabel(t)),
       many ? h('button', { class: 'fm-tab-close', title: 'Close tab', 'aria-label': 'Close tab', onclick: (e) => { e.stopPropagation(); this.closeTab(i); } }, '×') : null);
       // Drop files on a tab to move (or copy) them there.
@@ -313,7 +313,9 @@ class FileBrowser {
     const admin = window.mediadeskSession?.user?.role === 'admin' && !state.config?.mock;
     clear(this.sidebar,
       h('div', { class: 'fm-side-title' }, 'Shared folders',
-        admin ? h('button', { class: 'fm-side-add', title: 'Connect a network share', 'aria-label': 'Connect a network share', html: NET_ICON + '<b>+</b>', onclick: () => this.connectShare() }) : null),
+        admin ? h('span', { class: 'fm-side-adds' },
+          h('button', { class: 'fm-side-add', title: 'Connect cloud storage (Google Drive, OneDrive, iCloud Drive, Dropbox…)', 'aria-label': 'Connect cloud storage', html: CLOUD_ICON + '<b>+</b>', onclick: () => this.connectShare('cloud') }),
+          h('button', { class: 'fm-side-add', title: 'Connect a network share', 'aria-label': 'Connect a network share', html: NET_ICON + '<b>+</b>', onclick: () => this.connectShare() })) : null),
       shownTags.length ? h('div', { class: 'fm-tag-filter' },
         h('button', { class: `tag-chip ${this.tagFilter ? '' : 'on'}`, onclick: () => { this.tagFilter = null; this.drawRoots(); } }, 'All'),
         shownTags.map((t) => h('button', { class: `tag-chip ${this.tagFilter === t.id ? 'on' : ''}`, style: { '--tag': t.color }, onclick: () => { this.tagFilter = this.tagFilter === t.id ? null : t.id; this.drawRoots(); } }, h('span', { class: 'tag-dot' }), t.name))) : null,
@@ -324,9 +326,9 @@ class FileBrowser {
           oncontextmenu: (e) => { e.preventDefault(); contextMenu(e.clientX, e.clientY, [
             { label: 'Open', icon: icon.folder, action: () => this.go(r.id, '') },
             { label: 'Open in new tab', icon: icon.plus, action: () => this.newTab(r.id, '') },
-            ...(r.network && admin ? ['-', { label: 'Network share settings…', icon: NET_ICON, action: () => openApp('settings', { tab: 'files' }) }] : []),
+            ...(r.network && admin ? ['-', { label: r.network.cloud ? 'Cloud storage settings…' : 'Network share settings…', icon: r.network.cloud ? CLOUD_ICON : NET_ICON, action: () => openApp('settings', { tab: 'files' }) }] : []),
           ]); } },
-          h('span', { class: 'nav-icon', html: r.offline ? icon.alert : r.network ? NET_ICON : r.ok ? fileIcon('folder') : icon.alert }),
+          h('span', { class: 'nav-icon', html: r.offline ? icon.alert : r.network ? (r.network.cloud ? CLOUD_ICON : NET_ICON) : r.ok ? fileIcon('folder') : icon.alert }),
           h('span', { class: 'fm-root-text' }, h('span', { class: 'fm-root-name' }, r.name),
             r.network ? h('span', { class: 'fm-root-path' }, r.offline ? 'Not connected' : r.network.label) : r.alias ? h('span', { class: 'fm-root-path' }, r.path) : null,
             (r.tags || []).length ? h('span', { class: 'fm-root-tags' }, r.tags.map((id) => byId[id] && h('span', { class: 'tag-chip mini', style: { '--tag': byId[id].color } }, h('span', { class: 'tag-dot' }), byId[id].name))) : null,
@@ -383,11 +385,11 @@ class FileBrowser {
   }
   get local() { return isLocal(this.root) ? this.roots[this.root] : null; }
 
-  // Admins: connect a network share right here (it joins the shared folders).
-  async connectShare() {
-    let platform = '';
-    try { platform = (await fetch('/portal/netshares', { credentials: 'same-origin' }).then((r) => r.json())).platform || ''; } catch { /* fine */ }
-    const share = await shareDialog(null, { platform });
+  // Admins: connect a network share or cloud storage right here (it joins the shared folders).
+  async connectShare(kind = '') {
+    let platform = '', cloud = null;
+    try { ({ platform = '', cloud = null } = await fetch('/portal/netshares', { credentials: 'same-origin', headers: { 'X-MediaDesk': '1' } }).then((r) => r.json())); } catch { /* fine */ }
+    const share = await shareDialog(null, { platform, cloud, kind });
     if (!share) return;
     try { state.config = await portal.config(); } catch { /* later */ }
     await this.loadRoots();

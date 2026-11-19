@@ -2139,6 +2139,25 @@ button.notes-st:hover { background: var(--hover); color: var(--text); }
 .ns-status.error { background: color-mix(in srgb, #e03131 14%, transparent); color: #e03131; }
 .ns-status.connecting { background: var(--active); color: var(--accent); }
 .ns-err { color: #e03131; margin-top: 3px; }
+.ns-groups { display: flex; gap: 6px; padding: 3px; border-radius: 10px; background: var(--surface-2); align-self: flex-start; }
+.ns-group { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border: 0; border-radius: 8px; background: none; color: inherit; font: inherit; cursor: pointer; }
+.ns-group svg { width: 15px; height: 15px; }
+.ns-group.on { background: var(--surface); box-shadow: 0 1px 3px rgb(0 0 0 / .12); color: var(--accent); }
+.ns-group:disabled:not(.on) { opacity: .45; cursor: default; }
+.ns-signin { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; margin-bottom: 10px; }
+.ns-steps { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 6px; }
+.ns-steps code { font-size: 11.5px; }
+.ns-paste { display: flex; gap: 8px; width: 100%; }
+.ns-paste .input { flex: 1; min-width: 0; }
+.ns-wait { display: inline-flex; align-items: center; gap: 6px; }
+.ns-wait .spinner { width: 12px; height: 12px; border-width: 2px; margin: 0; }
+.ns-signed { padding: 9px 12px; border-radius: 10px; background: color-mix(in srgb, var(--ok, #2f9e44) 14%, transparent); color: var(--ok, #2f9e44); font-weight: 600; }
+.ns-note { margin: 10px 0 0; line-height: 1.45; }
+.ns-adv { margin-top: 6px; }
+.ns-adv summary { cursor: pointer; color: var(--text-muted); }
+.ns-adv p { margin: 6px 0 !important; }
+.ns-code { font-size: 20px; letter-spacing: .3em; max-width: 180px; }
+.fm-side-adds { display: inline-flex; gap: 2px; }
 
 /* Files: tabs, and network shares in the sidebar */
 .fm-tabs { display: flex; align-items: flex-end; gap: 2px; padding: 6px 8px 0; background: var(--surface-2); border-bottom: 1px solid var(--border); overflow-x: auto; scrollbar-width: none; flex: none; }
