@@ -67,7 +67,7 @@ function explain(share, r) {
   return (r.out || 'It couldn’t be connected').split('\n').filter(Boolean).slice(-2).join(' ').slice(0, 300);
 }
 
-function createNetShares({ dataDir, getShares, setShares, cloud = null, log = console.log, mock = false }) {
+function createNetShares({ dataDir, getShares, setShares, cloud = null, getCloudSettings = () => ({}), setCloudSettings = async () => {}, log = console.log, mock = false }) {
   const base = path.join(dataDir, 'network');
   const state = new Map(); // id -> { status: 'connected' | 'connecting' | 'error' | 'off', error, at }
 
@@ -189,6 +189,7 @@ function createNetShares({ dataDir, getShares, setShares, cloud = null, log = co
     if (isCloud(s)) {
       // Sign-in details go to rclone.conf (cloudstorage.js), never here.
       delete s.username;
+      if (prev.offline) s.offline = prev.offline;
       const sub = (v) => clean(v, 500).replace(/\\/g, '/').split('/').filter((x) => x && x !== '.' && x !== '..').join('/');
       s.path = sub(body.path ?? prev.path);
       if (type === 's3') {
@@ -245,6 +246,7 @@ function createNetShares({ dataDir, getShares, setShares, cloud = null, log = co
     id: s.id, type: s.type, typeName: TYPES[s.type], name: s.name, host: s.host, share: s.share || '', path: s.path || '', url: s.url || '', port: s.port || null,
     username: (isCloud(s) ? cloud?.accountOf(s.id) : s.username) || '', domain: s.domain || '', version: s.version || 'auto', readOnly: Boolean(s.readOnly), hasPassword: Boolean(s.password),
     ...(isCloud(s) ? { cloud: true, bucket: s.bucket || '', endpoint: s.endpoint || '', region: s.region || '' } : {}),
+    ...(isCloud(s) ? { offline: offlineView(s), ...(cloud?.usesSharedClient(s) ? { warning: 'Uses rclone’s shared Google app, which is being retired during 2026. Press Change, open “Use your own Google client ID”, and sign in again.' } : {}) } : {}),
     label: label(s), root: rootOf(s), ...(mounted(s) ? { status: 'connected' } : { status: state.get(s.id)?.status === 'connecting' ? 'connecting' : 'error', error: (state.get(s.id)?.status === 'connected' ? cloud?.lastError(s.id) : state.get(s.id)?.error) || cloud?.lastError(s.id) || 'Not connected' }),
   });
 
@@ -299,7 +301,7 @@ function createNetShares({ dataDir, getShares, setShares, cloud = null, log = co
     if (!s) throw new ShareError(404, 'That network share isn’t there any more');
     await unmountOne(s);
     if ((!isWin || isCloud(s)) && !mounted(s)) await fsp.rmdir(rootOf(s)).catch(() => {});
-    if (isCloud(s)) cloud?.forget(s.id);
+    if (isCloud(s)) cloud?.forget(s.id); // an offline copy's files stay where they are
     await setShares(getShares().filter((x) => x.id !== id));
     state.delete(id);
   }
@@ -326,6 +328,97 @@ function createNetShares({ dataDir, getShares, setShares, cloud = null, log = co
   }, 120e3);
   timer.unref?.();
 
+  // ---- Offline copies of cloud storage (kept in step both ways by cloudstorage.js) ----
+  const EVERY = [0, 15, 60, 360, 1440]; // minutes; 0 = only when asked
+  const offlineOn = (s) => isCloud(s) && s.offline && s.offline.mode !== 'off';
+  const defaultDest = (s) => path.join(dataDir, 'cloud-offline', s.id);
+  const offlineView = (s) => ({ mode: s.offline?.mode || 'off', paths: s.offline?.paths || [], dest: s.offline?.dest || defaultDest(s), defaultDest: defaultDest(s), every: s.offline?.every ?? 60, ...(cloud ? cloud.syncState(s.id) : {}) });
+  const cleanRel = (p) => {
+    const dir = /[\\/]$/.test(String(p));
+    const parts = String(p ?? '').replace(/[\u0000-\u001f]/g, '').split(/[\\/]+/).filter(Boolean);
+    if (!parts.length || parts.some((x) => x === '.' || x === '..')) return null;
+    return parts.join('/') + (dir ? '/' : '');
+  };
+  const isInside = (child, parent) => { const r = path.relative(parent, child); return r === '' || (!r.startsWith('..') && !path.isAbsolute(r)); };
+  async function setOffline(id, body) {
+    const s = getShares().find((x) => x.id === id);
+    if (!s || !isCloud(s)) throw new ShareError(404, 'That cloud storage isn’t there any more');
+    if (mock) throw new ShareError(400, 'Offline copies can’t be made in demo mode');
+    const prev = s.offline || {};
+    let mode = ['off', 'all', 'some'].includes(body.mode) ? body.mode : prev.mode || 'off';
+    let paths = Array.isArray(body.paths) ? body.paths : prev.paths || [];
+    if (Array.isArray(body.add)) paths = [...paths, ...body.add];
+    if (Array.isArray(body.remove)) { const gone = new Set(body.remove.map(cleanRel)); paths = paths.filter((x) => !gone.has(cleanRel(x))); }
+    paths = [...new Set(paths.map(cleanRel).filter(Boolean))].slice(0, 500);
+    // From Files' "Keep offline": chosen items, unless it already keeps everything.
+    if (body.mode === 'auto') mode = prev.mode === 'all' ? 'all' : paths.length ? 'some' : 'off';
+    const every = EVERY.includes(Number(body.every)) ? Number(body.every) : prev.every ?? 60;
+    let dest = typeof body.dest === 'string' && body.dest.trim() ? body.dest.trim() : prev.dest || defaultDest(s);
+    if (!path.isAbsolute(dest)) throw new ShareError(400, `Give the full path of a folder for the offline copy, like ${isWin ? 'D:\\Offline\\Google Drive' : '/mnt/storage/Google Drive'}`);
+    dest = path.resolve(dest);
+    if (isInside(dest, base) || isInside(base, dest)) throw new ShareError(400, 'The offline copy can’t go in MediaDesk’s network folder.');
+    if (isInside(dest, path.resolve(cloud.cacheDir())) || isInside(dest, path.resolve(cloud.defaultCacheDir))) throw new ShareError(400, 'The offline copy can’t go in the cloud cache folder.');
+    for (const x of getShares()) if (x.id !== id && x.offline?.dest && (isInside(dest, x.offline.dest) || isInside(x.offline.dest, dest))) throw new ShareError(400, `That folder is (or holds) the offline copy of “${x.name}”.`);
+    if (mode !== 'off' && dest !== path.resolve(prev.dest || defaultDest(s))) {
+      // Syncing merges the folder with the cloud: start with an empty (or new) folder.
+      let items = [];
+      try { items = await fsp.readdir(dest); } catch { /* new */ }
+      if (items.length) throw new ShareError(400, 'Choose an empty or new folder: everything in it would be synced up to the cloud.');
+    }
+    if (mode === 'some' && !paths.length) throw new ShareError(400, 'Choose at least one file or folder to keep offline (right-click it in Files, or type its path).');
+    if (mode !== 'off') {
+      try { await fsp.mkdir(dest, { recursive: true }); } catch (err) { throw new ShareError(400, `MediaDesk can’t make ${dest}: ${err.code || err.message}`); }
+    }
+    const next = { ...s, offline: { mode, paths, dest, every } };
+    if (mode === 'off') cloud.stopSync(id);
+    await setShares(getShares().map((x) => (x.id === id ? next : x)));
+    if (mode !== 'off') await cloud.sync(next, next.offline).catch((err) => { throw new ShareError(err.status || 502, err.message); });
+    return view(next);
+  }
+  async function syncNow(id, { force = false } = {}) {
+    const s = getShares().find((x) => x.id === id);
+    if (!offlineOn(s)) throw new ShareError(400, 'There’s no offline copy to sync');
+    try { await cloud.sync(s, s.offline, { force }); } catch (err) { throw new ShareError(err.status || 502, err.message); }
+    return view(s);
+  }
+  // Each one on its own schedule (checked every minute).
+  const syncTimer = setInterval(() => {
+    for (const s of getShares()) {
+      if (!offlineOn(s) || !s.offline.every) continue;
+      const st = cloud.syncState(s.id);
+      if (st.running || (st.lastAt && Date.now() - st.lastAt < s.offline.every * 60e3)) continue;
+      cloud.sync(s, s.offline).catch((err) => log(`Offline copy of “${s.name}”: ${err.message}`));
+    }
+  }, 60e3);
+  syncTimer.unref?.();
+
+  // Cloud cache: where files wait to upload, and how big that may get.
+  async function setCacheSettings(body) {
+    const cur = getCloudSettings() || {};
+    const next = { ...cur };
+    if (typeof body.cacheDir === 'string') {
+      const d = body.cacheDir.trim();
+      if (d && !path.isAbsolute(d)) throw new ShareError(400, 'Give the full path of a folder for the cache');
+      if (d) {
+        const r = path.resolve(d);
+        if (isInside(r, base)) throw new ShareError(400, 'The cache can’t go in MediaDesk’s network folder.');
+        try { await fsp.mkdir(r, { recursive: true }); await fsp.access(r, fs.constants.W_OK); } catch { throw new ShareError(400, `MediaDesk can’t write to ${r}`); }
+        next.cacheDir = r;
+      } else delete next.cacheDir;
+    }
+    if (body.cacheMaxGB !== undefined) {
+      const gb = body.cacheMaxGB === '' || body.cacheMaxGB === null ? 0 : Number(body.cacheMaxGB);
+      if (!Number.isFinite(gb) || gb < 0 || gb > 100000) throw new ShareError(400, 'Enter the cache limit in GB, or leave it blank for no limit');
+      if (gb) next.cacheMaxGB = Math.round(gb * 10) / 10; else delete next.cacheMaxGB;
+    }
+    const changed = next.cacheDir !== cur.cacheDir || next.cacheMaxGB !== cur.cacheMaxGB;
+    await setCloudSettings(next);
+    // Connected cloud storage picks the new settings up when it's mounted again.
+    if (changed && !mock) for (const s of getShares()) if (isCloud(s) && mounted(s)) await reconnect(s.id).catch(() => {});
+    return cacheView();
+  }
+  const cacheView = () => ({ cacheDir: getCloudSettings()?.cacheDir || '', cacheMaxGB: getCloudSettings()?.cacheMaxGB || null, defaultCacheDir: cloud?.defaultCacheDir || '' });
+
   // For Files: the share whose folder this is, and whether it can be used now.
   const byRoot = (abs) => getShares().find((s) => path.resolve(rootOf(s)) === path.resolve(abs)) || null;
   function offline(abs) {
@@ -334,11 +427,23 @@ function createNetShares({ dataDir, getShares, setShares, cloud = null, log = co
     const st = state.get(s.id);
     return st?.status === 'connecting' ? `The network share “${s.name}” is connecting… try again in a moment.` : `The network share “${s.name}” isn’t connected${st?.error ? `: ${st.error}` : ''}.`;
   }
-  const info = (abs) => { const s = byRoot(abs); return s ? { network: { id: s.id, type: s.type, label: label(s), ...(isCloud(s) ? { cloud: true } : {}) }, offline: offline(abs) } : null; };
+  const byOfflineRoot = (abs) => getShares().find((s) => offlineOn(s) && path.resolve(s.offline.dest) === path.resolve(abs)) || null;
+  const info = (abs) => {
+    const s = byRoot(abs);
+    if (s) return { network: { id: s.id, type: s.type, label: label(s), ...(isCloud(s) ? { cloud: true, offlineCopy: offlineOn(s) ? { mode: s.offline.mode, paths: s.offline.paths } : null } : {}) }, offline: offline(abs) };
+    const o = byOfflineRoot(abs);
+    if (o) { const st = cloud.syncState(o.id); return { network: { id: o.id, type: o.type, cloud: true, isOfflineCopy: true, label: `Offline copy · ${st.running ? 'syncing…' : st.ok === false ? 'sync failed' : st.lastAt ? 'in sync' : 'not synced yet'}` }, offline: null }; }
+    return null;
+  };
+  const offlineRoots = () => getShares().filter(offlineOn).map((s) => path.resolve(s.offline.dest));
 
   async function handle(req, res, p, { sendJson, readJson }) {
     try {
-      if (p === '/portal/netshares' && req.method === 'GET') return sendJson(res, 200, { shares: getShares().map(view), types: TYPES, platform: process.platform, cloud: cloud ? await cloud.status() : { available: false } });
+      if (p === '/portal/netshares' && req.method === 'GET') return sendJson(res, 200, { shares: getShares().map(view), types: TYPES, platform: process.platform, cloud: cloud ? { ...(await cloud.status()), ...cacheView() } : { available: false } });
+      if (p === '/portal/netshares/cloud/settings' && req.method === 'PUT') return sendJson(res, 200, await setCacheSettings(await readJson(req)));
+      const o = /^\/portal\/netshares\/([a-f0-9]{12})\/offline(\/sync)?$/.exec(p);
+      if (o && !o[1 + 1] && req.method === 'PUT') return sendJson(res, 200, { share: await setOffline(o[1], await readJson(req)) });
+      if (o && o[2] && req.method === 'POST') return sendJson(res, 200, { share: await syncNow(o[1], { force: Boolean((await readJson(req)).force) }) });
       // Signing in to a cloud service in the browser (see cloudstorage.js).
       if (p === '/portal/netshares/cloud/auth' && req.method === 'POST') return sendJson(res, 200, await cloud.startAuth(await readJson(req)));
       const a = /^\/portal\/netshares\/cloud\/auth\/([a-f0-9]{18})$/.exec(p);
@@ -358,7 +463,7 @@ function createNetShares({ dataDir, getShares, setShares, cloud = null, log = co
     }
   }
 
-  return { handle, connectAll, rootOf, offline, info, roots: () => getShares().map(rootOf), names: () => getShares().map((s) => [rootOf(s), s.name]) };
+  return { handle, connectAll, rootOf, offline, info, roots: () => [...getShares().map(rootOf), ...offlineRoots()], names: () => [...getShares().map((s) => [rootOf(s), s.name]), ...getShares().filter(offlineOn).map((s) => [path.resolve(s.offline.dest), `${s.name} (offline)`])] };
 }
 
 module.exports = { createNetShares, rootFor, TYPES, ShareError };

@@ -161,9 +161,18 @@ export function shareDialog(share = null, { platform = '', cloud = null, kind = 
         if (svc.auth === 'oauth') {
           drawSignIn();
           clear(fields, missing, signIn, folderField,
-            h('details', { class: 'ns-adv' }, h('summary', { class: 'small' }, 'Use your own app registration (optional)'),
-              h('p', { class: 'small muted' }, `MediaDesk signs in with rclone’s shared ${svc.name} app, which needs no set-up. If ${svc.name} limits it, register your own app and enter its client ID and secret before signing in (rclone.org/${{ gdrive: 'drive', onedrive: 'onedrive', dropbox: 'dropbox', box: 'box', pcloud: 'pcloud' }[type]}/ shows how). They’re kept on the server only.`),
-              h('div', { class: 'field-row' }, field('Client ID', clientId), field('Client secret', clientSecret))));
+            type === 'gdrive'
+              ? h('details', { class: 'ns-adv', open: true }, h('summary', { class: 'small' }, 'Use your own Google client ID (recommended)'),
+                h('p', { class: 'small muted' }, 'rclone’s shared Google app is being retired during 2026, so make your own (free, about 5 minutes) and enter it here before signing in. It’s kept on the MediaDesk server only.'),
+                h('ol', { class: 'ns-steps small' },
+                  h('li', {}, 'Go to ', h('a', { href: 'https://console.cloud.google.com/projectcreate', target: '_blank', rel: 'noopener' }, 'console.cloud.google.com'), ' and create a project (any name, like MediaDesk).'),
+                  h('li', {}, 'APIs & Services → Library: find ', h('b', {}, 'Google Drive API'), ' and press Enable.'),
+                  h('li', {}, 'Google Auth Platform (OAuth consent screen): Get started, app name MediaDesk, your email, Audience ', h('b', {}, 'External'), '. Then under Audience press ', h('b', {}, 'Publish app'), ' (in Testing, Google signs you out every 7 days). You don’t need Google to verify it.'),
+                  h('li', {}, 'Clients → Create client: type ', h('b', {}, 'Desktop app'), '. Copy the client ID and secret into these boxes, then press Sign in above. Google warns the app isn’t verified: choose Advanced → Go to MediaDesk.')),
+                h('div', { class: 'field-row' }, field('Client ID', clientId), field('Client secret', clientSecret)))
+              : h('details', { class: 'ns-adv' }, h('summary', { class: 'small' }, 'Use your own app registration (optional)'),
+                h('p', { class: 'small muted' }, `MediaDesk signs in with rclone’s shared ${svc.name} app, which needs no set-up. If ${svc.name} limits it, register your own app and enter its client ID and secret before signing in (rclone.org/${{ onedrive: 'onedrive', dropbox: 'dropbox', box: 'box', pcloud: 'pcloud' }[type]}/ shows how). They’re kept on the server only.`),
+                h('div', { class: 'field-row' }, field('Client ID', clientId), field('Client secret', clientSecret))));
         } else if (svc.auth === 'apple') {
           account.placeholder = 'you@icloud.com';
           clear(fields, missing,
@@ -282,20 +291,113 @@ export function sharesSection(onChange) {
         h('div', { class: 'grow' },
           h('b', {}, s.name), h('span', { class: `ns-status ${s.status}` }, s.status === 'connected' ? 'Connected' : s.status === 'connecting' ? 'Connecting…' : 'Not connected'),
           h('div', { class: 'small muted' }, s.cloud ? `${s.label}${s.readOnly ? ' · read-only' : ''}` : `${s.typeName} · ${s.label}${s.username ? ` · as ${s.username}` : ''}${s.readOnly ? ' · read-only' : ''}`),
-          s.status !== 'connected' && s.error ? h('div', { class: 'small ns-err' }, s.error) : null),
+          s.status !== 'connected' && s.error ? h('div', { class: 'small ns-err' }, s.error) : null,
+          s.warning ? h('div', { class: 'small ns-warn' }, s.warning) : null,
+          s.cloud && s.offline?.mode !== 'off' ? h('div', { class: `small ${s.offline.ok === false ? 'ns-err' : 'muted'}` }, offlineStatus(s.offline), s.offline.ok === false && s.offline.error ? `: ${s.offline.error}` : '') : null),
         h('div', { class: 'btn-row' },
           s.status !== 'connected' ? h('button', { class: 'btn btn-sm', onclick: async (e) => { e.target.disabled = true; try { await api(`/portal/netshares/${s.id}/reconnect`, { method: 'POST' }); toast(`“${s.name}” connected`, { type: 'success', timeout: 2000 }); } catch (err) { toastError(err, 'Not connected'); } draw(); onChange?.(); } }, 'Reconnect') : null,
+          s.cloud && s.offline?.mode !== 'off' ? h('button', { class: 'btn btn-sm', disabled: s.offline.running, onclick: async (e) => { e.target.disabled = true; try { await syncNow(s.id, s.offline.tooMany); toast(s.offline.tooMany ? 'Syncing anyway' : 'Syncing', { timeout: 2000 }); } catch (err) { toastError(err, 'Couldn’t sync'); } setTimeout(draw, 1500); } }, s.offline.tooMany ? 'Sync anyway' : 'Sync now') : null,
+          s.cloud ? h('button', { class: 'btn btn-sm', onclick: async () => { if (await offlineDialog(s)) { draw(); onChange?.(); } } }, 'Offline copy…') : null,
           h('button', { class: 'btn btn-sm', onclick: async () => { if (await shareDialog(s, { platform, cloud })) { draw(); onChange?.(); } } }, 'Change'),
           h('button', { class: 'btn btn-sm btn-danger', onclick: async () => {
-            if (!await confirmDialog({ title: `Disconnect “${s.name}”?`, message: s.cloud ? `It goes from Files’ shared folders and MediaDesk forgets the sign-in. Nothing in your ${s.typeName} is deleted.` : 'It goes from Files’ shared folders. Nothing on the share is deleted.', confirm: 'Disconnect', danger: true })) return;
+            if (!await confirmDialog({ title: `Disconnect “${s.name}”?`, message: s.cloud ? `It goes from Files’ shared folders and MediaDesk forgets the sign-in. Nothing in your ${s.typeName} is deleted${s.offline?.mode !== 'off' ? `, and the offline copy’s files stay in ${s.offline.dest}` : ''}.` : 'It goes from Files’ shared folders. Nothing on the share is deleted.', confirm: 'Disconnect', danger: true })) return;
             try { await api(`/portal/netshares/${s.id}`, { method: 'DELETE' }); toast(`“${s.name}” disconnected`, { timeout: 2000 }); } catch (err) { toastError(err); }
             draw(); onChange?.();
           } }, 'Remove')))) : h('div', { class: 'small muted' }, 'No network shares or cloud storage yet.'),
       cloud && !cloud.available ? h('div', { class: 'notice notice-warn small' }, rcloneHelp(platform)) : null,
+      cloud && (cloud.available || data.shares.some((s) => s.cloud)) ? cacheSettings(cloud, () => { draw(); onChange?.(); }) : null,
       h('div', { class: 'btn-row' },
         h('button', { class: 'btn btn-primary', onclick: async () => { if (await shareDialog(null, { platform, cloud, kind: 'cloud' })) { draw(); onChange?.(); } } }, h('span', { html: CLOUD_ICON, class: 'ns-btnicon' }), 'Connect cloud storage…'),
         h('button', { class: 'btn', onclick: async () => { if (await shareDialog(null, { platform, cloud })) { draw(); onChange?.(); } } }, h('span', { html: NET_ICON, class: 'ns-btnicon' }), 'Connect a network share…')));
   };
   draw();
   return box;
+}
+
+// ---- Offline copies and the cloud cache ----
+
+const EVERY = [[15, 'Every 15 minutes'], [60, 'Every hour'], [360, 'Every 6 hours'], [1440, 'Once a day'], [0, 'Only when I press Sync now']];
+const ago = (t) => { const m = Math.round((Date.now() - t) / 60e3); return m < 1 ? 'just now' : m < 60 ? `${m} min ago` : m < 1440 ? `${Math.round(m / 60)} h ago` : new Date(t).toLocaleString(); };
+export function offlineStatus(o) {
+  if (!o || o.mode === 'off') return '';
+  const what = o.mode === 'all' ? 'everything' : `${o.paths.length} item${o.paths.length === 1 ? '' : 's'}`;
+  const st = o.running ? 'syncing now…' : o.ok === false ? `last sync failed${o.lastAt ? ` ${ago(o.lastAt)}` : ''}` : o.lastAt ? `in sync ${ago(o.lastAt)}` : 'not synced yet';
+  return `Offline copy of ${what} · ${st}`;
+}
+
+// Keep an offline copy (both ways) of all of a cloud folder, or of chosen files and folders in it.
+export function offlineDialog(share) {
+  return new Promise((resolve) => {
+    const o = share.offline || { mode: 'off', paths: [], every: 60, dest: '', defaultDest: '' };
+    let mode = o.mode || 'off';
+    let paths = [...(o.paths || [])];
+    const dest = input({ value: o.dest || o.defaultDest, placeholder: o.defaultDest });
+    const every = h('select', { class: 'input' }, EVERY.map(([v, l]) => h('option', { value: v, selected: Number(o.every ?? 60) === v }, l)));
+    const add = input({ placeholder: 'Photos/2024/   or   Documents/Taxes.pdf' });
+    const err = h('div', { class: 'notice notice-warn', hidden: true });
+    const modes = h('div', { class: 'ns-kinds' });
+    const body = h('div', {});
+    const list = h('div', { class: 'ns-paths' });
+    const drawList = () => clear(list, paths.length ? paths.map((p) => h('div', { class: 'ns-path' },
+      h('span', { class: 'ns-path-kind' }, p.endsWith('/') ? 'Folder' : 'File'), h('span', { class: 'grow' }, p.replace(/\/$/, '')),
+      h('button', { type: 'button', class: 'btn btn-sm', 'aria-label': `Remove ${p}`, onclick: () => { paths = paths.filter((x) => x !== p); drawList(); } }, '×')))
+      : h('div', { class: 'small muted' }, 'Nothing chosen yet. Right-click files or folders in Files and choose “Keep offline”, or type a path below (end a folder with /).'));
+    const draw = () => {
+      clear(modes, [['off', 'Off', 'Only in the cloud'], ['all', 'Everything', `All of “${share.name}”`], ['some', 'Chosen files and folders', 'Just what you pick']].map(([id, label, hint]) =>
+        h('button', { type: 'button', class: `ns-kind ${mode === id ? 'on' : ''}`, onclick: () => { mode = id; draw(); } }, h('b', {}, label), h('small', {}, hint))));
+      drawList();
+      clear(body, mode === 'off' ? h('p', { class: 'small muted' }, o.mode !== 'off' ? 'Turning it off stops syncing. The files already copied stay in their folder.' : 'Files in the cloud are only downloaded when you open them.') : [
+        mode === 'some' ? h('div', {}, list, h('div', { class: 'ns-paste' }, add, h('button', { type: 'button', class: 'btn', onclick: () => { const v = add.value.trim().replace(/^[\\/]+/, ''); if (v && !paths.includes(v)) { paths.push(v); add.value = ''; drawList(); } } }, 'Add'))) : null,
+        h('div', { class: 'field-row' }, field('Folder for the copy', dest, 'A full path on the MediaDesk server. A new or empty folder.'), field('Sync', every)),
+        h('p', { class: 'small muted' }, 'Changes go both ways: edit the copy in Files (it’s its own shared folder, “', share.name, ' (offline)”) and the cloud gets them at the next sync; changes in the cloud come down. If a file changed in both places, both are kept and the older one gets a number in its name.'),
+      ]);
+    };
+    const go = h('button', { type: 'submit', class: 'btn btn-primary' }, 'Save');
+    const done = (v) => { overlay.remove(); resolve(v); };
+    const box = h('form', { class: 'dialog us-dialog wide ns-dialog', onsubmit: async (e) => {
+      e.preventDefault();
+      err.hidden = true;
+      go.disabled = true;
+      try {
+        const r = await api(`/portal/netshares/${share.id}/offline`, { method: 'PUT', body: { mode, paths, dest: dest.value.trim(), every: Number(every.value) } });
+        toast(mode === 'off' ? 'Offline copy turned off' : 'Offline copy saved', { type: 'success', body: mode === 'off' ? '' : 'The first sync has started.' });
+        done(r.share);
+      } catch (ex) { err.textContent = ex.message; err.hidden = false; go.disabled = false; }
+    } },
+    h('h3', {}, `Offline copy of “${share.name}”`),
+    h('div', { class: 'us-body' }, modes, body, err),
+    h('div', { class: 'dialog-actions' }, h('button', { type: 'button', class: 'btn', onclick: () => done(null) }, 'Cancel'), go));
+    const overlay = h('div', { class: 'dialog-overlay', onclick: (e) => { if (e.target === overlay) done(null); } }, box);
+    overlay.addEventListener('keydown', (e) => { if (e.key === 'Escape') done(null); });
+    draw();
+    document.body.append(overlay);
+  });
+}
+
+// Add or remove files and folders (paths in the cloud folder; folders end in /) from its offline copy.
+export async function keepOffline(shareId, { add = [], remove = [] }) {
+  const { shares } = await listShares();
+  const s = shares.find((x) => x.id === shareId);
+  if (!s) throw new Error('That cloud storage isn’t there any more');
+  const body = { add, remove, mode: 'auto' };
+  return (await api(`/portal/netshares/${shareId}/offline`, { method: 'PUT', body })).share;
+}
+
+export const syncNow = (id, force = false) => api(`/portal/netshares/${id}/offline/sync`, { method: 'POST', body: { force } });
+
+// Where files wait to upload, and how big that may get.
+function cacheSettings(cloud, onSaved) {
+  const dir = input({ value: cloud.cacheDir || '', placeholder: cloud.defaultCacheDir });
+  const max = input({ value: cloud.cacheMaxGB || '', inputmode: 'decimal', placeholder: 'No limit' });
+  const save = h('button', { type: 'button', class: 'btn' }, 'Save cache settings');
+  save.onclick = async () => {
+    save.disabled = true;
+    try { await api('/portal/netshares/cloud/settings', { method: 'PUT', body: { cacheDir: dir.value.trim(), cacheMaxGB: max.value.trim() } }); toast('Cache settings saved', { type: 'success', body: 'Connected cloud storage was reconnected to use them.' }); onSaved?.(); } catch (ex) { toastError(ex); }
+    save.disabled = false;
+  };
+  return h('details', { class: 'ns-cache', open: Boolean(cloud.cacheDir || cloud.cacheMaxGB) },
+    h('summary', { class: 'small' }, `Cloud cache: ${cloud.cacheDir || cloud.defaultCacheDir}${cloud.cacheMaxGB ? `, up to ${cloud.cacheMaxGB} GB each` : ', no size limit'}`),
+    h('p', { class: 'small muted' }, 'Files you save or upload to cloud storage wait here until they’ve uploaded, and recently written files stay about an hour. Opening files streams them without saving them here.'),
+    h('div', { class: 'field-row' }, field('Cache folder', dir, 'A full path on the MediaDesk server. Blank for the default.'), field('Size limit (GB)', max, 'Per cloud connection. Blank for no limit.')),
+    h('div', { class: 'btn-row' }, save));
 }

@@ -1,6 +1,6 @@
 // Files: a file manager for the folders shared in Settings → Files.
 
-import { shareDialog, NET_ICON, CLOUD_ICON } from '../netshares-ui.js';
+import { shareDialog, keepOffline, NET_ICON, CLOUD_ICON } from '../netshares-ui.js';
 import * as drive from './localdrive.js';
 import { h, clear, formatBytes, formatDuration, debounce, toast, toastError, confirmDialog, contextMenu, spinner, emptyState, errorState, progressBar, isTouch } from '../ui.js';
 import { icon, appIcon } from '../icons.js';
@@ -672,6 +672,7 @@ class FileBrowser {
       !e.dir && BOOK_NAME.test(e.name) ? { label: 'Send to Kindle…', icon: KINDLE_ICON, disabled: many, action: () => this.sendToKindle(e) } : null,
       !e.dir && kindOf(e) !== 'text' ? { label: 'Open in Notes', icon: appIcon.notes, disabled: many, action: () => openApp('notes', { root: this.root, path: join(this.path, e.name) }) } : null,
       ...this.archiveItems(e, many),
+      ...this.offlineItems(),
       !e.dir && /\.(png|jpe?g|gif|webp|bmp|svg|avif|ora)$/i.test(e.name) ? { label: 'Edit in Paint Pro', icon: appIcon.paintpro, disabled: many, action: () => openApp('paintpro', { root: this.root, path: join(this.path, e.name) }) } : null,
       !e.dir && /\.(png|jpe?g|gif|webp|bmp)$/i.test(e.name) ? { label: 'Edit in Paint', icon: appIcon.paint, disabled: many, action: () => openApp('paint', { root: this.root, path: join(this.path, e.name) }) } : null,
       kindOf(e) === 'image' && extOf(e.name) !== 'ico' && extOf(e.name) !== 'tbn' ? { label: 'Set as desktop wallpaper', icon: icon.image, disabled: many, action: () => this.setWallpaper(e) } : null,
@@ -686,6 +687,28 @@ class FileBrowser {
       '-',
       { label: many ? `Delete ${this.selected.size} items` : 'Delete', icon: icon.trash, action: () => this.remove() },
     ].filter(Boolean));
+  }
+
+  // Cloud storage (admins): keep chosen files and folders as an offline copy, synced both ways.
+  offlineItems() {
+    const r = this.roots[this.root];
+    if (!r?.network?.cloud || r.network.isOfflineCopy || window.mediadeskSession?.user?.role !== 'admin') return [];
+    const oc = r.network.offlineCopy;
+    if (oc?.mode === 'all') return ['-', { label: 'Kept offline (everything)', icon: CLOUD_ICON, disabled: true }];
+    const rels = this.selectedEntries().map((x) => join(this.path, x.name) + (x.dir ? '/' : ''));
+    const kept = new Set(oc?.paths || []);
+    const inKept = (p) => kept.has(p) || [...kept].some((k) => k.endsWith('/') && p.startsWith(k));
+    const on = rels.filter((p) => kept.has(p));
+    const run = async (body, msg) => {
+      try { await keepOffline(r.network.id, body); toast(msg, { type: 'success', body: body.add ? `In Files as “${r.name} (offline)”, synced both ways.` : 'The copies already made stay in the offline folder.' }); } catch (err) { toastError(err); }
+      try { state.config = await portal.config(); } catch { /* later */ }
+      await this.loadRoots();
+    };
+    return ['-',
+      rels.some((p) => !inKept(p)) ? { label: 'Keep offline', icon: CLOUD_ICON, action: () => run({ add: rels.filter((p) => !inKept(p)) }, rels.length > 1 ? `Keeping ${rels.length} items offline` : 'Keeping it offline') } : null,
+      on.length ? { label: 'Stop keeping offline', icon: CLOUD_ICON, action: () => run({ remove: on }, 'No longer kept offline') } : null,
+      !on.length && rels.every(inKept) ? { label: 'Kept offline (in a folder kept offline)', icon: CLOUD_ICON, disabled: true } : null,
+    ].filter(Boolean);
   }
 
   // 7-Zip commands, when 7-Zip is installed on the server (see the Archive Expander).

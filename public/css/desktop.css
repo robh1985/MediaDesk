@@ -2139,6 +2139,7 @@ button.notes-st:hover { background: var(--hover); color: var(--text); }
 .ns-status.error { background: color-mix(in srgb, #e03131 14%, transparent); color: #e03131; }
 .ns-status.connecting { background: var(--active); color: var(--accent); }
 .ns-err { color: #e03131; margin-top: 3px; }
+.ns-warn { color: var(--warn, #d9480f); margin-top: 3px; }
 .ns-groups { display: flex; gap: 6px; padding: 3px; border-radius: 10px; background: var(--surface-2); align-self: flex-start; }
 .ns-group { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border: 0; border-radius: 8px; background: none; color: inherit; font: inherit; cursor: pointer; }
 .ns-group svg { width: 15px; height: 15px; }
@@ -2158,6 +2159,14 @@ button.notes-st:hover { background: var(--hover); color: var(--text); }
 .ns-adv p { margin: 6px 0 !important; }
 .ns-code { font-size: 20px; letter-spacing: .3em; max-width: 180px; }
 .fm-side-adds { display: inline-flex; gap: 2px; }
+.ns-paths { display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px; max-height: 220px; overflow: auto; }
+.ns-path { display: flex; align-items: center; gap: 8px; padding: 5px 8px; border-radius: 8px; background: var(--surface-2); }
+.ns-path .grow { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.ns-path-kind { font-size: 11px; color: var(--text-muted); min-width: 42px; }
+.ns-cache { padding: 8px 12px; border-radius: 10px; background: var(--surface-2); }
+.ns-cache summary { cursor: pointer; }
+.ns-cache[open] summary { margin-bottom: 8px; }
+.ns-cache p { margin: 0 0 8px; }
 
 /* Files: tabs, and network shares in the sidebar */
 .fm-tabs { display: flex; align-items: flex-end; gap: 2px; padding: 6px 8px 0; background: var(--surface-2); border-bottom: 1px solid var(--border); overflow-x: auto; scrollbar-width: none; flex: none; }

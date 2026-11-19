@@ -152,6 +152,12 @@ function loadConfig() {
       const r = path.resolve(rootFor(path.dirname(CONFIG_PATH), sh));
       if (!cfg.fileRoots.some((x) => path.resolve(String(x)) === r)) cfg.fileRoots.push(r);
       cfg.fileRootInfo[r] = { ...(cfg.fileRootInfo[r] || {}), alias: sh.name };
+      // A cloud folder's offline copy is a shared folder of its own.
+      if (sh.offline && sh.offline.mode && sh.offline.mode !== 'off' && sh.offline.dest) {
+        const d = path.resolve(sh.offline.dest);
+        if (!cfg.fileRoots.some((x) => path.resolve(String(x)) === d)) cfg.fileRoots.push(d);
+        cfg.fileRootInfo[d] = { ...(cfg.fileRootInfo[d] || {}), alias: `${sh.name} (offline)` };
+      }
     }
   }
   if (env.GAMES_DIR) cfg.gamesFolder = env.GAMES_DIR;
@@ -778,9 +784,11 @@ const sports = createSports({ dataDir: MOCK ? path.join(require('node:os').tmpdi
 const family = createFamily({ dataDir: MOCK ? path.join(require('node:os').tmpdir(), 'mediadesk-demo-data') : path.dirname(CONFIG_PATH), mock: MOCK });
 const archive = createArchive({ getConfig: () => filesConfigFor(reqUser()), resolveInShared: files.resolveInShared, filesEnabled: () => filesStatus(reqUser()).enabled });
 // Network shares (SMB, NFS, SFTP, WebDAV) and cloud storage (through rclone) mounted as shared folders for Files.
-const cloudStorage = createCloudStorage({ dataDir: path.dirname(CONFIG_PATH), mock: MOCK, getRclonePath: () => config.rclonePath || '' });
+const cloudStorage = createCloudStorage({ dataDir: path.dirname(CONFIG_PATH), mock: MOCK, getRclonePath: () => config.rclonePath || '', getSettings: () => config.cloudStorage || {} });
 const netShares = createNetShares({
   dataDir: path.dirname(CONFIG_PATH), mock: MOCK, cloud: cloudStorage,
+  getCloudSettings: () => config.cloudStorage || {},
+  setCloudSettings: async (v) => { const next = fs.existsSync(CONFIG_PATH) ? readConfigFile() : {}; if (Object.keys(v).length) next.cloudStorage = v; else delete next.cloudStorage; saveConfig(next); },
   getShares: () => (Array.isArray(config.networkShares) ? config.networkShares : []),
   setShares: async (list) => { const next = fs.existsSync(CONFIG_PATH) ? readConfigFile() : {}; next.networkShares = list; saveConfig(next); },
 });

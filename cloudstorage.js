@@ -13,6 +13,10 @@
 //   the Apple ID, password and a two-factor code (Advanced Data Protection must be off).
 // - MEGA takes an email and password; S3-compatible storage an access key and secret.
 //
+// Files people write are kept in rclone's cache while they upload (folder and size limit set in
+// Settings → Files). An offline copy keeps a local copy of all of it, or of chosen files and folders,
+// in a folder of its own, kept in step both ways with `rclone bisync` on a schedule.
+//
 // Tokens and passwords live only in rclone.conf next to config.json on the server (passwords
 // obscured the way rclone does it), never in config.json, on a command line, or in the browser.
 
@@ -109,8 +113,13 @@ function windowsPlaces() {
 
 // What went wrong, in words people can act on.
 function explain(text, provider) {
-  const o = String(text || '').toLowerCase();
+  // rclone's notice about its shared Google client isn't the error (Settings shows it separately).
+  text = String(text || '').split('\n').filter((l) => !/shared google drive client_id|making-your-own-client-id|create your own client_id/i.test(l)).join('\n')
+    .replace(/^.*?This remote uses rclone's shared Google Drive client_id.*?interruption: \S+\s*/i, '');
+  const o = text.toLowerCase();
   const p = PROVIDERS[provider]?.name || 'The cloud service';
+  if (/parent of mountpoint/.test(o)) return 'The folder to connect it in couldn’t be made. Press Reconnect; if it keeps failing, check MediaDesk can write to its config folder.';
+  if (/mountpoint.*(already exists|not empty)|directory already exists/.test(o)) return 'Its folder is already there (and not empty). Press Reconnect, or remove what’s in it.';
   if (/winfsp|cgofuse/.test(o)) return 'Cloud storage needs WinFsp on the MediaDesk computer: run winget install WinFsp.WinFsp, then press Reconnect.';
   if (/fusermount.*(not found|executable file)|exec: "fusermount/.test(o)) return 'Cloud storage needs FUSE on the MediaDesk server: install fuse3 (sudo apt install fuse3), then press Reconnect.';
   if (/\/dev\/fuse|fuse: device not found|no such device/.test(o)) return 'The MediaDesk server can’t use FUSE (needed for cloud storage). In Docker, add the device /dev/fuse (see docker-compose.yml).';
@@ -127,7 +136,7 @@ function explain(text, provider) {
   return (lines.slice(-2).join(' ') || `${p} couldn’t be connected`).slice(0, 300);
 }
 
-function createCloudStorage({ dataDir, getRclonePath = () => '', log = console.log, mock = false }) {
+function createCloudStorage({ dataDir, getRclonePath = () => '', getSettings = () => ({}), log = console.log, mock = false }) {
   const confPath = path.join(dataDir, 'rclone.conf');
   const cacheBase = path.join(dataDir, 'rclone-cache');
   const mounts = new Map(); // share id -> { child, mp, err, exited }
@@ -337,10 +346,15 @@ function createCloudStorage({ dataDir, getRclonePath = () => '', log = console.l
   }
   function forget(id) {
     dropSection(id);
-    fsp.rm(path.join(cacheBase, id), { recursive: true, force: true }).catch(() => {});
+    forgetSync(id);
+    for (const dir of new Set([cacheBase, cacheDir()])) fsp.rm(path.join(dir, id), { recursive: true, force: true }).catch(() => {});
+    fsp.rm(path.join(cacheBase, `${id}.filter`), { force: true }).catch(() => {});
   }
 
   // ---- Mounting ----
+  // Where files being written wait to upload, and how big that may get (per connection).
+  const cacheDir = () => { const d = getSettings().cacheDir; return d && path.isAbsolute(d) ? d : cacheBase; };
+  const cacheLimit = () => { const gb = Number(getSettings().cacheMaxGB); return gb > 0 ? `${Math.round(gb * 1024)}M` : null; };
   const remotePath = (s) => `${remoteName(s.id)}:${s.type === 's3' ? [s.bucket, s.path].filter(Boolean).join('/') : s.path || ''}`;
   const running = (id) => { const m = mounts.get(id); return Boolean(m && !m.exited); };
   const lastError = (id) => mounts.get(id)?.error || null;
@@ -387,9 +401,15 @@ function createCloudStorage({ dataDir, getRclonePath = () => '', log = console.l
     const cmd = await need(s.type);
     if (!hasSection(s.id)) throw new CloudError(400, `${PROVIDERS[s.type].name} isn’t set up on the server any more: press Change and sign in again.`);
     await unmount(s, mp, { inMounts });
-    if (isWin) await fsp.rmdir(mp).catch(() => {}); // WinFsp makes the folder itself
+    if (isWin) {
+      // WinFsp makes the mount folder itself: its parent must exist, and the folder itself mustn't.
+      await fsp.mkdir(path.dirname(mp), { recursive: true });
+      await fsp.rmdir(mp).catch(() => {});
+      if (fs.existsSync(mp)) throw new CloudError(409, `The folder ${mp} is in the way (it isn’t empty). Move what’s in it, then press Reconnect.`);
+    }
     else await fsp.mkdir(mp, { recursive: true });
-    const args = ['mount', remotePath(s), mp, '--config', confPath, '--cache-dir', path.join(cacheBase, s.id),
+    const args = ['mount', remotePath(s), mp, '--config', confPath, '--cache-dir', path.join(cacheDir(), s.id),
+      ...(cacheLimit() ? ['--vfs-cache-max-size', cacheLimit()] : []),
       '--vfs-cache-mode', 'writes', '--dir-cache-time', '1m', '--poll-interval', '1m', '--log-level', 'NOTICE',
       ...(s.readOnly ? ['--read-only'] : []), ...(isMac || isWin ? ['--volname', s.name] : [])];
     const m = { child: null, mp, err: '', exited: false, error: null, started: Date.now() };
@@ -418,6 +438,7 @@ function createCloudStorage({ dataDir, getRclonePath = () => '', log = console.l
   const stopAll = () => {
     for (const m of mounts.values()) if (!m.exited) { m.stopping = true; try { m.child.kill(); } catch { /* gone */ } }
     try { if (auth?.child && auth.child.exitCode === null) auth.child.kill(); } catch { /* gone */ }
+    for (const st of syncs.values()) if (st.running) try { st.child.kill(); } catch { /* gone */ }
   };
   process.once('exit', stopAll);
   for (const [sig, code] of [['SIGTERM', 143], ['SIGINT', 130]]) {
@@ -431,7 +452,95 @@ function createCloudStorage({ dataDir, getRclonePath = () => '', log = console.l
 
   const pendingShare = (id) => pending.get(String(id))?.share || null;
 
-  return { PROVIDERS, detect, status, pendingShare, startAuth, authStatus: (id) => { const a = authFor(id); if (!a) throw new CloudError(404, 'That sign-in has ended. Start again.'); return authView(a); }, finishAuth, cancelAuth, setUp, forget, mount, unmount, running, lastError, accountOf: (id) => sectionValue(id, 'apple_id') || sectionValue(id, 'user') || '' };
+  // ---- Offline copies ----
+  // `rclone bisync`, both ways: changes in the cloud come down, changes in the local folder go up.
+  // The first run (and any run after the chosen files, or the folder, change) is a --resync, which
+  // merges both sides keeping the newer version. Conflicts keep both: the older one gets a number.
+  const syncs = new Map(); // id -> { running, child, lastAt, ok, error, startedAt, tooMany }
+  const statePath = path.join(cacheBase, 'offline-state.json');
+  const saved = (() => { try { return JSON.parse(fs.readFileSync(statePath, 'utf8')); } catch { return {}; } })();
+  for (const [id, v] of Object.entries(saved)) syncs.set(id, { lastAt: v.lastAt || null, ok: v.ok ?? null, error: v.error || null, key: v.key || null });
+  function saveState() {
+    const out = {};
+    for (const [id, st] of syncs) out[id] = { lastAt: st.lastAt || null, ok: st.ok ?? null, error: st.error || null, key: st.key || null };
+    try { fs.mkdirSync(cacheBase, { recursive: true }); fs.writeFileSync(statePath, JSON.stringify(out)); } catch { /* next time */ }
+  }
+  const escapeGlob = (p) => p.replace(/[\\*?[\]{}]/g, (c) => `\\${c}`);
+  function filterLines(paths) {
+    return [...paths.map((p) => (p.endsWith('/') ? `+ /${escapeGlob(p.replace(/\/+$/, ''))}/**` : `+ /${escapeGlob(p)}`)), '- **'].join('\n') + '\n';
+  }
+  function syncState(id) { const st = syncs.get(id); return st ? { running: Boolean(st.running), lastAt: st.lastAt || null, ok: st.ok ?? null, error: st.error || null, tooMany: Boolean(st.tooMany), startedAt: st.startedAt || null } : { running: false, lastAt: null, ok: null, error: null, tooMany: false }; }
+  function stopSync(id) { const st = syncs.get(id); if (st?.child && st.running) { st.stopped = true; st.child.kill(); } }
+  function forgetSync(id) { stopSync(id); syncs.delete(id); saveState(); }
+  // What makes a --resync necessary: where the copy is, and what's in it.
+  const syncKey = (s, offline) => crypto.createHash('sha1').update(JSON.stringify([remotePath(s), offline.dest, offline.mode, offline.mode === 'some' ? [...offline.paths].sort() : []])).digest('hex');
+
+  function runBisync(cmd, args) {
+    return new Promise((resolve) => {
+      let out = '';
+      const child = spawn(cmd, args, { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+      child.stdout.on('data', (d) => { out = (out + d).slice(-6000); });
+      child.stderr.on('data', (d) => { out = (out + d).slice(-6000); });
+      child.on('error', (e) => { out += e.message; });
+      child.on('close', (code) => resolve({ code, out }));
+      resolve.child = child;
+      runBisync.last = child;
+    });
+  }
+
+  async function sync(s, offline, { force = false, onDone } = {}) {
+    if (mock) return syncState(s.id);
+    const st = syncs.get(s.id) || {};
+    if (st.running) return syncState(s.id);
+    const cmd = await need(s.type);
+    if (!hasSection(s.id)) throw new CloudError(400, `${PROVIDERS[s.type].name} isn’t set up on the server any more: press Change and sign in again.`);
+    if (offline.mode === 'some' && !offline.paths.length) throw new CloudError(400, 'Choose at least one file or folder to keep offline.');
+    await fsp.mkdir(offline.dest, { recursive: true });
+    const workdir = path.join(cacheBase, 'bisync');
+    await fsp.mkdir(workdir, { recursive: true });
+    const base = ['bisync', remotePath(s), offline.dest, '--config', confPath, '--workdir', workdir, '--create-empty-src-dirs',
+      '--resilient', '--recover', '--max-lock', '2m', '--conflict-resolve', 'newer', '--conflict-loser', 'num', '--compare', 'size,modtime', '--log-level', 'NOTICE'];
+    if (offline.mode === 'some') {
+      const f = path.join(cacheBase, `${s.id}.filter`);
+      await fsp.writeFile(f, filterLines(offline.paths));
+      base.push('--filters-file', f);
+    }
+    if (force) base.push('--force');
+    const key = syncKey(s, offline);
+    Object.assign(st, { running: true, startedAt: Date.now(), stopped: false, error: null, tooMany: false });
+    syncs.set(s.id, st);
+    (async () => {
+      let resync = st.key !== key;
+      let r;
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const p = runBisync(cmd, [...base, ...(resync ? ['--resync', '--resync-mode', 'newer'] : [])]);
+        st.child = runBisync.last;
+        r = await p;
+        if (st.stopped) break;
+        // Its saved listings are gone or out of date: one --resync puts it right.
+        if (r.code !== 0 && !resync && /must run --resync|cannot find prior|--resync to recover|filters file has changed|listings? (are|is) (missing|corrupt)/i.test(r.out)) { resync = true; continue; }
+        break;
+      }
+      st.running = false;
+      st.child = null;
+      if (st.stopped) return;
+      st.lastAt = Date.now();
+      st.ok = r.code === 0;
+      st.tooMany = !st.ok && /too many deletes|max-delete|safety abort/i.test(r.out);
+      st.error = st.ok ? null : st.tooMany ? 'More than half of the files were deleted on one side, so the sync stopped to be safe. If that was on purpose, press Sync anyway.' : explain(r.out || `rclone stopped (code ${r.code})`, s.type);
+      if (st.ok) st.key = key;
+      saveState();
+      log(`Offline copy of “${s.name}” ${st.ok ? 'is in sync' : `failed: ${st.error}`}`);
+      onDone?.(syncState(s.id));
+    })();
+    return syncState(s.id);
+  }
+  function stopAllSyncs() { for (const id of syncs.keys()) stopSync(id); }
+
+  // Google Drive signed in with rclone's shared app, which Google is retiring during 2026.
+  const usesSharedClient = (s) => s.type === 'gdrive' && hasSection(s.id) && !sectionValue(s.id, 'client_id');
+
+  return { PROVIDERS, usesSharedClient, detect, sync, syncState, stopSync, forgetSync, stopAllSyncs, cacheDir, defaultCacheDir: cacheBase, status, pendingShare, startAuth, authStatus: (id) => { const a = authFor(id); if (!a) throw new CloudError(404, 'That sign-in has ended. Start again.'); return authView(a); }, finishAuth, cancelAuth, setUp, forget, mount, unmount, running, lastError, accountOf: (id) => sectionValue(id, 'apple_id') || sectionValue(id, 'user') || '' };
 }
 
 module.exports = { createCloudStorage, PROVIDERS, CloudError, obscure, reveal, parseConf, formatConf, explain };
