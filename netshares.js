@@ -463,7 +463,10 @@ function createNetShares({ dataDir, getShares, setShares, cloud = null, getCloud
     }
   }
 
-  return { handle, connectAll, rootOf, offline, info, roots: () => [...getShares().map(rootOf), ...offlineRoots()], names: () => [...getShares().map((s) => [rootOf(s), s.name]), ...getShares().filter(offlineOn).map((s) => [path.resolve(s.offline.dest), `${s.name} (offline)`])] };
+  // rclone mounts (cloud storage) never contain symlinks: Files needn't resolve them.
+  const noLinks = (abs) => { const s = byRoot(abs); return Boolean(s && isCloud(s)); };
+
+  return { handle, connectAll, rootOf, offline, info, noLinks, roots: () => [...getShares().map(rootOf), ...offlineRoots()], names: () => [...getShares().map((s) => [rootOf(s), s.name]), ...getShares().filter(offlineOn).map((s) => [path.resolve(s.offline.dest), `${s.name} (offline)`])] };
 }
 
 module.exports = { createNetShares, rootFor, TYPES, ShareError };

@@ -60,7 +60,7 @@ const within = (child, parent) => {
 };
 
 // Network shares (netshares.js): which shared folders are shares, and whether they're connected.
-let network = { offline: () => null, info: () => null };
+let network = { offline: () => null, info: () => null, noLinks: () => false };
 function setNetwork(n) { network = n; }
 
 function rootList(config) {
@@ -124,6 +124,9 @@ async function resolveIn(root, rel = '') {
   // A network share that isn't connected: its folder is empty (and not the share), so not used.
   const off = network.offline(root.path);
   if (off) throw new FileError(503, off);
+  // Cloud storage mounted by rclone has no links to follow, and on Windows its WinFsp folder can't be
+  // resolved with realpath (it's a volume without a drive letter), so it's used as it is.
+  if (network.noLinks?.(root.path)) return abs;
   // Follow symlinks/junctions on the deepest existing ancestor and make sure it stays inside.
   const realRoot = await fsp.realpath(root.path).catch(() => { throw new FileError(404, `Folder root ${root.path} is not reachable`); });
   let probe = abs;

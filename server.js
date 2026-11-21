@@ -792,7 +792,7 @@ const netShares = createNetShares({
   getShares: () => (Array.isArray(config.networkShares) ? config.networkShares : []),
   setShares: async (list) => { const next = fs.existsSync(CONFIG_PATH) ? readConfigFile() : {}; next.networkShares = list; saveConfig(next); },
 });
-files.setNetwork({ offline: (abs) => netShares.offline(abs), info: (abs) => netShares.info(abs) });
+files.setNetwork({ offline: (abs) => netShares.offline(abs), info: (abs) => netShares.info(abs), noLinks: (abs) => netShares.noLinks(abs) });
 const wallpapers = createWallpapers(MOCK ? path.join(require('node:os').tmpdir(), 'mediadesk-demo-wallpapers') : path.join(path.dirname(CONFIG_PATH), 'wallpapers'));
 
 // --- Notifications ------------------------------------------------------------
