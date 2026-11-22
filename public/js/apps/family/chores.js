@@ -58,7 +58,7 @@ export class ChoresView {
         h('button', { class: this.layout === 'day' ? 'on' : '', onclick: () => { this.layout = 'day'; this.render(el); } }, 'Day'),
         h('button', { class: this.layout === 'week' ? 'on' : '', onclick: () => { this.layout = 'week'; this.render(el); } }, 'Week')) : null,
       this.canApprove && this.pending().length ? h('button', { class: 'fam-btn fam-approve-btn', onclick: () => this.approvals() }, `Approve (${this.pending().length})`) : null,
-      h('button', { class: 'fam-btn', onclick: () => this.manage() }, 'Manage'),
+      this.app.toolbarMore([h('button', { class: 'fam-btn', onclick: () => this.manage() }, 'Manage')]),
       h('button', { class: 'fam-btn primary', onclick: () => this.edit(null) }, h('span', { html: ICONS.plus }), this.mode === 'routines' ? 'Routine' : 'Chore'));
     const board = h('div', { class: 'fam-board' });
     // Chores, by the day: the extra chores menu on the right.
@@ -449,8 +449,8 @@ export class RewardsView {
     const bar = h('div', { class: 'fam-toolbar' },
       h('div', { class: 'fam-toolbar-title' }, 'Rewards'),
       h('div', { class: 'fam-spacer' }),
-      h('button', { class: 'fam-btn', onclick: () => this.history() }, 'History'),
-      h('button', { class: 'fam-btn', onclick: () => this.adjust() }, `${STAR} Give or take stars`),
+      this.app.toolbarMore([h('button', { class: 'fam-btn', onclick: () => this.history() }, 'History'),
+        h('button', { class: 'fam-btn', onclick: () => this.adjust() }, `${STAR} Give or take stars`)]),
       h('button', { class: 'fam-btn primary', onclick: () => this.edit(null) }, h('span', { html: ICONS.plus }), 'Reward'));
     const people = h('div', { class: 'fam-star-people' }, members.map((m) => h('button', { class: `fam-star-person ${m.id === this.who ? 'on' : ''}`, style: { '--c': m.color }, onclick: () => { this.who = m.id; this.render(el); } },
       avatar(m, 'lg'), h('b', {}, m.name), h('span', { class: 'fam-stars big' }, `${STAR} ${this.store.stars(m.id)}`))));

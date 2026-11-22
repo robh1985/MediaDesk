@@ -39,8 +39,8 @@ export class PhotosView {
     const bar = h('div', { class: 'fam-toolbar' },
       h('div', { class: 'fam-toolbar-title' }, 'Photos'),
       h('div', { class: 'fam-spacer' }),
-      filesEnabled() ? h('button', { class: 'fam-btn', title: folder ? `${folder.name || folder.path || 'Shared folder'}` : '', onclick: () => this.chooseFolder() }, folder ? `Folder: ${folder.name || folder.path || 'shared folder'}` : 'Use a shared folder') : null,
-      h('button', { class: 'fam-btn', onclick: () => fileIn.click() }, h('span', { html: ICONS.upload }), 'Add photos'), fileIn,
+      this.app.toolbarMore([filesEnabled() ? h('button', { class: 'fam-btn', title: folder ? `${folder.name || folder.path || 'Shared folder'}` : '', onclick: () => this.chooseFolder() }, folder ? `Folder: ${folder.name || folder.path || 'shared folder'}` : 'Use a shared folder') : null,
+        h('button', { class: 'fam-btn', onclick: () => fileIn.click() }, h('span', { html: ICONS.upload }), 'Add photos')]), fileIn,
       h('button', { class: 'fam-btn primary', onclick: () => this.app.frame() }, h('span', { html: ICONS.play }), 'Photo frame'));
     const grid = h('div', { class: 'fam-photos' }, h('div', { class: 'fam-muted' }, 'Loading…'));
     clear(el, bar, grid);

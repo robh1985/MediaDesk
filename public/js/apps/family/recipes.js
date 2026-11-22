@@ -90,11 +90,17 @@ export class RecipeBox {
     const q = input({ type: 'search', placeholder: 'Search recipes, ingredients, tags…', value: this.q, class: 'fam-input fam-recipe-search' });
     const pick = (key, label, opts) => (opts.length ? select([['', label], ...opts.map((o) => [o, o])], this.filters[key], { class: 'fam-input fam-recipe-filter', onchange: (e) => { this.filters[key] = e.target.value; draw(); } }) : null);
     const fromMealie = all.some((r) => r.source === 'mealie');
-    const filters = h('div', { class: 'fam-recipe-filters' }, q,
+    // Phones: just the search box, with the rest behind Filter.
+    const phone = this.app.isPhone();
+    const active = ['category', 'tag', 'tool', 'source'].filter((k) => this.filters[k]).length + (this.filters.fav ? 1 : 0) + (this.sort !== 'name' ? 1 : 0);
+    const filterBtn = phone ? h('button', { class: `fam-btn fam-filter-toggle ${active ? 'on' : ''}`, 'aria-expanded': String(Boolean(this.filtersOpen)), onclick: () => { this.filtersOpen = !this.filtersOpen; more.hidden = !this.filtersOpen; filterBtn.setAttribute('aria-expanded', String(this.filtersOpen)); } },
+      h('span', { html: ICONS.sliders }), active ? `Filter (${active})` : 'Filter') : null;
+    const more = h('div', { class: 'fam-recipe-more', hidden: phone && !this.filtersOpen },
       h('button', { class: `fam-chip ${this.filters.fav ? 'on' : ''}`, onclick: (e) => { this.filters.fav = !this.filters.fav; e.currentTarget.classList.toggle('on', this.filters.fav); draw(); } }, '♥ Favourites'),
       pick('category', 'All categories', values('categories')), pick('tag', 'All tags', values('tags')), pick('tool', 'All tools', values('tools')),
       fromMealie ? select([['', 'All recipes'], ['mealie', 'From Mealie'], ['ours', 'Made here']], this.filters.source, { class: 'fam-input fam-recipe-filter', onchange: (e) => { this.filters.source = e.target.value; draw(); } }) : null,
       select([['name', 'A–Z'], ['new', 'Newest'], ['rating', 'Top rated'], ['quick', 'Quickest'], ['made', 'Recently made']], this.sort, { class: 'fam-input fam-recipe-filter', onchange: (e) => { this.sort = e.target.value; draw(); } }));
+    const filters = h('div', { class: 'fam-recipe-filters' }, q, filterBtn, more);
     const status = h('div', { class: 'fam-mealie-status' });
     const shelf = h('div', { class: 'fam-shelf' });
     this.drawShelf(shelf);
@@ -121,7 +127,8 @@ export class RecipeBox {
     };
     q.addEventListener('input', () => { this.q = q.value; draw(); });
     draw();
-    clear(body, shelf, book ? head : null, filters, status, grid);
+    // Phones: the cookbooks are in the ☰ menu instead of a shelf.
+    clear(body, phone ? null : shelf, book ? head : null, filters, status, grid);
     this.drawStatus(status);
   }
 

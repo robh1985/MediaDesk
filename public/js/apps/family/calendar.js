@@ -59,6 +59,7 @@ export class CalendarView {
 
   render(el) {
     this.el = el;
+    this.countdownsOpen = false;
     const views = [['day', 'Day', ICONS.viewDay, '#1c7ed6'], ['week', 'Week', ICONS.viewWeek, '#4263eb'], ['month', 'Month', ICONS.viewMonth, '#7048e8'], ['schedule', 'Schedule', ICONS.viewList, '#0ca678']];
     // Day, Week, Month and Schedule: a menu beside the left one.
     const row = this.app.subMenu('View', views, this.view, (id) => { this.view = id; this.scrolled = false; this.store.setSettings({ calendarView: id }).catch(() => {}); this.render(el); }, 'fam-cal-views');
@@ -117,18 +118,21 @@ export class CalendarView {
       if (next) list.push(next);
     }
     list.sort((a, b) => a.start - b.start);
-    clear(this.countdownEl, list.slice(0, 6).map((o) => {
+    // Phones: just the next one, with "+2" to see the rest.
+    const folded = this.app.isPhone() && !this.countdownsOpen && list.length > 1;
+    clear(this.countdownEl, list.slice(0, folded ? 1 : 6).map((o) => {
       const days = dayDiff(now, o.start);
       return h('button', { class: 'fam-countdown', style: { '--c': this.colorOf(o.ev) }, onclick: () => this.showEvent(o) },
         h('span', { class: 'fam-countdown-n' }, days <= 0 ? 'Today' : days === 1 ? '1 day' : `${days} days`),
         h('span', { class: 'fam-countdown-t' }, o.ev.title));
-    }));
+    }), folded ? h('button', { class: 'fam-countdown fam-countdown-more', 'aria-label': `${list.length - 1} more countdowns`, onclick: () => { this.countdownsOpen = true; this.drawCountdowns(); } }, `+${Math.min(list.length, 6) - 1}`) : null);
     this.countdownEl.hidden = !list.length;
   }
 
   // --- Month -----------------------------------------------------------------------
 
   drawMonth() {
+    if (this.app.isPhone()) { this.drawPhoneMonth(); return; }
     const first = new Date(this.date.getFullYear(), this.date.getMonth(), 1);
     this.titleEl.textContent = `${MONTHS[first.getMonth()]} ${first.getFullYear()}`;
     const start = startOfWeek(first, this.weekStart);
@@ -166,6 +170,43 @@ export class CalendarView {
         box.append(h('button', { class: 'fam-more', onclick: (e) => { e.stopPropagation(); this.dayList(addDays(start, idx)); } }, `+${hidden} more`));
       }
     });
+  }
+
+  // Phones: the month with a coloured dot per event, and the picked day's events listed below it.
+  drawPhoneMonth() {
+    const first = new Date(this.date.getFullYear(), this.date.getMonth(), 1);
+    this.titleEl.textContent = `${MONTHS[first.getMonth()]} ${first.getFullYear()}`;
+    const start = startOfWeek(first, this.weekStart);
+    const weeks = Math.ceil((dayDiff(start, first) + new Date(first.getFullYear(), first.getMonth() + 1, 0).getDate()) / 7);
+    const end = addDays(start, weeks * 7);
+    const occ = this.occurrences(start, end);
+    const today = new Date();
+    const inMonth = (d) => d && d.getMonth() === first.getMonth() && d.getFullYear() === first.getFullYear();
+    if (!inMonth(this.picked)) this.picked = inMonth(today) ? startOfDay(today) : first;
+    const grid = h('div', { class: 'fam-month phone', style: { '--weeks': weeks } },
+      Array.from({ length: 7 }, (_, i) => h('div', { class: 'fam-month-dow' }, DAY_SHORT[(i + this.weekStart) % 7][0])));
+    for (let i = 0; i < weeks * 7; i++) {
+      const day = addDays(start, i);
+      const next = addDays(day, 1);
+      const items = occ.filter((o) => o.start < next && o.end > day);
+      const colors = [...new Set(items.map((o) => this.colorOf(o.ev)))];
+      grid.append(h('button', {
+        class: `fam-month-cell ${day.getMonth() !== first.getMonth() ? 'other' : ''} ${sameDay(day, today) ? 'today' : ''} ${sameDay(day, this.picked) ? 'picked' : ''}`,
+        'aria-label': `${fmtDate(day)}: ${items.length} event${items.length === 1 ? '' : 's'}`,
+        onclick: () => { if (inMonth(day)) { this.picked = day; this.drawMonth(); } else { this.date = day; this.picked = day; this.draw(); } },
+      },
+      h('span', { class: 'fam-daynum' }, day.getDate()),
+      h('span', { class: 'fam-month-dots' }, colors.slice(0, 4).map((c) => h('i', { style: { background: c } })), items.length > 4 ? h('b', {}, '+') : null)));
+    }
+    const day = this.picked;
+    const dayOcc = this.occurrences(day, addDays(day, 1));
+    const list = h('div', { class: 'fam-month-day' },
+      h('div', { class: 'fam-month-day-head' }, h('b', {}, fmtDate(day, { weekday: 'long', month: 'long', day: 'numeric' })),
+        h('button', { class: 'fam-btn', onclick: () => this.edit(null, { date: day }) }, h('span', { html: ICONS.plus }), 'Event')),
+      dayOcc.length ? dayOcc.map((o) => h('button', { class: 'fam-agenda-row', style: { '--c': this.colorOf(o.ev) }, onclick: () => this.showEvent(o) },
+        h('span', { class: 'fam-agenda-time' }, o.allDay ? 'All day' : fmtTime(o.start)), h('span', { class: 'fam-agenda-bar' }), h('span', { class: 'fam-agenda-title' }, o.ev.title)))
+        : h('div', { class: 'fam-muted fam-month-none' }, 'Nothing planned.'));
+    clear(this.body, grid, list);
   }
 
   pill(o, day) {

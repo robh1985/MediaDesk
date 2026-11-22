@@ -36,6 +36,10 @@ const TABS = [
   ['lists', 'Lists', ICONS.lists],
   ['photos', 'Photos', ICONS.photos],
 ];
+// On a phone, these stay in the bar along the bottom; the rest are under More (the ☰ drawer).
+const PHONE_TABS = new Set(['calendar', 'chores', 'meals', 'lists']);
+const TAB_NAMES = { approvals: 'Approvals', settings: 'Settings' };
+const PHONE = '(max-width: 760px)';
 // Each button on the left has its own colour.
 const RAIL_COLORS = { calendar: '#1c7ed6', chores: '#2f9e44', rewards: '#f08c00', meals: '#e8590c', lists: '#7048e8', photos: '#d6336c', approvals: '#1098ad', sleep: '#4263eb', settings: '#5c677d' };
 
@@ -110,6 +114,7 @@ class FamilyOrganizer {
 
   destroy() {
     this.theme.stop();
+    if (this.phoneMq) this.phoneMq.onchange = null;
     this.store.stop();
     this.unsub?.();
     this.timers.forEach(clearInterval);
@@ -121,22 +126,34 @@ class FamilyOrganizer {
     this.clock = h('div', { class: 'fam-clock' });
     this.wx = h('button', { class: 'fam-weather', title: 'Weather', onclick: () => this.showWeather() });
     this.filterEl = h('div', { class: 'fam-filter' });
+    this.phoneMq = matchMedia(PHONE);
+    // Phone ↔ wide (a window resized, a tablet turned): menus and toolbars change shape.
+    this.phoneMq.onchange = () => { this.drawFilter(); if (this.tab && this.main.firstElementChild) this.go(this.tab); };
+    const extra = (id) => (PHONE_TABS.has(id) ? '' : 'fam-rail-extra');
     this.rail = h('nav', { class: 'fam-rail' },
-      TABS.map(([id, label, ic]) => h('button', { class: 'fam-rail-btn', style: { '--rc': RAIL_COLORS[id] }, dataset: { tab: id }, onclick: () => this.go(id) }, h('span', { html: ic }), h('span', {}, label))),
+      TABS.map(([id, label, ic]) => h('button', { class: `fam-rail-btn ${extra(id)}`, style: { '--rc': RAIL_COLORS[id] }, dataset: { tab: id }, onclick: () => this.go(id) }, h('span', { html: ic }), h('span', {}, label))),
       // Signed in as a parent: everything waiting for a parent's approval, in one place.
-      this.isParentUser() ? h('button', { class: 'fam-rail-btn', style: { '--rc': RAIL_COLORS.approvals }, dataset: { tab: 'approvals' }, onclick: () => this.go('approvals') },
+      this.isParentUser() ? h('button', { class: 'fam-rail-btn fam-rail-extra', style: { '--rc': RAIL_COLORS.approvals }, dataset: { tab: 'approvals' }, onclick: () => this.go('approvals') },
         h('span', { class: 'fam-rail-icon', html: ICONS.approve }), h('span', {}, 'Approvals'), this.approvalBadge = h('span', { class: 'fam-rail-badge', hidden: true })) : null,
       h('div', { class: 'fam-rail-gap' }),
-      h('button', { class: 'fam-rail-btn small', style: { '--rc': RAIL_COLORS.sleep }, title: 'Sleep', onclick: () => this.sleep(true) }, h('span', { html: ICONS.sleep }), h('span', {}, 'Sleep')),
-      h('button', { class: 'fam-rail-btn small', style: { '--rc': RAIL_COLORS.settings }, dataset: { tab: 'settings' }, onclick: () => this.go('settings') }, h('span', { html: ICONS.settings }), h('span', {}, 'Settings')));
-    // On a phone, a section's parts (subMenu) live in a drawer on the left, opened from here.
-    this.menuBtn = h('button', { class: 'fam-icon-btn fam-menu-btn', hidden: true, 'aria-label': 'Open the menu', 'aria-expanded': 'false', html: ICONS.menu, onclick: () => this.openDrawer() });
+      // Phones: More, for everything not in the bottom bar.
+      this.moreTab = h('button', { class: 'fam-rail-btn fam-rail-morebtn', style: { '--rc': RAIL_COLORS.settings }, 'aria-label': 'More', onclick: () => this.openDrawer() },
+        h('span', { html: ICONS.menu }), h('span', {}, 'More'), this.moreBadge = h('span', { class: 'fam-rail-badge', hidden: true })),
+      h('button', { class: 'fam-rail-btn small fam-rail-extra', style: { '--rc': RAIL_COLORS.sleep }, title: 'Sleep', onclick: () => this.sleep(true) }, h('span', { html: ICONS.sleep }), h('span', {}, 'Sleep')),
+      h('button', { class: 'fam-rail-btn small fam-rail-extra', style: { '--rc': RAIL_COLORS.settings }, dataset: { tab: 'settings' }, onclick: () => this.go('settings') }, h('span', { html: ICONS.settings }), h('span', {}, 'Settings')));
+    // Phones: a drawer on the left (☰) holds the section's parts and everything under More.
+    this.menuBtn = h('button', { class: 'fam-icon-btn fam-menu-btn', 'aria-label': 'Open the menu', 'aria-expanded': 'false', html: ICONS.menu, onclick: () => this.openDrawer() },
+      this.menuBadge = h('span', { class: 'fam-menu-dot', hidden: true }));
+    // Phones: the section's name (and part) where the clock is on a big screen.
+    this.pageTitle = h('div', { class: 'fam-page-title' });
+    // Phones: who's shown, as one button instead of the row of faces.
+    this.peopleBtn = h('button', { class: 'fam-people-btn', 'aria-label': 'Choose whose things to show', onclick: () => this.choosePeople() });
     this.header = h('header', { class: 'fam-header' },
-      this.menuBtn, this.clock, this.wx,
+      this.menuBtn, this.clock, this.pageTitle, this.wx,
       h('div', { class: 'fam-spacer' }),
-      this.filterEl,
+      this.filterEl, this.peopleBtn,
       h('button', { class: 'fam-btn fam-quick-btn', title: 'Type events the way you’d say them', onclick: () => this.calendar.quickAdd() }, h('span', { html: ICONS.sparkle }), h('span', { class: 'fam-hide-sm' }, 'Quick add')),
-      h('button', { class: 'fam-btn primary', onclick: () => this.add() }, h('span', { html: ICONS.plus }), h('span', { class: 'fam-hide-sm' }, 'Add')),
+      h('button', { class: 'fam-btn primary fam-add-btn', 'aria-label': 'Add', onclick: () => (this.isPhone() ? this.addMenu() : this.add()) }, h('span', { html: ICONS.plus }), h('span', { class: 'fam-hide-sm' }, 'Add')),
       h('button', { class: `fam-icon-btn fam-theme-btn ${this.session?.user ? 'fam-hide-sm' : ''}`, title: 'Light or dark', 'aria-label': 'Switch between light and dark', onclick: () => this.toggleTheme() }, ...themeIcon(this.root.classList.contains('fam-dark'))),
       h('button', { class: 'fam-icon-btn fam-hide-sm', title: 'Full screen', html: ICONS.expand, onclick: () => this.fullscreen() }),
       this.session?.user && !this.session.user.viaMediaDesk ? h('button', { class: 'fam-account-btn', title: `Signed in as ${this.session.user.first} ${this.session.user.last}`, onclick: () => this.accountMenu() },
@@ -145,12 +162,20 @@ class FamilyOrganizer {
     // A second menu beside the left one, for a section with parts of its own (Settings).
     this.subnav = h('nav', { class: 'fam-subrail', hidden: true });
     this.drawerTitle = h('div', { class: 'fam-drawer-title' });
-    this.drawerBody = h('nav', { class: 'fam-drawer-body' });
+    this.drawerBody = h('nav', { class: 'fam-drawer-part' });
+    const moreBtn = (id, label, ic, onclick, badge = null) => h('button', { class: 'fam-rail-btn', style: { '--rc': RAIL_COLORS[id] }, dataset: { tab: id }, onclick: () => { this.closeDrawer(); onclick(); } },
+      h('span', { html: ic }), h('span', {}, label), badge);
+    this.drawerMore = h('nav', { class: 'fam-drawer-more', 'aria-label': 'More' },
+      h('div', { class: 'fam-drawer-title' }, 'More'),
+      TABS.filter(([id]) => !PHONE_TABS.has(id)).map(([id, label, ic]) => moreBtn(id, label, ic, () => this.go(id))),
+      this.isParentUser() ? moreBtn('approvals', 'Approvals', ICONS.approve, () => this.go('approvals'), this.drawerApprovalBadge = h('span', { class: 'fam-list-count', hidden: true })) : null,
+      moreBtn('settings', 'Settings', ICONS.settings, () => this.go('settings')),
+      moreBtn('sleep', 'Sleep', ICONS.sleep, () => this.sleep(true)));
     this.drawer = h('div', { class: 'fam-drawer', hidden: true, onkeydown: (e) => { if (e.key === 'Escape') this.closeDrawer(); } },
       h('div', { class: 'fam-drawer-shade', onclick: () => this.closeDrawer() }),
       h('div', { class: 'fam-drawer-panel', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Menu' },
         h('div', { class: 'fam-drawer-head' }, this.drawerTitle, h('button', { class: 'fam-icon-btn', 'aria-label': 'Close the menu', html: ICONS.close, onclick: () => this.closeDrawer() })),
-        this.drawerBody));
+        h('div', { class: 'fam-drawer-body' }, this.drawerBody, this.drawerMore)));
     clear(this.root, this.rail, this.subnav, h('div', { class: 'fam-content' }, this.header, this.main), this.drawer);
     this.drawFilter();
     this.updateApprovalBadge();
@@ -179,7 +204,8 @@ class FamilyOrganizer {
     this.tab = tab;
     this.prefs.tab = tab;
     savePrefs(this.prefs);
-    for (const b of this.rail.querySelectorAll('.fam-rail-btn')) b.classList.toggle('on', b.dataset.tab === tab);
+    for (const b of this.root.querySelectorAll('.fam-rail .fam-rail-btn, .fam-drawer-more .fam-rail-btn')) b.classList.toggle('on', b.dataset.tab === tab);
+    this.moreTab.classList.toggle('on', !PHONE_TABS.has(tab));
     this.root.dataset.tab = tab;
     if (tab === 'lists' && section) this.views.lists.listId = section;
     const view = this.views[tab];
@@ -187,12 +213,22 @@ class FamilyOrganizer {
     this.subnav.hidden = true;
     clear(this.subnav);
     this.closeDrawer();
-    this.menuBtn.hidden = true;
+    this.drawerBody.hidden = true;
     clear(this.drawerBody);
+    this.drawerTitle.textContent = 'Menu';
+    this.setPageTitle(this.tabName(tab));
     const el = h('div', { class: `fam-view fam-view-${tab}` });
     clear(this.main, el);
     if (tab === 'settings') view.render(el, section); else view.render(el);
-    this.win.setTitle(tab === 'calendar' ? 'Family Organizer' : `Family Organizer — ${tab === 'settings' ? 'Settings' : tab === 'approvals' ? 'Approvals' : TABS.find((t) => t[0] === tab)[1]}`);
+    this.win.setTitle(tab === 'calendar' ? 'Family Organizer' : `Family Organizer — ${this.tabName(tab)}`);
+  }
+
+  tabName(tab) { return TAB_NAMES[tab] || TABS.find((t) => t[0] === tab)?.[1] || ''; }
+
+  isPhone() { return this.phoneMq.matches; }
+
+  setPageTitle(name, part = '') {
+    clear(this.pageTitle, h('b', {}, name), part && part !== name ? h('span', {}, part) : null);
   }
 
   // A section's parts (Calendar's views, Chores and Routines, Meal plan and Recipe box, Lists,
@@ -207,10 +243,9 @@ class FamilyOrganizer {
       h('span', {}, ...String(label ?? '').split('/').flatMap((part, i) => (i ? ['/', h('wbr'), part] : [part]))), more.extra || null));
     if (after) buttons.push(after);
     const tab = this.tab;
-    // Phone ↔ wide (a window resized, a tablet turned): the menu moves.
-    this.subMq ||= matchMedia('(max-width: 760px)');
-    this.subMq.onchange = () => { if (this.tab && this.main.firstElementChild) this.go(this.tab); };
-    if (!this.subMq.matches) {
+    const on = items.find((it) => it[0] === current);
+    this.setPageTitle(this.tabName(tab), on ? String(on[1]) : '');
+    if (!this.isPhone()) {
       this.subnav.hidden = false;
       this.subnav.className = `fam-subrail fam-subrail-${tab} ${cls}`;
       clear(this.subnav, h('div', { class: 'fam-subrail-title' }, title), buttons);
@@ -223,14 +258,12 @@ class FamilyOrganizer {
     this.drawer.className = `fam-drawer fam-drawer-${tab} ${cls} ${this.drawer.hidden ? '' : 'open'}`;
     this.drawerTitle.textContent = title;
     clear(this.drawerBody, buttons);
-    this.menuBtn.hidden = false;
-    const on = items.find((it) => it[0] === current);
-    this.menuBtn.title = on ? `${title}: ${on[1]}` : title;
+    this.drawerBody.hidden = false;
     return null;
   }
 
   openDrawer() {
-    if (!this.drawer.hidden || this.menuBtn.hidden) return;
+    if (!this.drawer.hidden) return;
     this.drawer.hidden = false;
     this.menuBtn.setAttribute('aria-expanded', 'true');
     // Next frame, so the panel slides in rather than appearing.
@@ -244,7 +277,7 @@ class FamilyOrganizer {
     this.drawer.classList.remove('open');
     this.drawer.hidden = true;
     this.menuBtn.setAttribute('aria-expanded', 'false');
-    if (wasOpen && !this.menuBtn.hidden) this.menuBtn.focus({ preventScroll: true });
+    if (wasOpen) this.menuBtn.focus({ preventScroll: true });
   }
 
   // Redraw after a change, keeping the place you were typing.
@@ -271,6 +304,9 @@ class FamilyOrganizer {
     const n = this.views.approvals.count();
     this.approvalBadge.hidden = !n;
     this.approvalBadge.textContent = n > 99 ? '99+' : String(n);
+    // Phones: Approvals is under More, so More and ☰ show there's something waiting.
+    for (const b of [this.moreBadge, this.drawerApprovalBadge]) { if (b) { b.hidden = !n; b.textContent = this.approvalBadge.textContent; } }
+    if (this.menuBadge) this.menuBadge.hidden = !n;
   }
 
   changed(what) {
@@ -299,6 +335,60 @@ class FamilyOrganizer {
         },
       }, avatar(m, 'md'))),
     ] : null);
+    // The phone's one button: everyone, or the faces of whoever's picked.
+    this.peopleBtn.hidden = !members.length;
+    const picked = members.filter((m) => this.filter.has(m.id));
+    clear(this.peopleBtn, picked.length
+      ? h('span', { class: 'fam-people-faces' }, picked.slice(0, 3).map((m) => avatar(m, 'xs')), picked.length > 3 ? h('small', {}, `+${picked.length - 3}`) : null)
+      : [h('span', { class: 'fam-people-icon', html: ICONS.family }), h('span', {}, 'All')]);
+    this.peopleBtn.classList.toggle('on', Boolean(picked.length));
+  }
+
+  // Phones: pick whose things to show, in a sheet (tap people to add or take them away).
+  choosePeople() {
+    const members = this.store.members();
+    const body = h('div', { class: 'fam-people-pick' });
+    const set = (next) => { this.filter = next; this.prefs.filter = [...next]; savePrefs(this.prefs); this.drawFilter(); this.refresh(); draw(); };
+    const draw = () => clear(body,
+      h('button', { type: 'button', class: `fam-people-row ${this.filter.size ? '' : 'on'}`, onclick: () => set(new Set()) },
+        h('span', { class: 'fam-people-icon', html: ICONS.family }), h('span', {}, 'Everyone'), h('span', { class: 'fam-people-check', html: ICONS.check })),
+      members.map((m) => h('button', {
+        type: 'button', class: `fam-people-row ${this.filter.has(m.id) ? 'on' : ''}`, style: { '--c': m.color },
+        onclick: () => { const next = new Set(this.filter); if (next.has(m.id)) next.delete(m.id); else next.add(m.id); set(next); },
+      }, avatar(m, 'sm'), h('span', {}, m.name), h('span', { class: 'fam-people-check', html: ICONS.check }))));
+    draw();
+    sheet(this.root, { title: 'Show', body, cls: 'fam-people-sheet', actions: [{ label: 'Done', primary: true }] });
+  }
+
+  // Phones: the one + button offers quick add, and adding whatever fits the screen you're on.
+  addMenu() {
+    const v = this.views[this.tab];
+    const label = {
+      calendar: 'New event', chores: v?.mode === 'routines' ? 'New routine' : 'New chore', rewards: 'New reward',
+      meals: v?.tab === 'recipes' ? 'New recipe' : 'Plan a meal', lists: 'Add to this list', photos: 'Add photos',
+    }[this.tab] || 'New event';
+    const s = sheet(this.root, {
+      title: 'Add', cls: 'fam-add-sheet',
+      body: h('div', { class: 'fam-add-menu' },
+        h('button', { type: 'button', class: 'fam-add-choice', onclick: () => { s.close(); this.calendar.quickAdd(); } },
+          h('span', { html: ICONS.sparkle }), h('span', {}, h('b', {}, 'Quick add'), h('small', {}, 'Type an event the way you’d say it'))),
+        h('button', { type: 'button', class: 'fam-add-choice', onclick: () => { s.close(); this.add(); } },
+          h('span', { html: ICONS.plus }), h('span', {}, h('b', {}, label)))),
+    });
+  }
+
+  // A toolbar's less-used buttons: as they are on a big screen, behind one ⋯ button on a phone.
+  toolbarMore(buttons, title = 'More') {
+    buttons = buttons.filter(Boolean);
+    if (!buttons.length || !this.isPhone()) return buttons;
+    let open = null;
+    for (const b of buttons) {
+      if (b.tagName === 'BUTTON') b.type = 'button';
+      // Close the sheet first, so whatever the button opens comes up on top.
+      b.addEventListener('click', () => open?.close(), { capture: true });
+    }
+    return h('button', { class: 'fam-icon-btn fam-toolbar-more', title, 'aria-label': title, html: ICONS.more,
+      onclick: () => { open = sheet(this.root, { title, cls: 'fam-more-sheet', body: h('div', { class: 'fam-more-list' }, buttons) }); } });
   }
 
   // The + button adds whatever fits the screen you're on.

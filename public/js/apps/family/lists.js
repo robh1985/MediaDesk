@@ -207,11 +207,13 @@ export class ListsView {
       (list.members || []).length ? h('span', { class: 'fam-list-for' }, 'For ', list.members.map((id) => this.store.member(id)).filter(Boolean).map((m) => h('span', {}, avatar(m, 'xs'), m.name))) : null,
       h('div', { class: 'fam-spacer' }),
       items.length ? h('button', { class: 'fam-btn primary fam-shop-btn', title: 'The list on the whole screen, big, for the store', onclick: () => shoppingMode(this, list) }, list.kind === 'grocery' ? '🛒 Shopping' : '⛶ Full screen') : null,
-      done.length ? h('button', { class: 'fam-btn', onclick: () => { this.showDone = !this.showDone; this.render(this.el); } }, this.showDone ? 'Hide ticked' : `Show ticked (${done.length})`) : null,
-      done.length ? h('button', { class: 'fam-btn', onclick: () => this.clearDone(list, done) }, 'Clear ticked') : null,
-      list.kind === 'grocery' ? h('button', { class: 'fam-btn', onclick: () => this.browseFoods(list) }, '🥕 Foods') : null,
-      list.kind === 'grocery' ? h('button', { class: 'fam-btn', onclick: () => this.manageAisles() }, '🗂️ Aisles') : null,
-      h('button', { class: 'fam-icon-btn', title: 'List settings', html: ICONS.edit, onclick: () => this.editList(list) }));
+      this.app.toolbarMore([
+        done.length ? h('button', { class: 'fam-btn', onclick: () => { this.showDone = !this.showDone; this.render(this.el); } }, this.showDone ? 'Hide ticked' : `Show ticked (${done.length})`) : null,
+        done.length ? h('button', { class: 'fam-btn', onclick: () => this.clearDone(list, done) }, 'Clear ticked') : null,
+        list.kind === 'grocery' ? h('button', { class: 'fam-btn', onclick: () => this.browseFoods(list) }, '🥕 Foods') : null,
+        list.kind === 'grocery' ? h('button', { class: 'fam-btn', onclick: () => this.manageAisles() }, '🗂️ Aisles') : null,
+        this.app.isPhone() ? h('button', { class: 'fam-btn', onclick: () => this.editList(list) }, h('span', { html: ICONS.edit }), 'List settings') : null], `${list.title}`),
+      this.app.isPhone() ? null : h('button', { class: 'fam-icon-btn', title: 'List settings', html: ICONS.edit, onclick: () => this.editList(list) }));
     const body = h('div', { class: 'fam-list-items' });
     const visible = items.filter((i) => this.showDone || !i.done);
     if (list.kind === 'grocery' && list.group !== false) {
@@ -226,7 +228,12 @@ export class ListsView {
       if (ticked.length) body.append(h('div', { class: 'fam-aisle' }, '✓ In the cart'), ...ticked.map((i) => this.row(i, list)));
     } else body.append(...visible.map((i) => this.row(i, list)));
     if (!items.length) body.append(h('div', { class: 'fam-muted fam-list-empty' }, 'This list is empty.'));
-    clear(main, head, h('div', { class: `fam-list-add ${grocery ? 'grocery' : ''}` }, h('div', { class: 'fam-list-entry-wrap' }, entry, sugg), qtyIn, brandIn, kindIn?.el, brands, h('button', { class: 'fam-btn primary', onclick: add }, 'Add')), body);
+    // Phones: just the item box; quantity, brand and kind are behind the ⋯ beside it.
+    const phone = grocery && this.app.isPhone();
+    const details = h('div', { class: 'fam-list-details', hidden: phone && !this.detailsOpen }, qtyIn, brandIn, kindIn?.el, brands);
+    const detailsBtn = phone ? h('button', { class: `fam-icon-btn fam-list-details-btn ${this.detailsOpen ? 'on' : ''}`, title: 'Quantity, brand and kind', 'aria-label': 'Quantity, brand and kind', 'aria-expanded': String(Boolean(this.detailsOpen)), html: ICONS.sliders,
+      onclick: () => { this.detailsOpen = !this.detailsOpen; details.hidden = !this.detailsOpen; detailsBtn.classList.toggle('on', this.detailsOpen); detailsBtn.setAttribute('aria-expanded', String(this.detailsOpen)); if (this.detailsOpen) qtyIn.focus(); else entry.focus(); } }) : null;
+    clear(main, head, h('div', { class: `fam-list-add ${grocery ? 'grocery' : ''}` }, h('div', { class: 'fam-list-entry-wrap' }, entry, sugg), detailsBtn, h('button', { class: 'fam-btn primary', onclick: add }, 'Add'), grocery ? details : null), body);
   }
 
   row(i, list, aisle = null) {

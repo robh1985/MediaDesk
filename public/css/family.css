@@ -939,7 +939,7 @@ h3.fam-bk-h { font-size: .9em; letter-spacing: .14em; text-transform: uppercase;
 
 /* Phones: a section's parts (Calendar views, Chores/Routines, Meals, Lists, Settings) in a drawer
    that slides in from the left, opened with the ☰ button at the top left. */
-.fam-menu-btn[hidden] { display: none; }
+
 .fam-menu-btn { margin-left: -6px; }
 .fam-drawer { position: absolute; inset: 0; z-index: 45; }
 .fam-drawer[hidden] { display: none; }
@@ -1081,3 +1081,111 @@ h3.fam-bk-h { font-size: .9em; letter-spacing: .14em; text-transform: uppercase;
 .fam-drawer .fam-rail-btn .fam-list-count { max-width: none; overflow: visible; text-overflow: clip; }
 .fam-drawer .fam-rail-btn > .fam-sub-extra { max-width: none; overflow: visible; }
 .fam-rail-btn .fam-sub-extra .fam-list-count { width: auto; height: 18px; }
+
+/* Phone clean-up: ☰ and More, the page title, one people button, one add button, folded toolbars,
+   the month with dots, recipe filters and grocery details tucked away. Wide screens are unchanged. */
+.fam-page-title, .fam-people-btn, .fam-rail-morebtn, .fam-drawer-more { display: none; }
+.fam-menu-btn { display: none; position: relative; }
+.fam-menu-dot { position: absolute; top: 5px; right: 5px; width: 9px; height: 9px; border-radius: 50%; background: #e03131; box-shadow: 0 0 0 2px var(--f-bg); }
+.fam-menu-dot[hidden] { display: none; }
+.fam-list-details { display: contents; }
+.fam-list-add.grocery > .fam-btn.primary { order: 2; }
+.fam-recipe-more { display: contents; }
+.fam-month-day { display: none; }
+@media (max-width: 760px) {
+  /* 1. Bottom bar: Calendar, Chores, Meals, Lists and More. */
+  .fam-rail .fam-rail-extra { display: none; }
+  .fam-rail .fam-rail-morebtn { display: flex; }
+  .fam-drawer-more { display: flex; flex-direction: column; gap: 2px; }
+  .fam-drawer-part:not([hidden]) + .fam-drawer-more { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--f-line); }
+  .fam-drawer-more > .fam-drawer-title { padding: 6px 8px 4px; }
+  .fam-drawer-part[hidden] { display: none; }
+  .fam-drawer-part { display: flex; flex-direction: column; gap: 2px; }
+  .fam-drawer .fam-list-count { position: static; min-width: 20px; height: 20px; padding: 0 6px; box-sizing: border-box; border-radius: 10px; background: #e03131; color: #fff; font-size: 11.5px; line-height: 20px; text-align: center; }
+  .fam-drawer .fam-sub-extra .fam-list-count { background: var(--rc); }
+  .fam-drawer .fam-list-count[hidden] { display: none; }
+  .fam-menu-btn { display: inline-flex; }
+  /* 2. One people button. */
+  .fam-header .fam-filter { display: none; }
+  .fam-people-btn { display: inline-flex; align-items: center; gap: 5px; height: 36px; padding: 0 10px; border: 1px solid var(--f-line); background: var(--f-panel); border-radius: 999px; cursor: pointer; font-size: 13px !important; font-weight: 600; flex: none; }
+  .fam-people-btn[hidden] { display: none; }
+  .fam-people-btn.on { border-color: var(--f-accent); padding: 0 6px; }
+  .fam-people-icon { display: inline-flex; width: 18px; height: 18px; }
+  .fam-people-icon svg { width: 100%; height: 100%; }
+  .fam-people-faces { display: inline-flex; align-items: center; }
+  .fam-people-faces .fam-avatar + .fam-avatar { margin-left: -6px; }
+  .fam-people-faces small { margin-left: 3px; font-weight: 700; }
+  /* 3. One add button. */
+  .fam-header .fam-quick-btn { display: none; }
+  .fam-add-btn { width: 40px; padding: 0; }
+  /* 9. The page's name instead of the clock; 10. a smaller weather pill. */
+  .fam-header .fam-clock { display: none; }
+  .fam-page-title { display: flex; flex-direction: column; line-height: 1.1; min-width: 0; }
+  .fam-page-title b { font-size: 19px; font-weight: 750; letter-spacing: -.01em; white-space: nowrap; }
+  .fam-page-title span { font-size: 12.5px; color: var(--f-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .fam-header .fam-weather { background: none; box-shadow: none; padding: 4px 2px; gap: 3px; }
+  .fam-header .fam-weather b { font-size: 14px; font-weight: 600; }
+  .fam-header .fam-wx-icon { font-size: 17px; }
+  .fam-header { flex-wrap: nowrap; }
+  /* 4. One countdown, with +N for the rest. */
+  .fam-countdown-more { font-weight: 700; color: var(--f-muted) !important; background: var(--f-panel); }
+  /* 5. A toolbar's extra buttons behind ⋯. */
+  .fam-more-list { display: flex; flex-direction: column; gap: 6px; }
+  .fam-more-list > .fam-btn { justify-content: flex-start; height: 46px; font-size: 15px !important; }
+  /* 6. Grocery details behind a button. */
+  .fam-list-add.grocery { flex-wrap: wrap; }
+  .fam-list-add.grocery .fam-list-entry-wrap { flex: 1 1 0; min-width: 0; }
+  .fam-list-details-btn { height: 38px; width: 38px; border: 1px solid var(--f-line); }
+  .fam-list-details-btn.on { background: color-mix(in srgb, var(--f-accent) 14%, transparent); border-color: var(--f-accent); }
+  .fam-list-details { display: flex; flex-wrap: wrap; gap: 8px; order: 3; flex: 1 1 100%; }
+  .fam-list-details[hidden] { display: none; }
+  .fam-list-details .fam-list-qty { flex: 0 0 72px; width: 72px; }
+  .fam-list-details .fam-list-brand { flex: 1 1 120px; }
+  .fam-list-details .fam-flavor-wrap { flex: 1 1 100%; }
+  /* 7. The month with dots, and the picked day below. */
+  .fam-cal-month { display: flex; flex-direction: column; gap: 8px; overflow-y: auto; }
+  .fam-month.phone { flex: none; grid-template-rows: auto repeat(var(--weeks), 48px); background: var(--f-panel); border-radius: var(--f-radius); box-shadow: var(--f-shadow); }
+  .fam-month.phone .fam-month-cell { border: 0; background: none; display: flex; flex-direction: column; align-items: center; justify-content: flex-start; gap: 3px; padding: 4px 0; color: inherit; }
+  .fam-month.phone .fam-month-cell.other { opacity: .45; }
+  .fam-month.phone .fam-daynum { display: grid; place-items: center; width: 30px; height: 30px; cursor: inherit; }
+  .fam-month.phone .fam-month-cell.picked .fam-daynum { box-shadow: inset 0 0 0 2px var(--f-accent); }
+  .fam-month.phone .fam-month-cell.today .fam-daynum { background: var(--f-accent); color: #fff !important; }
+  .fam-month-dots { display: flex; gap: 3px; height: 6px; align-items: center; }
+  .fam-month-dots i { width: 6px; height: 6px; border-radius: 50%; }
+  .fam-month-dots b { font-size: 10px; line-height: 6px; color: var(--f-muted); }
+  .fam-month-day { display: flex; flex-direction: column; gap: 2px; flex: none; background: var(--f-panel); border-radius: var(--f-radius); box-shadow: var(--f-shadow); padding: 10px; }
+  .fam-month-day-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 0 4px 6px; }
+  .fam-month-day-head .fam-btn { height: 32px; padding: 0 10px; font-size: 13px !important; }
+  .fam-month-none { padding: 6px 8px 4px; }
+  /* 8. Recipe filters behind Filter. */
+  .fam-recipe-filters .fam-recipe-search { flex: 1 1 0; min-width: 0; }
+  .fam-filter-toggle.on { border-color: var(--f-accent); color: var(--f-accent) !important; }
+  .fam-recipe-more { display: flex; flex-wrap: wrap; gap: 8px; flex: 1 1 100%; }
+  .fam-recipe-more[hidden] { display: none; }
+  .fam-recipe-more .fam-recipe-filter { flex: 1 1 140px; }
+}
+/* The phone's people picker and add menu */
+.fam-people-pick { display: flex; flex-direction: column; gap: 4px; }
+.fam-people-row { --c: var(--f-accent); display: flex; align-items: center; gap: 12px; padding: 8px 10px; border: 0; border-radius: 12px; background: var(--f-panel2); cursor: pointer; font-size: 15px !important; text-align: left; }
+.fam-people-row > span:nth-child(2) { flex: 1; font-weight: 600; }
+.fam-people-row .fam-people-icon { display: inline-flex; width: 30px; height: 30px; padding: 4px; box-sizing: border-box; }
+.fam-people-check { width: 22px; height: 22px; opacity: 0; color: var(--c); }
+.fam-people-check svg { width: 100%; height: 100%; }
+.fam-people-row.on { background: color-mix(in srgb, var(--c) 14%, var(--f-panel)); }
+.fam-people-row.on .fam-people-check { opacity: 1; }
+.fam-add-menu { display: flex; flex-direction: column; gap: 8px; }
+.fam-add-choice { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border: 1px solid var(--f-line); border-radius: 14px; background: var(--f-panel2); cursor: pointer; text-align: left; }
+.fam-add-choice > span:first-child { display: inline-flex; width: 24px; height: 24px; color: var(--f-accent); flex: none; }
+.fam-add-choice svg { width: 100%; height: 100%; }
+.fam-add-choice > span:last-child { display: flex; flex-direction: column; gap: 2px; }
+.fam-add-choice b { font-size: 16px; }
+.fam-add-choice small { color: var(--f-muted); }
+@media (max-width: 760px) {
+  /* The header already names the page and its part. */
+  .fam-view-settings > .fam-toolbar, .fam-view-meals > .fam-toolbar > .fam-toolbar-title { display: none; }
+  .fam-cal.fam-cal-month { background: none; box-shadow: none; border-radius: 0; }
+}
+@media (max-width: 760px) {
+  /* Chores: the + at the top adds a chore, so the toolbar stays on one line. */
+  .fam-view-chores > .fam-toolbar > .fam-btn.primary { display: none; }
+}

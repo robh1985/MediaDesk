@@ -32,7 +32,15 @@ export class MealsView {
     this.el = el;
     const weekStart = startOfWeek(this.date, Number(this.store.settings.weekStart) || 0);
     // Meal plan and Recipe box: a menu beside the left one.
-    const row = this.app.subMenu('Meals', [['plan', 'Meal plan', ICONS.calendar, '#e8590c'], ['recipes', 'Recipe box', ICONS.book, '#c2255c']], this.tab, (id) => { this.tab = id; this.render(el); });
+    // Phones: the cookbooks go in the same menu, under Recipe box.
+    const phone = this.app.isPhone();
+    const books = phone ? this.box.cookbooks() : [];
+    const current = this.tab === 'recipes' && phone && this.box.book ? `book:${this.box.book}` : this.tab;
+    const row = this.app.subMenu('Meals', [['plan', 'Meal plan', ICONS.calendar, '#e8590c'], ['recipes', phone ? 'All recipes' : 'Recipe box', ICONS.book, '#c2255c'],
+      ...books.map((b) => [`book:${b.id}`, b.name, b.emoji || '📕', b.color || '#e8590c', { cls: 'fam-drawer-book' }])], current, (id) => {
+      if (id.startsWith('book:')) { this.tab = 'recipes'; this.box.book = id.slice(5); } else { this.tab = id; if (id === 'recipes') this.box.book = null; }
+      this.render(el);
+    }, '', { after: phone ? h('div', { class: 'fam-sub-after' }, h('button', { class: 'fam-rail-btn fam-list-tab add', style: { '--rc': '#868e96' }, onclick: () => this.box.editBook(null) }, h('span', { html: ICONS.plus }), h('span', {}, 'New cookbook'))) : null });
     const bar = h('div', { class: 'fam-toolbar' },
       h('div', { class: 'fam-toolbar-title' }, this.tab === 'plan' ? 'Meal plan' : 'Recipe box'),
       this.tab === 'plan' ? h('div', { class: 'fam-nav' },
@@ -40,9 +48,10 @@ export class MealsView {
         h('button', { class: 'fam-btn', onclick: () => { this.date = startOfDay(new Date()); this.render(el); } }, `Week of ${fmtDate(weekStart, { month: 'short', day: 'numeric' })}`),
         h('button', { class: 'fam-icon-btn', 'aria-label': 'Next week', html: ICONS.right, onclick: () => { this.date = addDays(this.date, 7); this.render(el); } })) : null,
       h('div', { class: 'fam-spacer' }),
-      this.tab === 'plan' ? h('button', { class: 'fam-btn', onclick: () => this.weekGroceries(weekStart) }, h('span', { html: ICONS.cart }), 'Groceries for the week') : null,
-      this.tab === 'plan' ? h('button', { class: 'fam-btn', onclick: () => this.fillWeek(weekStart) }, h('span', { html: ICONS.dice }), 'Plan dinners for me') : null,
-      this.tab === 'recipes' ? h('button', { class: 'fam-btn', onclick: () => this.box.fromWebsite() }, '🌐 From a website') : null,
+      this.app.toolbarMore([
+        this.tab === 'plan' ? h('button', { class: 'fam-btn', onclick: () => this.weekGroceries(weekStart) }, h('span', { html: ICONS.cart }), 'Groceries for the week') : null,
+        this.tab === 'plan' ? h('button', { class: 'fam-btn', onclick: () => this.fillWeek(weekStart) }, h('span', { html: ICONS.dice }), 'Plan dinners for me') : null,
+        this.tab === 'recipes' ? h('button', { class: 'fam-btn', onclick: () => this.box.fromWebsite() }, '🌐 From a website') : null]),
       this.tab === 'recipes' ? h('button', { class: 'fam-btn primary', onclick: () => this.editRecipe(null) }, h('span', { html: ICONS.plus }), 'Recipe') : null);
     const body = h('div', { class: 'fam-meals-body' });
     clear(el, row, bar, body);
