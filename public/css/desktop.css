@@ -2259,3 +2259,31 @@ button.notes-st:hover { background: var(--hover); color: var(--text); }
 @media (pointer: coarse) { .fm-drive-x { opacity: .7; } }
 .fm-connect-drive { color: var(--accent); }
 .fm-usb-big svg { width: 48px; height: 48px; }
+
+/* Settings: every page is listed in a drawer that slides in from the left, opened with the ☰
+   button at the top left. General holds Overview, Appearance, Dock & Desktop and Screensaver as tabs. */
+.settings-layout { position: relative; }
+.settings-pages > .pane-header:first-child { padding-left: 44px; min-height: 34px; }
+.settings-menu-btn { position: absolute; top: 18px; left: 18px; z-index: 6; width: 34px; height: 34px; background: var(--surface); border: 1px solid var(--border); box-shadow: 0 1px 3px rgba(0, 0, 0, .08); }
+.settings-menu-btn svg { width: 18px; height: 18px; }
+.settings-tabs { display: flex; width: max-content; max-width: 100%; overflow-x: auto; scrollbar-width: none; margin: -4px 0 18px; }
+.settings-tabs .seg-btn { white-space: nowrap; padding: 5px 14px; }
+.settings-drawer { position: absolute; inset: 0; z-index: 20; }
+.settings-drawer[hidden] { display: none; }
+.settings-drawer-shade { position: absolute; inset: 0; background: rgba(15, 18, 25, .32); opacity: 0; transition: opacity .2s; }
+.settings-drawer.open .settings-drawer-shade { opacity: 1; }
+.settings-drawer-panel { position: absolute; top: 0; bottom: 0; left: 0; width: min(270px, 84%); display: flex; flex-direction: column; background: var(--surface); border-right: 1px solid var(--border); box-shadow: 4px 0 24px rgba(0, 0, 0, .18); transform: translateX(-100%); transition: transform .22s ease-out; }
+.settings-drawer.open .settings-drawer-panel { transform: none; }
+.settings-drawer-head { display: flex; align-items: center; justify-content: space-between; padding: 12px 10px 6px 18px; font-size: 12px; font-weight: 750; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); }
+.settings-drawer-list { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; display: flex; flex-direction: column; gap: 2px; padding: 4px 10px 14px; }
+.settings-drawer-list .nav-item { flex: none; }
+.settings-nav-parts { display: flex; flex-direction: column; gap: 2px; margin: 0 0 4px 18px; padding-left: 8px; border-left: 1px solid var(--border); }
+.settings-nav-part { padding: 6px 10px; font-weight: 500; }
+.settings-nav-group.active { background: none; color: var(--text); }
+.settings-nav-heading { margin: 10px 10px 2px; font-size: 11px; font-weight: 750; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); }
+.settings-nav-sep { height: 1px; margin: 8px 10px; background: var(--border); }
+@media (prefers-reduced-motion: reduce) { .settings-drawer-shade, .settings-drawer-panel { transition: none; } }
+@media (max-width: 760px) {
+  .settings-menu-btn { top: 12px; left: 12px; }
+  .settings-pages > .pane-header:first-child { padding-left: 42px; }
+}
