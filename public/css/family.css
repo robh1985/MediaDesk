@@ -936,3 +936,27 @@ h3.fam-bk-h { font-size: .9em; letter-spacing: .14em; text-transform: uppercase;
 .fam-dark .fam-shop-item.done { opacity: .55; }
 .fam-dark .fam-shop-chip.on span { color: #fff; background: rgba(255, 255, 255, .22); }
 .fam-dark .fam-item-text small.fam-item-qty { color: color-mix(in srgb, var(--c) 55%, #fff); }
+
+/* Phones: a section's parts (Calendar views, Chores/Routines, Meals, Lists, Settings) in a drawer
+   that slides in from the left, opened with the ☰ button at the top left. */
+.fam-menu-btn[hidden] { display: none; }
+.fam-menu-btn { margin-left: -6px; }
+.fam-drawer { position: absolute; inset: 0; z-index: 45; }
+.fam-drawer[hidden] { display: none; }
+.fam-drawer-shade { position: absolute; inset: 0; background: rgba(15, 18, 25, .38); opacity: 0; transition: opacity .2s; }
+.fam-drawer.open .fam-drawer-shade { opacity: 1; }
+.fam-drawer-panel { position: absolute; top: 0; bottom: 0; left: 0; width: min(280px, 82%); display: flex; flex-direction: column; background: var(--f-panel); box-shadow: 4px 0 24px rgba(0,0,0,.18); padding-top: env(safe-area-inset-top); transform: translateX(-100%); transition: transform .22s ease-out; }
+.fam-drawer.open .fam-drawer-panel { transform: none; }
+.fam-drawer-head { display: flex; align-items: center; justify-content: space-between; padding: 12px 10px 6px 18px; }
+.fam-drawer-title { font-size: 12px; font-weight: 750; letter-spacing: .06em; text-transform: uppercase; color: var(--f-muted); }
+.fam-drawer-body { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; display: flex; flex-direction: column; gap: 2px; padding: 4px 10px calc(14px + env(safe-area-inset-bottom)); }
+.fam-drawer .fam-rail-btn { flex: none; min-width: 0; flex-direction: row; justify-content: flex-start; gap: 12px; padding: 8px 10px; font-size: 15px !important; text-align: left; color: var(--f-fg) !important; }
+.fam-drawer .fam-rail-btn > span:first-child { width: 22px; height: 22px; padding: 6px; flex: none; }
+.fam-drawer .fam-rail-btn > span:nth-child(2) { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fam-drawer .fam-rail-emoji { font-size: 20px; }
+.fam-drawer .fam-sub-extra { flex: none; }
+.fam-drawer .fam-sub-extra .fam-list-count { position: static; }
+.fam-drawer .fam-sub-after { display: flex; flex-direction: column; gap: 2px; margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--f-line); }
+.fam-drawer .fam-lists-hidden { flex-direction: row; justify-content: center; gap: 6px; margin-top: 4px; }
+@media (prefers-reduced-motion: reduce) { .fam-drawer-shade, .fam-drawer-panel { transition: none; } }
+.fam-drawer .fam-list-tab.add > span:first-child { box-sizing: content-box; width: 20px; height: 20px; }

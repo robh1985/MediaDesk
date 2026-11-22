@@ -129,8 +129,10 @@ class FamilyOrganizer {
       h('div', { class: 'fam-rail-gap' }),
       h('button', { class: 'fam-rail-btn small', style: { '--rc': RAIL_COLORS.sleep }, title: 'Sleep', onclick: () => this.sleep(true) }, h('span', { html: ICONS.sleep }), h('span', {}, 'Sleep')),
       h('button', { class: 'fam-rail-btn small', style: { '--rc': RAIL_COLORS.settings }, dataset: { tab: 'settings' }, onclick: () => this.go('settings') }, h('span', { html: ICONS.settings }), h('span', {}, 'Settings')));
+    // On a phone, a section's parts (subMenu) live in a drawer on the left, opened from here.
+    this.menuBtn = h('button', { class: 'fam-icon-btn fam-menu-btn', hidden: true, 'aria-label': 'Open the menu', 'aria-expanded': 'false', html: ICONS.menu, onclick: () => this.openDrawer() });
     this.header = h('header', { class: 'fam-header' },
-      this.clock, this.wx,
+      this.menuBtn, this.clock, this.wx,
       h('div', { class: 'fam-spacer' }),
       this.filterEl,
       h('button', { class: 'fam-btn fam-quick-btn', title: 'Type events the way you’d say them', onclick: () => this.calendar.quickAdd() }, h('span', { html: ICONS.sparkle }), h('span', { class: 'fam-hide-sm' }, 'Quick add')),
@@ -142,7 +144,14 @@ class FamilyOrganizer {
     this.main = h('main', { class: 'fam-main' });
     // A second menu beside the left one, for a section with parts of its own (Settings).
     this.subnav = h('nav', { class: 'fam-subrail', hidden: true });
-    clear(this.root, this.rail, this.subnav, h('div', { class: 'fam-content' }, this.header, this.main));
+    this.drawerTitle = h('div', { class: 'fam-drawer-title' });
+    this.drawerBody = h('nav', { class: 'fam-drawer-body' });
+    this.drawer = h('div', { class: 'fam-drawer', hidden: true, onkeydown: (e) => { if (e.key === 'Escape') this.closeDrawer(); } },
+      h('div', { class: 'fam-drawer-shade', onclick: () => this.closeDrawer() }),
+      h('div', { class: 'fam-drawer-panel', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Menu' },
+        h('div', { class: 'fam-drawer-head' }, this.drawerTitle, h('button', { class: 'fam-icon-btn', 'aria-label': 'Close the menu', html: ICONS.close, onclick: () => this.closeDrawer() })),
+        this.drawerBody));
+    clear(this.root, this.rail, this.subnav, h('div', { class: 'fam-content' }, this.header, this.main), this.drawer);
     this.drawFilter();
     this.updateApprovalBadge();
   }
@@ -177,19 +186,23 @@ class FamilyOrganizer {
     // A section with parts of its own puts them back as it draws (subMenu).
     this.subnav.hidden = true;
     clear(this.subnav);
+    this.closeDrawer();
+    this.menuBtn.hidden = true;
+    clear(this.drawerBody);
     const el = h('div', { class: `fam-view fam-view-${tab}` });
     clear(this.main, el);
     if (tab === 'settings') view.render(el, section); else view.render(el);
     this.win.setTitle(tab === 'calendar' ? 'Family Organizer' : `Family Organizer — ${tab === 'settings' ? 'Settings' : tab === 'approvals' ? 'Approvals' : TABS.find((t) => t[0] === tab)[1]}`);
   }
 
-  // A section's parts (Calendar's views, Chores and Routines, Meal plan and Recipe box, Settings'
-  // pages) as a menu beside the left one, styled like it. On a phone, where there's no room
-  // beside it, the menu is returned to be put at the top of the section instead.
+  // A section's parts (Calendar's views, Chores and Routines, Meal plan and Recipe box, Lists,
+  // Settings' pages) as a menu beside the left one, styled like it. On a phone, where there's no
+  // room beside it, they go in a drawer that slides in from the left (the ☰ button at the top).
+  // Returns null: the section has nothing of the menu's to place itself.
   // items: [id, label, icon (an SVG, or an emoji), colour, { cls, extra }]; after: more to show below.
   subMenu(title, items, current, pick, cls = '', { after = null } = {}) {
     const buttons = items.map(([id, label, icon, color, more = {}]) => h('button', {
-      class: `fam-rail-btn ${id === current ? 'on' : ''} ${more.cls || ''}`, style: { '--rc': color }, dataset: { section: id }, 'aria-current': id === current ? 'page' : null, onclick: () => pick(id),
+      class: `fam-rail-btn ${id === current ? 'on' : ''} ${more.cls || ''}`, style: { '--rc': color }, dataset: { section: id }, 'aria-current': id === current ? 'page' : null, onclick: () => { this.closeDrawer(); pick(id); },
     }, String(icon).startsWith('<') ? h('span', { html: icon }) : h('span', { class: 'fam-rail-emoji' }, icon),
       h('span', {}, ...String(label ?? '').split('/').flatMap((part, i) => (i ? ['/', h('wbr'), part] : [part]))), more.extra || null));
     if (after) buttons.push(after);
@@ -205,7 +218,33 @@ class FamilyOrganizer {
     }
     this.subnav.hidden = true;
     clear(this.subnav);
-    return h('nav', { class: `fam-subrow ${cls}` }, buttons);
+    // Anything else in the menu (Lists' "New list") closes the drawer too.
+    after?.addEventListener('click', (e) => { if (e.target.closest('button')) this.closeDrawer(); });
+    this.drawer.className = `fam-drawer fam-drawer-${tab} ${cls} ${this.drawer.hidden ? '' : 'open'}`;
+    this.drawerTitle.textContent = title;
+    clear(this.drawerBody, buttons);
+    this.menuBtn.hidden = false;
+    const on = items.find((it) => it[0] === current);
+    this.menuBtn.title = on ? `${title}: ${on[1]}` : title;
+    return null;
+  }
+
+  openDrawer() {
+    if (!this.drawer.hidden || this.menuBtn.hidden) return;
+    this.drawer.hidden = false;
+    this.menuBtn.setAttribute('aria-expanded', 'true');
+    // Next frame, so the panel slides in rather than appearing.
+    requestAnimationFrame(() => this.drawer.classList.add('open'));
+    (this.drawerBody.querySelector('.fam-rail-btn.on') || this.drawerBody.querySelector('button'))?.focus({ preventScroll: true });
+  }
+
+  closeDrawer() {
+    if (!this.drawer || this.drawer.hidden) return;
+    const wasOpen = this.drawer.contains(document.activeElement);
+    this.drawer.classList.remove('open');
+    this.drawer.hidden = true;
+    this.menuBtn.setAttribute('aria-expanded', 'false');
+    if (wasOpen && !this.menuBtn.hidden) this.menuBtn.focus({ preventScroll: true });
   }
 
   // Redraw after a change, keeping the place you were typing.
