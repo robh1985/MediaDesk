@@ -16,6 +16,8 @@ export const GIFT_KINDS = ['christmas', 'birthday', 'gift'];
 export const isGift = (l) => GIFT_KINDS.includes(l?.kind);
 // Gift lists and the Christmas card list (which lives in the Christmas folder too).
 export const isGiftish = (l) => isGift(l) || l?.kind === 'cards';
+// A Christmas list's name: “Emma 2026 Christmas List”.
+export const christmasName = (person, year) => `${person ? `${person} ` : ''}${year} Christmas List`;
 export const KIND_LABELS = { christmas: 'Christmas list', birthday: 'Birthday list', gift: 'Gift list', cards: 'Christmas cards' };
 
 const STATUS = [['idea', '💡', 'Idea'], ['bought', '🛍️', 'Bought'], ['wrapped', '🎀', 'Wrapped'], ['given', '🎁', 'Given']];
@@ -729,7 +731,7 @@ export class GiftLists {
 
   async listsForEveryone(year, members) {
     const prev = (m) => this.view.lists().filter((l) => l.kind === 'christmas' && l.recipient === m.id).sort((a, b) => (b.year || 0) - (a.year || 0))[0];
-    const ops = members.map((m, n) => ({ op: 'put', col: 'lists', item: { id: newId(), kind: 'christmas', title: m.name, emoji: '🎄', color: m.color || '#2f9e44', recipient: m.id, year, folder: `Christmas ${year}`, reminders: [14], order: Date.now() + n, about: prev(m)?.about, budget: prev(m)?.budget } }));
+    const ops = members.map((m, n) => ({ op: 'put', col: 'lists', item: { id: newId(), kind: 'christmas', title: christmasName(m.name, year), emoji: '🎄', color: m.color || '#2f9e44', recipient: m.id, year, folder: `Christmas ${year}`, reminders: [14], order: Date.now() + n, about: prev(m)?.about, budget: prev(m)?.budget } }));
     try { await this.store.batch(ops); toast(`Made ${plural(ops.length, 'list')} for Christmas ${year}`, { type: 'success', timeout: 3000 }); } catch (err) { toastError(err); }
   }
 
@@ -763,7 +765,7 @@ export class GiftLists {
     const ops = [];
     let first = null;
     for (const l of lists) {
-      const copy = { ...l, id: newId(), year: next, folder: nextFolder, order: Date.now() + ops.length, archived: false };
+      const copy = { ...l, id: newId(), year: next, folder: nextFolder, order: Date.now() + ops.length, archived: false, title: this.nextYearTitle(l, next) };
       delete copy.shareToken; delete copy.created; delete copy.updated;
       first ||= copy.id;
       ops.push({ op: 'put', col: 'lists', item: copy });
@@ -1011,11 +1013,20 @@ export class GiftLists {
     } catch (err) { toastError(err); }
   }
 
+  // Next year's name for a Christmas list: the year in it moves on, and an old-style name (just
+  // the person's) becomes “Name Year Christmas List”.
+  nextYearTitle(l, year) {
+    if (l.kind !== 'christmas') return l.title;
+    const name = this.who(l).name || '';
+    if (!l.title || l.title === name) return christmasName(name, year);
+    return l.year && l.title.includes(String(l.year)) ? l.title.replaceAll(String(l.year), String(year)) : l.title;
+  }
+
   // A new list from an old one: same settings, the gifts nobody got to, and a fresh date.
   async reuse(l) {
     const copy = { ...l, id: newId(), title: l.kind === 'gift' ? `${l.title} (copy)` : l.title, archived: false, order: Date.now() };
     delete copy.shareToken; delete copy.created; delete copy.updated; delete copy.party;
-    if (copy.kind === 'christmas') { copy.year = Math.max(new Date().getFullYear(), (l.year || 0) + 1); copy.folder = `Christmas ${copy.year}`; }
+    if (copy.kind === 'christmas') { copy.year = Math.max(new Date().getFullYear(), (l.year || 0) + 1); copy.folder = `Christmas ${copy.year}`; copy.title = this.nextYearTitle(l, copy.year); }
     if (copy.kind === 'gift') copy.date = null;
     const ops = [{ op: 'put', col: 'lists', item: copy }, ...this.gifts(l).filter((i) => !taken(i)).map((i) => ({ op: 'put', col: 'listitems', item: resetGift(i, copy.id) }))];
     try {
@@ -1074,13 +1085,15 @@ export class GiftLists {
     const members = this.store.members();
     const d = l || { kind, emoji: tpl?.emoji || (kind === 'christmas' ? '🎄' : kind === 'birthday' ? '🎂' : '🎁'), color: tpl?.color || (kind === 'christmas' ? '#2f9e44' : kind === 'birthday' ? '#f08c00' : '#d6336c'), reminders: tpl?.reminders || (kind === 'birthday' ? [14, 2] : [14]), fields: (tpl?.fields || []).map(([label, type]) => ({ id: newId(), label, type })), occasion: tpl && tpl.id !== 'blank' ? tpl.label : '', template: tpl?.id };
     const emoji = emojiButton(d.emoji);
-    const title = input({ value: l?.title || (tpl && tpl.id !== 'blank' ? tpl.label : ''), placeholder: kind === 'christmas' ? 'Leave empty to use their name' : kind === 'birthday' ? 'Leave empty for “Name’s birthday”' : 'List name', maxlength: 80, autofocus: true });
+    const title = input({ value: l?.title || (tpl && tpl.id !== 'blank' ? tpl.label : ''), placeholder: kind === 'christmas' ? 'e.g. Emma 2026 Christmas List' : kind === 'birthday' ? 'Leave empty for “Name’s birthday”' : 'List name', maxlength: 80, autofocus: true });
     // Who it's for.
     const bdayEvents = this.store.all('events').filter((e) => e.allDay && e.rrule?.freq === 'yearly' && !String(e.id).startsWith('bday-') && /birthday|bday|b-day/i.test(e.title || ''));
-    const forOpts = [['', kind === 'gift' ? 'Nobody in particular' : 'Pick someone'], ...members.map((m) => [m.id, `${m.name}${kind === 'birthday' && m.birthday ? ` (${fmtDate(parseYmd(m.birthday), { month: 'short', day: 'numeric' })})` : ''}`]),
+    const ownOnly = kind === 'christmas' && !this.viewer.parent && Boolean(this.me) && (!l || l.recipient === this.me || !l.recipient);
+    const forOpts = ownOnly ? members.filter((m) => m.id === this.me).map((m) => [m.id, `${m.name} (you)`]) : [['', kind === 'gift' ? 'Nobody in particular' : 'Pick someone'], ...members.map((m) => [m.id, `${m.name}${kind === 'birthday' && m.birthday ? ` (${fmtDate(parseYmd(m.birthday), { month: 'short', day: 'numeric' })})` : ''}`]),
       ...(kind === 'birthday' ? bdayEvents.map((e) => [`ev:${e.id}`, `📅 ${e.title.replace(/[’']s birthday.*$/i, '').replace(/\s*🎂/, '')} (${fmtDate(parseYmd(String(e.start).slice(0, 10)), { month: 'short', day: 'numeric' })}, from the calendar)`]) : []),
       ['__name', 'Someone else…']];
-    const forSel = select(forOpts, d.recipient || (d.eventId ? `ev:${d.eventId}` : d.recipientName ? '__name' : ''));
+    const forSel = select(forOpts, d.recipient || (d.eventId ? `ev:${d.eventId}` : d.recipientName ? '__name' : '') || (ownOnly ? this.me : '') || (kind === 'christmas' && preset.recipient ? preset.recipient : ''));
+    if (ownOnly) forSel.disabled = forOpts.length < 2;
     const forName = input({ value: d.recipientName || '', placeholder: 'Their name', maxlength: 60 });
     const nameField = field('Their name', forName);
     const date = input({ type: 'date', value: kind === 'birthday' ? (!d.recipient && !d.eventId ? d.date || '' : '') : d.date || '' });
@@ -1091,12 +1104,22 @@ export class GiftLists {
     const year = input({ type: 'number', value: year0, min: 2000, max: 2100 });
     const budget = input({ value: d.budget ?? '', inputmode: 'decimal', placeholder: 'No budget', maxlength: 12 });
     // Christmas: start from last year's list for the same person.
-    const fromSel = !l && kind === 'christmas' ? select([['', 'Start empty'], ...this.view.lists().filter((x) => x.kind === 'christmas').sort((a, b) => (b.year || 0) - (a.year || 0)).map((x) => [x.id, `${x.title} (${x.folder || x.year})`])], '') : null;
+    const fromSel = !l && kind === 'christmas' ? select([['', 'Start empty'], ...this.view.lists().filter((x) => x.kind === 'christmas' && (!ownOnly || x.recipient === this.me)).sort((a, b) => (b.year || 0) - (a.year || 0)).map((x) => [x.id, `${x.title} (${x.folder || x.year})`])], '') : null;
     const syncFrom = () => {
       if (!fromSel) return;
       const who = forSel.value;
       const last = this.view.lists().filter((x) => x.kind === 'christmas' && who && x.recipient === who).sort((a, b) => (b.year || 0) - (a.year || 0))[0];
       if (last) fromSel.value = last.id;
+    };
+    // Christmas lists are named “Name Year Christmas List” until someone types their own name.
+    const personNow = () => { const f = forSel.value; return members.find((x) => x.id === f)?.name || (f === '__name' ? forName.value.trim() : ''); };
+    let autoTitle = kind === 'christmas' ? (l ? christmasName(this.who(l).name, l.year || year0) : '') : null;
+    const syncTitle = () => {
+      if (kind !== 'christmas') return;
+      const was = title.value.trim();
+      const next = christmasName(personNow(), Number(year.value) || year0);
+      if (!was || was === autoTitle || (l && was === (this.who(l).name || ''))) title.value = personNow() ? next : '';
+      autoTitle = next;
     };
     const syncFor = () => {
       nameField.hidden = forSel.value !== '__name';
@@ -1107,8 +1130,11 @@ export class GiftLists {
         if (m && !m.birthday) { dateField.hidden = false; dateField.querySelector('.fam-hint').textContent = `${m.name} has no birthday in their profile yet — add it here (it’s saved to their profile too).`; }
       }
       syncFrom();
+      syncTitle();
     };
     forSel.addEventListener('change', syncFor);
+    forName.addEventListener('input', syncTitle);
+    year.addEventListener('input', syncTitle);
     // Reminders.
     const rem = new Set(d.reminders || []);
     const remRow = h('div', { class: 'fam-row-wrap' });
@@ -1140,7 +1166,7 @@ export class GiftLists {
         show(kind === 'birthday', h('div', { class: 'fam-row-wrap' }, dateField, birthField)),
         show(kind === 'gift', h('div', { class: 'fam-row-wrap' }, field('Occasion', occasion), field('Date', date))),
         show(kind === 'christmas', h('div', { class: 'fam-row-wrap' }, field('Christmas', year), fromSel ? field('Start from', fromSel, 'Gift ideas nobody got to') : null)),
-        this.isRecipient(l) ? null : field('Budget', budget, 'Spending so far is added up from what’s claimed or bought.'),
+        this.isRecipient(l) || ownOnly ? null : field('Budget', budget, 'Spending so far is added up from what’s claimed or bought.'),
         field('Reminders', remRow, kind === 'christmas' ? 'Shipping cutoffs remind you too.' : 'While the organizer is open, like event reminders.'),
         show(kind === 'gift', field('Extra fields for each gift', fieldsEl)),
         this.isRecipient(l) && !this.viewer.parent ? null : h('details', { class: 'fam-gift-access', open: (acc.see || []).length || (acc.edit || []).length || (acc.claim || []).length ? true : null },
@@ -1150,6 +1176,7 @@ export class GiftLists {
         field('Colour', colors)),
       actions: [l ? { label: 'Delete list', danger: true, left: true, value: 'delete' } : null, { label: 'Cancel' }, { label: l ? 'Save' : 'Make the list', primary: true, submit: true, onClick: (close) => {
         const f = forSel.value;
+        if (ownOnly && f !== this.me) { toast('You can make your own Christmas list. A parent can make one for anyone.', { timeout: 3500 }); return; }
         if ((kind === 'christmas' || kind === 'birthday') && !f) { toast(kind === 'birthday' ? 'Whose birthday is it?' : 'Who’s the list for?', { timeout: 2500 }); return forSel.focus(); }
         if (f === '__name' && !forName.value.trim()) return forName.focus();
         if (kind === 'birthday' && f === '__name' && !date.value) return date.focus();
@@ -1159,7 +1186,7 @@ export class GiftLists {
         const y = Number(year.value) || year0;
         const next = {
           ...(l || { id: newId(), order: Date.now() }), kind, emoji: emoji.value, color,
-          title: title.value.trim() || (kind === 'christmas' ? person : kind === 'birthday' ? `${person}’s birthday` : occasion.value.trim() || 'Gift list'),
+          title: title.value.trim() || (kind === 'christmas' ? christmasName(person, y) : kind === 'birthday' ? `${person}’s birthday` : occasion.value.trim() || 'Gift list'),
           recipient: m ? m.id : null, recipientName: m ? null : person || null, eventId: ev ? ev.id : null,
           date: kind === 'gift' ? date.value || null : kind === 'birthday' && !m && !ev ? date.value || null : kind === 'birthday' && m && !m.birthday ? date.value || null : l?.date || null,
           birthYear: Number(birthYear.value) || null, occasion: kind === 'gift' ? occasion.value.trim() : l?.occasion,

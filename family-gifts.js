@@ -120,6 +120,11 @@ function guard(ops, who, d) {
       if (prev && isGift(prev) && !canEdit(prev, v)) throw new GiftError(403, 'Only the people this list lets edit it can change it');
       if (op.op !== 'put') continue;
       const item = op.item;
+      // Christmas lists: family members make their own; parents make them for anyone.
+      if (item.kind === 'christmas' && !v.parent && v.profile) {
+        const changed = !prev || prev.recipient !== item.recipient || (prev.recipientName || null) !== (item.recipientName || null);
+        if (changed && item.recipient !== v.profile) throw new GiftError(403, 'You can make your own Christmas list. A parent can make one for anyone.');
+      }
       item.owner = prev ? prev.owner ?? null : v.profile;
       // Made by the server (the share link): never taken from the browser.
       if (prev?.shareToken) item.shareToken = prev.shareToken; else delete item.shareToken;
@@ -326,7 +331,7 @@ function createGifts({ load, persist, recipes, mock = false }) {
     const mine = key ? hashKey(key) : null;
     return {
       title: l.title, emoji: l.emoji || '🎁', color: l.color || '#d6336c', kind: l.kind,
-      forName: m?.name || l.recipientName || '', date: l.date || null, family: d.settings.familyName || '',
+      forName: m?.name || l.recipientName || '', date: l.date || null, year: l.kind === 'christmas' ? Number(l.year) || null : null, family: d.settings.familyName || '',
       note: l.shareNote || '', claims: l.shareClaims !== false, currency: d.settings.currency || 'USD',
       fields: (l.fields || []).map((f) => ({ id: f.id, label: f.label, type: f.type })),
       items: sharedItems(l).sort((a, b) => (b.mostWanted ? 1 : 0) - (a.mostWanted ? 1 : 0) || (b.stars || 0) - (a.stars || 0) || (a.order ?? 0) - (b.order ?? 0)).map((i) => ({

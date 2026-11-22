@@ -704,9 +704,9 @@ function demoData() {
   d.collections.members['m-leo'].birthday = `2016-${ymd(day(12)).slice(5)}`;
   ev('bday-m-leo', 'Leo’s birthday 🎂', `2016-${ymd(day(12)).slice(5)}`, `2016-${ymd(day(12)).slice(5)}`, { allDay: true, members: ['m-leo'], countdown: true, rrule: { freq: 'yearly', interval: 1 } });
   const gl = (id, extra) => put('lists', { id, color: '#2f9e44', emoji: '🎄', order: 10, reminders: [14], ...extra });
-  gl('l-x-emma', { kind: 'christmas', title: 'Emma', recipient: 'm-emma', year: xmas, folder: `Christmas ${xmas}`, budget: 150, color: '#ae3ec9', owner: 'm-mom', about: { sizes: 'Shirt youth L, shoes 4', favorites: 'Purple, horses, art supplies, mystery books' } });
-  gl('l-x-leo', { kind: 'christmas', title: 'Leo', recipient: 'm-leo', year: xmas, folder: `Christmas ${xmas}`, budget: 150, color: '#2f9e44', owner: 'm-mom' });
-  gl('l-x-grandma', { kind: 'christmas', title: 'Grandma', recipientName: 'Grandma', year: xmas, folder: `Christmas ${xmas}`, budget: 60, color: '#e8590c', owner: 'm-mom' });
+  gl('l-x-emma', { kind: 'christmas', title: `Emma ${xmas} Christmas List`, recipient: 'm-emma', year: xmas, folder: `Christmas ${xmas}`, budget: 150, color: '#ae3ec9', owner: 'm-mom', about: { sizes: 'Shirt youth L, shoes 4', favorites: 'Purple, horses, art supplies, mystery books' } });
+  gl('l-x-leo', { kind: 'christmas', title: `Leo ${xmas} Christmas List`, recipient: 'm-leo', year: xmas, folder: `Christmas ${xmas}`, budget: 150, color: '#2f9e44', owner: 'm-mom' });
+  gl('l-x-grandma', { kind: 'christmas', title: `Grandma ${xmas} Christmas List`, recipientName: 'Grandma', year: xmas, folder: `Christmas ${xmas}`, budget: 60, color: '#e8590c', owner: 'm-mom' });
   put('lists', { id: 'l-x-cards', kind: 'cards', title: 'Christmas cards', emoji: '💌', color: '#c2255c', year: xmas, folder: `Christmas ${xmas}`, order: 11 });
   put('lists', { id: 'l-b-leo', kind: 'birthday', title: 'Leo’s birthday', emoji: '🎂', color: '#f08c00', recipient: 'm-leo', eventId: 'bday-m-leo', budget: 100, reminders: [14, 2], order: 12, owner: 'm-mom', party: { place: 'Lincoln Park pavilion' } });
   put('lists', { id: 'l-g-baby', kind: 'gift', title: 'Baby shower for Priya', emoji: '🍼', color: '#1098ad', occasion: 'Priya’s baby shower', date: ymd(day(30)), reminders: [14, 2], order: 13, template: 'baby', fields: [{ id: 'f-size', label: 'Size', type: 'text' }, { id: 'f-store', label: 'Store', type: 'text' }], owner: 'm-mom', shareToken: 'demo-gift-share-token-0001' });

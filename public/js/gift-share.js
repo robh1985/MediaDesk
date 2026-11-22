@@ -48,7 +48,7 @@ function draw() {
   const when = data.date ? new Date(`${data.date}T12:00:00`).toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' }) : '';
   main.replaceChildren(...[
     h('header', { class: 'gs-head' }, h('div', { class: 'gs-emoji' }, data.emoji),
-      h('div', {}, h('h1', {}, data.title), h('p', { class: 'muted' }, [data.forName ? `For ${data.forName}` : '', when].filter(Boolean).join(' · ') || (data.family ? `The ${data.family} family` : '')))),
+      h('div', {}, data.year ? h('div', { class: 'gs-year' }, `🎄 Christmas ${data.year}`) : null, h('h1', {}, data.title), h('p', { class: 'muted' }, [data.forName ? `For ${data.forName}` : '', when].filter(Boolean).join(' · ') || (data.family ? `The ${data.family} family` : '')))),
     data.note ? h('div', { class: 'gs-note' }, data.note) : null,
     data.claims ? h('p', { class: 'muted' }, 'Getting something? Tap “I’ll get this” so nobody else buys it too. Only the family sees your name.') : null,
     h('div', { class: 'gs-tools' }, RANGES.map(([v, l]) => h('button', { class: only === v ? 'on' : '', onclick: () => { only = v; draw(); } }, l)),
