@@ -17,7 +17,11 @@ export const isGift = (l) => GIFT_KINDS.includes(l?.kind);
 // Gift lists and the Christmas card list (which lives in the Christmas folder too).
 export const isGiftish = (l) => isGift(l) || l?.kind === 'cards';
 // A Christmas list's name: “Emma 2026 Christmas List”.
-export const christmasName = (person, year) => `${person ? `${person} ` : ''}${year} Christmas List`;
+// A name ending in s gets just an apostrophe (James’), the rest ’s (Emma’s).
+export const possessive = (name) => (name ? (/s$/i.test(name.trim()) ? `${name.trim()}’` : `${name.trim()}’s`) : '');
+export const christmasName = (person, year) => `${person ? `${possessive(person)} ` : ''}${year} Christmas List`;
+// Names this list could have been given automatically (with or without the ’s).
+const autoChristmasNames = (person, year) => [christmasName(person, year), `${person} ${year} Christmas List`, person];
 export const KIND_LABELS = { christmas: 'Christmas list', birthday: 'Birthday list', gift: 'Gift list', cards: 'Christmas cards' };
 
 const STATUS = [['idea', '💡', 'Idea'], ['bought', '🛍️', 'Bought'], ['wrapped', '🎀', 'Wrapped'], ['given', '🎁', 'Given']];
@@ -1018,7 +1022,7 @@ export class GiftLists {
   nextYearTitle(l, year) {
     if (l.kind !== 'christmas') return l.title;
     const name = this.who(l).name || '';
-    if (!l.title || l.title === name) return christmasName(name, year);
+    if (!l.title || autoChristmasNames(name, l.year).includes(l.title)) return christmasName(name, year);
     return l.year && l.title.includes(String(l.year)) ? l.title.replaceAll(String(l.year), String(year)) : l.title;
   }
 
@@ -1118,7 +1122,7 @@ export class GiftLists {
       if (kind !== 'christmas') return;
       const was = title.value.trim();
       const next = christmasName(personNow(), Number(year.value) || year0);
-      if (!was || was === autoTitle || (l && was === (this.who(l).name || ''))) title.value = personNow() ? next : '';
+      if (!was || was === autoTitle || (l && autoChristmasNames(this.who(l).name || '', l.year || year0).includes(was))) title.value = personNow() ? next : '';
       autoTitle = next;
     };
     const syncFor = () => {
