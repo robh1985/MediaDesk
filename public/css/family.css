@@ -1086,8 +1086,6 @@ h3.fam-bk-h { font-size: .9em; letter-spacing: .14em; text-transform: uppercase;
    the month with dots, recipe filters and grocery details tucked away. Wide screens are unchanged. */
 .fam-page-title, .fam-people-btn, .fam-rail-morebtn, .fam-drawer-more { display: none; }
 .fam-menu-btn { display: none; position: relative; }
-.fam-menu-dot { position: absolute; top: 5px; right: 5px; width: 9px; height: 9px; border-radius: 50%; background: #e03131; box-shadow: 0 0 0 2px var(--f-bg); }
-.fam-menu-dot[hidden] { display: none; }
 .fam-list-details { display: contents; }
 .fam-list-add.grocery > .fam-btn.primary { order: 2; }
 .fam-recipe-more { display: contents; }
@@ -1097,14 +1095,13 @@ h3.fam-bk-h { font-size: .9em; letter-spacing: .14em; text-transform: uppercase;
   .fam-rail .fam-rail-extra { display: none; }
   .fam-rail .fam-rail-morebtn { display: flex; }
   .fam-drawer-more { display: flex; flex-direction: column; gap: 2px; }
-  .fam-drawer-part:not([hidden]) + .fam-drawer-more { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--f-line); }
-  .fam-drawer-more > .fam-drawer-title { padding: 6px 8px 4px; }
   .fam-drawer-part[hidden] { display: none; }
   .fam-drawer-part { display: flex; flex-direction: column; gap: 2px; }
   .fam-drawer .fam-list-count { position: static; min-width: 20px; height: 20px; padding: 0 6px; box-sizing: border-box; border-radius: 10px; background: #e03131; color: #fff; font-size: 11.5px; line-height: 20px; text-align: center; }
   .fam-drawer .fam-sub-extra .fam-list-count { background: var(--rc); }
   .fam-drawer .fam-list-count[hidden] { display: none; }
   .fam-menu-btn { display: inline-flex; }
+  .fam-menu-btn[hidden] { display: none; }
   /* 2. One people button. */
   .fam-header .fam-filter { display: none; }
   .fam-people-btn { display: inline-flex; align-items: center; gap: 5px; height: 36px; padding: 0 10px; border: 1px solid var(--f-line); background: var(--f-panel); border-radius: 999px; cursor: pointer; font-size: 13px !important; font-weight: 600; flex: none; }
@@ -1189,3 +1186,6 @@ h3.fam-bk-h { font-size: .9em; letter-spacing: .14em; text-transform: uppercase;
   /* Chores: the + at the top adds a chore, so the toolbar stays on one line. */
   .fam-view-chores > .fam-toolbar > .fam-btn.primary { display: none; }
 }
+/* Phones: More slides in from the right. */
+.fam-drawer-right .fam-drawer-panel { left: auto; right: 0; transform: translateX(100%); box-shadow: -4px 0 24px rgba(0,0,0,.18); padding-bottom: env(safe-area-inset-bottom); }
+.fam-drawer-right.open .fam-drawer-panel { transform: none; }

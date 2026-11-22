@@ -36,7 +36,7 @@ const TABS = [
   ['lists', 'Lists', ICONS.lists],
   ['photos', 'Photos', ICONS.photos],
 ];
-// On a phone, these stay in the bar along the bottom; the rest are under More (the ☰ drawer).
+// On a phone, these stay in the bar along the bottom; the rest are under More (a drawer on the right).
 const PHONE_TABS = new Set(['calendar', 'chores', 'meals', 'lists']);
 const TAB_NAMES = { approvals: 'Approvals', settings: 'Settings' };
 const PHONE = '(max-width: 760px)';
@@ -137,13 +137,12 @@ class FamilyOrganizer {
         h('span', { class: 'fam-rail-icon', html: ICONS.approve }), h('span', {}, 'Approvals'), this.approvalBadge = h('span', { class: 'fam-rail-badge', hidden: true })) : null,
       h('div', { class: 'fam-rail-gap' }),
       // Phones: More, for everything not in the bottom bar.
-      this.moreTab = h('button', { class: 'fam-rail-btn fam-rail-morebtn', style: { '--rc': RAIL_COLORS.settings }, 'aria-label': 'More', onclick: () => this.openDrawer() },
+      this.moreTab = h('button', { class: 'fam-rail-btn fam-rail-morebtn', style: { '--rc': RAIL_COLORS.settings }, 'aria-label': 'More', 'aria-expanded': 'false', onclick: () => this.openDrawer(this.moreDrawer) },
         h('span', { html: ICONS.menu }), h('span', {}, 'More'), this.moreBadge = h('span', { class: 'fam-rail-badge', hidden: true })),
       h('button', { class: 'fam-rail-btn small fam-rail-extra', style: { '--rc': RAIL_COLORS.sleep }, title: 'Sleep', onclick: () => this.sleep(true) }, h('span', { html: ICONS.sleep }), h('span', {}, 'Sleep')),
       h('button', { class: 'fam-rail-btn small fam-rail-extra', style: { '--rc': RAIL_COLORS.settings }, dataset: { tab: 'settings' }, onclick: () => this.go('settings') }, h('span', { html: ICONS.settings }), h('span', {}, 'Settings')));
-    // Phones: a drawer on the left (☰) holds the section's parts and everything under More.
-    this.menuBtn = h('button', { class: 'fam-icon-btn fam-menu-btn', 'aria-label': 'Open the menu', 'aria-expanded': 'false', html: ICONS.menu, onclick: () => this.openDrawer() },
-      this.menuBadge = h('span', { class: 'fam-menu-dot', hidden: true }));
+    // Phones: a drawer on the left (☰) holds the section's parts; it only shows on sections that have them.
+    this.menuBtn = h('button', { class: 'fam-icon-btn fam-menu-btn', hidden: true, 'aria-label': 'Open the menu', 'aria-expanded': 'false', html: ICONS.menu, onclick: () => this.openDrawer(this.drawer) });
     // Phones: the section's name (and part) where the clock is on a big screen.
     this.pageTitle = h('div', { class: 'fam-page-title' });
     // Phones: who's shown, as one button instead of the row of faces.
@@ -166,7 +165,6 @@ class FamilyOrganizer {
     const moreBtn = (id, label, ic, onclick, badge = null) => h('button', { class: 'fam-rail-btn', style: { '--rc': RAIL_COLORS[id] }, dataset: { tab: id }, onclick: () => { this.closeDrawer(); onclick(); } },
       h('span', { html: ic }), h('span', {}, label), badge);
     this.drawerMore = h('nav', { class: 'fam-drawer-more', 'aria-label': 'More' },
-      h('div', { class: 'fam-drawer-title' }, 'More'),
       TABS.filter(([id]) => !PHONE_TABS.has(id)).map(([id, label, ic]) => moreBtn(id, label, ic, () => this.go(id))),
       this.isParentUser() ? moreBtn('approvals', 'Approvals', ICONS.approve, () => this.go('approvals'), this.drawerApprovalBadge = h('span', { class: 'fam-list-count', hidden: true })) : null,
       moreBtn('settings', 'Settings', ICONS.settings, () => this.go('settings')),
@@ -175,8 +173,14 @@ class FamilyOrganizer {
       h('div', { class: 'fam-drawer-shade', onclick: () => this.closeDrawer() }),
       h('div', { class: 'fam-drawer-panel', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Menu' },
         h('div', { class: 'fam-drawer-head' }, this.drawerTitle, h('button', { class: 'fam-icon-btn', 'aria-label': 'Close the menu', html: ICONS.close, onclick: () => this.closeDrawer() })),
-        h('div', { class: 'fam-drawer-body' }, this.drawerBody, this.drawerMore)));
-    clear(this.root, this.rail, this.subnav, h('div', { class: 'fam-content' }, this.header, this.main), this.drawer);
+        h('div', { class: 'fam-drawer-body' }, this.drawerBody)));
+    // Phones: More (the bottom bar) slides in from the right.
+    this.moreDrawer = h('div', { class: 'fam-drawer fam-drawer-right', hidden: true, onkeydown: (e) => { if (e.key === 'Escape') this.closeDrawer(); } },
+      h('div', { class: 'fam-drawer-shade', onclick: () => this.closeDrawer() }),
+      h('div', { class: 'fam-drawer-panel', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'More' },
+        h('div', { class: 'fam-drawer-head' }, h('div', { class: 'fam-drawer-title' }, 'More'), h('button', { class: 'fam-icon-btn', 'aria-label': 'Close', html: ICONS.close, onclick: () => this.closeDrawer() })),
+        h('div', { class: 'fam-drawer-body' }, this.drawerMore)));
+    clear(this.root, this.rail, this.subnav, h('div', { class: 'fam-content' }, this.header, this.main), this.drawer, this.moreDrawer);
     this.drawFilter();
     this.updateApprovalBadge();
   }
@@ -214,6 +218,7 @@ class FamilyOrganizer {
     clear(this.subnav);
     this.closeDrawer();
     this.drawerBody.hidden = true;
+    this.menuBtn.hidden = true;
     clear(this.drawerBody);
     this.drawerTitle.textContent = 'Menu';
     this.setPageTitle(this.tabName(tab));
@@ -259,25 +264,31 @@ class FamilyOrganizer {
     this.drawerTitle.textContent = title;
     clear(this.drawerBody, buttons);
     this.drawerBody.hidden = false;
+    this.menuBtn.hidden = false;
     return null;
   }
 
-  openDrawer() {
-    if (!this.drawer.hidden) return;
-    this.drawer.hidden = false;
-    this.menuBtn.setAttribute('aria-expanded', 'true');
+  // The ☰ drawer (left) or More (right); only one is open at a time.
+  openDrawer(drawer) {
+    if (!drawer.hidden) return;
+    this.closeDrawer();
+    drawer.hidden = false;
+    this.drawerOpener = drawer === this.moreDrawer ? this.moreTab : this.menuBtn;
+    this.drawerOpener.setAttribute('aria-expanded', 'true');
     // Next frame, so the panel slides in rather than appearing.
-    requestAnimationFrame(() => this.drawer.classList.add('open'));
-    (this.drawerBody.querySelector('.fam-rail-btn.on') || this.drawerBody.querySelector('button'))?.focus({ preventScroll: true });
+    requestAnimationFrame(() => drawer.classList.add('open'));
+    (drawer.querySelector('.fam-drawer-body .fam-rail-btn.on') || drawer.querySelector('.fam-drawer-body button'))?.focus({ preventScroll: true });
   }
 
   closeDrawer() {
-    if (!this.drawer || this.drawer.hidden) return;
-    const wasOpen = this.drawer.contains(document.activeElement);
-    this.drawer.classList.remove('open');
-    this.drawer.hidden = true;
-    this.menuBtn.setAttribute('aria-expanded', 'false');
-    if (wasOpen) this.menuBtn.focus({ preventScroll: true });
+    for (const drawer of [this.drawer, this.moreDrawer]) {
+      if (!drawer || drawer.hidden) continue;
+      const wasOpen = drawer.contains(document.activeElement);
+      drawer.classList.remove('open');
+      drawer.hidden = true;
+      this.drawerOpener?.setAttribute('aria-expanded', 'false');
+      if (wasOpen) this.drawerOpener?.focus({ preventScroll: true });
+    }
   }
 
   // Redraw after a change, keeping the place you were typing.
@@ -306,7 +317,6 @@ class FamilyOrganizer {
     this.approvalBadge.textContent = n > 99 ? '99+' : String(n);
     // Phones: Approvals is under More, so More and ☰ show there's something waiting.
     for (const b of [this.moreBadge, this.drawerApprovalBadge]) { if (b) { b.hidden = !n; b.textContent = this.approvalBadge.textContent; } }
-    if (this.menuBadge) this.menuBadge.hidden = !n;
   }
 
   changed(what) {
