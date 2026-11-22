@@ -5,6 +5,7 @@ import { h, clear } from './ui.js';
 import { familyApp } from './apps/family/family.js';
 import { familyAuth } from './apps/family/store.js';
 import { deviceTheme } from './apps/family/theme.js';
+import { watchKeyboard } from './apps/family/shared.js';
 
 const root = document.getElementById('family');
 const params = new URLSearchParams(location.search);
@@ -17,6 +18,8 @@ const theme = () => {
   const own = deviceTheme();
   document.documentElement.dataset.theme = own === 'dark' || ((own === 'family' || own === 'auto' || own === 'night') && dark.matches) ? 'dark' : 'light';
 };
+// Sign-in and the organizer stay above the phone's keyboard.
+watchKeyboard();
 theme();
 dark.addEventListener?.('change', theme);
 

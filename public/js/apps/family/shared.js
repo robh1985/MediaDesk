@@ -214,3 +214,61 @@ export const ICONS = {
   user: svg('<circle cx="12" cy="8" r="3.5"/><path d="M5 20v-1a5 5 0 0 1 5-5h4a5 5 0 0 1 5 5v1"/>'),
   gift: svg('<rect x="3.5" y="8" width="17" height="4" rx="1"/><path d="M5 12v8.5h14V12M12 8v12.5M12 8S10.5 3.5 8 4.5 9 8 12 8zm0 0s1.5-4.5 4-3.5S15 8 12 8z"/>'),
 };
+
+// The on-screen keyboard. Phones lay it over the page (iOS always, Android Chrome by default)
+// instead of making the page shorter, so a sheet pinned to the bottom of the screen, or a box
+// low on a page, ends up hidden behind it. While one is open, --fam-kb says how much of the
+// page (on <html>) and of each organizer (on .fam-root) it covers, .fam-kb-open is set, and the
+// box being typed in is scrolled into sight. The CSS lifts sheets and pages above it.
+let kbWatching = false;
+const editable = (el) => Boolean(el && (el.isContentEditable || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT'
+  || (el.tagName === 'INPUT' && !/^(button|checkbox|radio|range|color|file|submit|reset|image|hidden)$/i.test(el.type))));
+export function watchKeyboard() {
+  const vv = window.visualViewport;
+  if (kbWatching || !vv) return;
+  kbWatching = true;
+  let raf = 0;
+  let was = false;
+  const set = (el, px) => {
+    el.style.setProperty('--fam-kb', `${px}px`);
+    el.classList.toggle('fam-kb-open', px > 0);
+  };
+  const update = () => {
+    raf = 0;
+    const seen = vv.offsetTop + vv.height;
+    const act = document.activeElement;
+    // Only a keyboard: something is being typed in and much of the screen is covered (a pinch
+    // zoom or the address bar coming and going changes the visible area too).
+    const open = editable(act) && window.innerHeight - seen > 100;
+    set(document.documentElement, open ? Math.round(window.innerHeight - seen) : 0);
+    for (const root of document.querySelectorAll('.fam-root')) {
+      set(root, open ? Math.max(0, Math.round(root.getBoundingClientRect().bottom - seen)) : 0);
+    }
+    if (open && act) {
+      // After the layout above has moved things, bring the box into the part still visible.
+      requestAnimationFrame(() => {
+        const r = act.getBoundingClientRect();
+        const top = vv.offsetTop + 8;
+        const bottom = seen - 8;
+        if (r.bottom <= bottom && r.top >= top) return;
+        // Scroll the box's own scrolling area only: the page itself must stay put.
+        for (let p = act.parentElement; p && p !== document.body; p = p.parentElement) {
+          const oy = getComputedStyle(p).overflowY;
+          if ((oy === 'auto' || oy === 'scroll') && p.scrollHeight > p.clientHeight) {
+            const box = p.getBoundingClientRect();
+            const room = Math.min(bottom, box.bottom) - Math.max(top, box.top);
+            p.scrollTop += r.top - Math.max(top, box.top) - Math.max(0, (room - r.height) / 2);
+            return;
+          }
+        }
+      });
+    }
+    was = open;
+  };
+  const later = () => { if (!raf) raf = requestAnimationFrame(update); };
+  vv.addEventListener('resize', later);
+  vv.addEventListener('scroll', later);
+  // The keyboard can open or close without a resize being reported in time.
+  document.addEventListener('focusin', () => { later(); setTimeout(later, 350); });
+  document.addEventListener('focusout', () => setTimeout(() => { if (was) later(); }, 50));
+}

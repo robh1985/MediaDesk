@@ -13,7 +13,7 @@ import { MealsView } from './meals.js';
 import { ListsView } from './lists.js';
 import { PhotosView, photoFrame, sleepScreen } from './photos.js';
 import { SettingsView } from './settings.js';
-import { avatar, sheet, ICONS, weatherIcon, setParentSession } from './shared.js';
+import { avatar, sheet, ICONS, weatherIcon, setParentSession, watchKeyboard } from './shared.js';
 import { expand, addDays, fmtTime } from './dates.js';
 import { themeWatcher, isDark, setDeviceTheme, themeIcon } from './theme.js';
 
@@ -47,6 +47,7 @@ export const familyApp = {
   id: 'family', name: 'Family Organizer', icon: appIcon.family, size: [1240, 820], description: 'Family calendar, chores, meals, lists and photo frame',
   open(win, opts = {}) {
     loadCss();
+    watchKeyboard();
     const app = new FamilyOrganizer(win, opts);
     win.on('reopen', (o) => { if (o?.tab) app.go(o.tab, o.section); });
     win.on('close', () => app.destroy());

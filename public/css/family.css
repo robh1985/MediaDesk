@@ -1189,3 +1189,15 @@ h3.fam-bk-h { font-size: .9em; letter-spacing: .14em; text-transform: uppercase;
 /* Phones: More slides in from the right. */
 .fam-drawer-right .fam-drawer-panel { left: auto; right: 0; transform: translateX(100%); box-shadow: -4px 0 24px rgba(0,0,0,.18); padding-bottom: env(safe-area-inset-bottom); }
 .fam-drawer-right.open .fam-drawer-panel { transform: none; }
+
+/* The phone's on-screen keyboard (watchKeyboard in shared.js sets --fam-kb and .fam-kb-open):
+   pages, sheets and full-screen views end where the keyboard starts, so what's being typed in
+   stays in sight. */
+.fam-root.fam-kb-open { padding-bottom: var(--fam-kb); box-sizing: border-box; }
+.fam-root.fam-kb-open > .fam-overlay, .fam-root.fam-kb-open > .fam-drawer, .fam-root.fam-kb-open > .fam-cook { bottom: var(--fam-kb); }
+.fam-root.fam-kb-open > .fam-overlay > .fam-sheet { max-height: 100%; }
+html.fam-kb-open .fam-auth { padding-bottom: calc(40px + var(--fam-kb)); }
+@media (max-width: 760px) {
+  /* The bottom bar steps aside while typing, leaving the room to the page. */
+  .fam-root.fam-kb-open > .fam-rail { display: none; }
+}
