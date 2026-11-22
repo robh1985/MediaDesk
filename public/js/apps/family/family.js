@@ -99,6 +99,8 @@ class FamilyOrganizer {
     const first = !this.store.members().length;
     this.go(opts.tab || (first ? 'settings' : this.prefs.tab || this.store.settings.startPage || 'calendar'), first ? 'profiles' : opts.section);
     if (first) toast('Welcome! Start by adding the people in your family.', { timeout: 6000 });
+    // A gift sent from a store's page (the browser button, or Android's Share).
+    else setTimeout(() => this.views.lists.gifts?.takeIncoming().catch((err) => console.warn('Family Organizer: incoming gift', err)), 300);
     // Keep the browser's time zone, so the phone calendar address uses the family's local time.
     const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
     if (tz && this.store.settings.timeZone !== tz && !this.store.settings.timeZoneFixed) this.store.setSettings({ timeZone: tz }).catch(() => {});

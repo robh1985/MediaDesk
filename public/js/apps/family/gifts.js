@@ -319,26 +319,40 @@ export class GiftLists {
   }
 
   addRow(l, { mine }) {
-    const entry = input({ class: 'fam-input fam-list-entry fam-gift-entry', placeholder: mine ? 'Add something you’d like, or paste a store link' : 'Add a gift idea, or paste a store link', maxlength: 2000, enterkeyhint: 'enter', autocomplete: 'off' });
-    const price = input({ class: 'fam-input fam-gift-price-in', placeholder: 'Price', inputmode: 'decimal', maxlength: 12, 'aria-label': 'Price (optional)', enterkeyhint: 'enter' });
+    const entry = input({ class: 'fam-input fam-list-entry fam-gift-entry', placeholder: 'Or type one and press Enter, or paste a store link', maxlength: 2000, enterkeyhint: 'enter', autocomplete: 'off', 'aria-label': 'Quick add' });
+    // Enter adds what's typed straight away; Add Gift Idea opens the gift's screen (with it).
     const add = async () => {
       const text = entry.value.trim();
       if (!text) { entry.focus(); return; }
-      const p = parsePrice(price.value);
       entry.value = '';
-      price.value = '';
       const link = urlIn(text);
-      if (link) await this.addFromLink(l, link, text.replace(link, '').trim(), p);
-      else await this.addGift(l, { text, price: p });
+      if (link) await this.addFromLink(l, link, text.replace(link, '').trim());
+      else await this.addGift(l, { text });
       this.view.el?.querySelector('.fam-gift-entry')?.focus();
     };
+    const open = () => {
+      const typed = entry.value.trim();
+      const link = urlIn(typed);
+      entry.value = '';
+      this.newGift(l, { text: link ? cleanShareText(typed.replace(link, '')) : typed, url: link || '' });
+    };
     entry.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); add(); } });
-    price.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); add(); } });
+    // A pasted store link opens the gift's screen and reads the store's page.
     entry.addEventListener('paste', (e) => {
       const t = e.clipboardData.getData('text');
-      if (urlIn(t) && !entry.value.trim()) { e.preventDefault(); entry.value = t.trim(); add(); }
+      if (urlIn(t) && !entry.value.trim()) { e.preventDefault(); entry.value = t.trim(); open(); }
     });
-    return h('div', { class: 'fam-list-add fam-gift-add' }, h('div', { class: 'fam-list-entry-wrap' }, entry), price, h('button', { class: 'fam-btn primary', onclick: add }, 'Add'));
+    return h('div', { class: 'fam-gift-addbox' },
+      h('div', { class: 'fam-list-add fam-gift-add' }, h('button', { class: 'fam-btn primary fam-gift-new', onclick: open }, h('span', { html: ICONS.plus }), mine ? 'Add to My Wish List' : 'Add Gift Idea'), h('div', { class: 'fam-list-entry-wrap' }, entry)),
+      h('button', { type: 'button', class: 'fam-gift-howto', onclick: () => this.browserButton() }, '🛍️ Shopping on Amazon, Walmart or Best Buy? Add gifts straight from the store’s page'));
+  }
+
+  // A new gift's screen, filled in with what's known; a store link is read straight away.
+  async newGift(l, fields = {}) {
+    const i = { list: l.id, text: '', ...fields };
+    const auto = Boolean(i.url) && !i.image && i.price == null;
+    if (auto) setTimeout(() => [...this.app.root.querySelectorAll('.fam-sheet .fam-btn')].find((b) => b.textContent === 'Fill in from the link')?.click(), 50);
+    return this.editGift(i, l);
   }
 
   // A gift on the list; a heads-up if they've had it before.
@@ -357,14 +371,8 @@ export class GiftLists {
   }
 
   // A store link: its name, picture and price are read from the store's page where it allows it.
-  async addFromLink(l, link, name = '', price = null) {
-    toast('Reading the store page…', { timeout: 2500 });
-    let p = null;
-    try { p = await this.store.giftPreview(link); } catch (err) { toastError(err, 'Couldn’t read that link'); }
-    const saved = await this.addGift(l, { text: name || p?.title || link, url: p?.url || link, price: price ?? p?.price ?? null, image: p?.image || null, store: p?.store || null }, { open: Boolean(p?.partial) || !p });
-    if (saved && p?.partial && p.note) toast(p.note, { timeout: 5000 });
-    return saved;
-  }
+  // A store link: the gift's screen opens and reads the store's page (where the store allows it).
+  addFromLink(l, link, name = '') { return this.newGift(l, { text: cleanShareText(name), url: link }); }
 
   row(i, l, { mine, hide }) {
     const st = STATUS.find((s) => s[0] === (i.status || 'idea')) || STATUS[0];
@@ -435,10 +443,14 @@ export class GiftLists {
     try { await this.store.put('listitems', { ...i, ...patch }); } catch (err) { toastError(err); }
   }
 
+  // A gift's screen; a new one (no id yet) for "Add Gift Idea", the browser button and sharing.
   async editGift(i, l) {
+    const isNew = !i.id;
     const mine = this.isRecipient(l);
     const buyer = !mine && !this.hidden;
-    const text = input({ value: i.text, required: true, autofocus: true, maxlength: 300 });
+    const text = input({ value: i.text || '', required: true, autofocus: !i.url || Boolean(i.text), maxlength: 300, placeholder: 'What’s the gift?' });
+    // When a store won't show its page to the server: how to bring the price and picture anyway.
+    const blockedHint = h('div', { class: 'fam-gift-blocked', hidden: true });
     const url = input({ type: 'url', value: i.url || '', placeholder: 'https://…', maxlength: 2000 });
     const price = input({ value: i.price ?? '', inputmode: 'decimal', placeholder: '0.00', maxlength: 12 });
     let image = i.image || null;
@@ -461,7 +473,10 @@ export class GiftLists {
         if (p.title && (!text.value.trim() || text.value === i.text)) text.value = p.title;
         if (p.price != null) price.value = p.price;
         if (p.image) { image = p.image; drawPic(); }
-        if (p.note) toast(p.note, { timeout: 4000 });
+        if (p.blocked) {
+          clear(blockedHint, h('span', {}, p.note), h('button', { type: 'button', class: 'fam-btn small', onclick: () => this.browserButton() }, 'Get the 🎁 Add to gift list button'));
+          blockedHint.hidden = false;
+        } else if (p.note) toast(p.note, { timeout: 4000 });
       } catch (err) { toastError(err, 'Couldn’t read that link'); }
       fill.disabled = false;
       fill.textContent = 'Fill in from the link';
@@ -503,9 +518,10 @@ export class GiftLists {
     drawChips();
     const editable = this.canEdit(l) || (mine && i.addedBy === this.me);
     const out = await sheet(this.app.root, {
-      title: mine ? 'On my wish list' : 'Gift', wide: true,
-      body: h('div', { class: 'fam-form' }, text,
-        h('div', { class: 'fam-row-wrap' }, field('Store link', url), h('div', { class: 'fam-field' }, h('span', { class: 'fam-label' }, ' '), fill)),
+      title: isNew ? (mine ? 'Add to my wish list' : 'Add Gift Idea') : mine ? 'On my wish list' : 'Gift', wide: true,
+      body: h('div', { class: 'fam-form' }, field('Gift', text),
+        h('div', { class: 'fam-row-wrap' }, field('Store link', url, 'Paste a link from the store, then Fill in.'), h('div', { class: 'fam-field' }, h('span', { class: 'fam-label' }, ' '), fill)),
+        blockedHint,
         h('div', { class: 'fam-row-wrap' }, field('Price', price), field('Priority', stars), h('div', { class: 'fam-field' }, h('span', { class: 'fam-label' }, ' '), wantedBox)),
         pic, custom.length ? h('div', { class: 'fam-row-wrap' }, custom) : null, field('Notes', notes),
         buyer ? h('div', { class: 'fam-gift-buyer' },
@@ -513,9 +529,9 @@ export class GiftLists {
           h('div', { class: 'fam-row-wrap' }, field('Status', status), this.canClaim(l) || this.viewer.parent ? field('Who’s getting it', claimer) : null,
             l.kind === 'christmas' && this.viewer.parent ? field('Santa or stocking?', secret, 'Hidden from the kids') : null),
           groupBox, groupWrap) : null),
-      actions: [editable ? { label: 'Delete', danger: true, left: true, value: 'delete' } : null, { label: 'Cancel' }, { label: 'Save', primary: true, submit: true, onClick: (close) => {
+      actions: [editable && !isNew ? { label: 'Delete', danger: true, left: true, value: 'delete' } : null, { label: 'Cancel' }, { label: isNew ? 'Add to the list' : 'Save', primary: true, submit: true, onClick: (close) => {
         if (!text.value.trim()) return text.focus();
-        const next = { ...i, text: text.value.trim().slice(0, 300), url: url.value.trim() || null, price: parsePrice(price.value), image, stars: Number(stars.value) || 0, mostWanted: wanted, values, notes: notes.value.trim() };
+        const next = { ...i, text: text.value.trim().slice(0, 300), url: url.value.trim() || null, store: url.value.trim() ? storeLabel(url.value.trim()) : null, price: parsePrice(price.value), image, stars: Number(stars.value) || 0, mostWanted: wanted, values, notes: notes.value.trim() };
         if (buyer) {
           next.status = status.value;
           next.done = status.value === 'given';
@@ -530,6 +546,7 @@ export class GiftLists {
       } }],
     });
     if (!out) return;
+    if (isNew) return this.addGift(l, out);
     try {
       if (out === 'delete') await this.view.removeItem(i);
       else await this.store.put('listitems', out);
@@ -540,28 +557,64 @@ export class GiftLists {
 
   aboutPanel(l) {
     const a = l.about || {};
-    const has = a.sizes || a.favorites || a.dislikes;
+    const sizes = sizeList(a);
+    const has = sizes.length || a.sizes || a.favorites || a.dislikes;
     const mine = this.isRecipient(l);
     if (!has && !this.canEdit(l) && !mine) return null;
     const { name } = this.who(l);
     return h('details', { class: 'fam-gift-panel', open: has && !this.app.subMq?.matches ? true : null },
       h('summary', {}, `👕 Sizes & favorites${name && !mine ? ` · ${name}` : ''}`, has ? null : h('small', { class: 'fam-muted' }, ' — nothing yet')),
       has ? h('dl', { class: 'fam-gift-about' },
-        a.sizes ? [h('dt', {}, 'Sizes'), h('dd', {}, a.sizes)] : null,
+        sizes.length ? [h('dt', {}, 'Sizes'), h('dd', { class: 'fam-gift-sizes' }, sizes.map((x) => h('span', { class: 'fam-gift-chip' }, `${x.kind}: `, h('b', {}, x.value))))] : null,
+        a.sizes ? [h('dt', {}, sizes.length ? 'Size notes' : 'Sizes'), h('dd', {}, a.sizes)] : null,
         a.favorites ? [h('dt', {}, 'Loves'), h('dd', {}, a.favorites)] : null,
         a.dislikes ? [h('dt', {}, 'Not a fan of'), h('dd', {}, a.dislikes)] : null) : null,
       h('button', { class: 'fam-btn small', onclick: () => this.editAbout(l) }, has ? 'Change' : 'Add sizes and favorites'));
   }
 
+  // Sizes are picked from drop-downs: what it's for (the ten most asked-for, or one of your own)
+  // and the size (the usual ones for it, or one of your own).
   async editAbout(l) {
     const a = l.about || {};
-    const sizes = h('textarea', { class: 'fam-input', rows: 2, maxlength: 400, placeholder: 'Shirt M, pants 10, shoes 4 youth, ring 7…' }, a.sizes || '');
+    const rows = sizeList(a).map((x) => ({ ...x }));
+    if (!rows.length) rows.push({ kind: SIZE_KINDS[0][0], value: '' });
+    const list = h('div', { class: 'fam-form fam-gift-size-rows' });
+    const other = (sel, onText, placeholder, value) => {
+      const box = input({ value, placeholder, maxlength: 40, hidden: true, class: 'fam-input fam-gift-size-other', oninput: (e) => onText(e.target.value) });
+      const sync = () => { box.hidden = sel.value !== '__other'; if (!box.hidden) box.focus(); };
+      sel.addEventListener('change', sync);
+      return { box, show: () => { box.hidden = sel.value !== '__other'; } };
+    };
+    const draw = () => clear(list, rows.map((r, n) => {
+      const known = SIZE_KINDS.some(([k]) => k === r.kind);
+      const kind = h('select', { class: 'fam-input', 'aria-label': 'What the size is for' },
+        SIZE_KINDS.map(([k]) => h('option', { value: k }, k)), h('option', { value: '__other' }, 'Something else…'));
+      kind.value = known ? r.kind : '__other';
+      const kindOther = other(kind, (v) => { r.kind = v; }, 'e.g. Ring, Hat, Gloves', known ? '' : r.kind);
+      kindOther.show();
+      kind.addEventListener('change', () => { if (kind.value !== '__other') { r.kind = kind.value; draw(); } else r.kind = kindOther.box.value; });
+      const groups = sizeChoices(r.kind);
+      const all = groups.flatMap(([, vs]) => vs);
+      const size = h('select', { class: 'fam-input', 'aria-label': 'Size' }, h('option', { value: '' }, 'Pick a size'),
+        groups.map(([g, vs]) => h('optgroup', { label: g }, vs.map((v) => h('option', { value: v }, v)))), h('option', { value: '__other' }, 'Another size…'));
+      size.value = !r.value ? '' : all.includes(r.value) ? r.value : '__other';
+      const sizeOther = other(size, (v) => { r.value = v; }, 'Type the size', all.includes(r.value) ? '' : r.value || '');
+      sizeOther.show();
+      size.addEventListener('change', () => { r.value = size.value === '__other' ? sizeOther.box.value : size.value; });
+      return h('div', { class: 'fam-gift-line fam-gift-size-row' }, kind, kindOther.box, size, sizeOther.box,
+        h('button', { type: 'button', class: 'fam-icon-btn', 'aria-label': 'Remove this size', html: ICONS.close, onclick: () => { rows.splice(n, 1); draw(); } }));
+    }), h('button', { type: 'button', class: 'fam-btn small', onclick: () => { const used = new Set(rows.map((r) => r.kind)); rows.push({ kind: (SIZE_KINDS.find(([k]) => !used.has(k)) || SIZE_KINDS[0])[0], value: '' }); draw(); } }, '+ Add a size'));
+    draw();
+    const notes = h('textarea', { class: 'fam-input', rows: 2, maxlength: 400, placeholder: 'Anything else: runs small, prefers loose fit, ring size 7…' }, a.sizes || '');
     const fav = h('textarea', { class: 'fam-input', rows: 3, maxlength: 600, placeholder: 'Colours, hobbies, favourite characters, books they’ve read…' }, a.favorites || '');
     const dis = h('textarea', { class: 'fam-input', rows: 2, maxlength: 400, placeholder: 'Allergies, things they already have…' }, a.dislikes || '');
     const out = await sheet(this.app.root, {
-      title: `Sizes & favorites${this.who(l).name ? ` — ${this.who(l).name}` : ''}`,
-      body: h('div', { class: 'fam-form' }, field('Sizes', sizes), field('Favorites', fav), field('Not a fan of / already has', dis), h('p', { class: 'fam-muted small' }, 'Kept with every list for this person, so it’s there next time too.')),
-      actions: [{ label: 'Cancel' }, { label: 'Save', primary: true, submit: true, onClick: (close) => close({ sizes: sizes.value.trim(), favorites: fav.value.trim(), dislikes: dis.value.trim() }) }],
+      title: `Sizes & favorites${this.who(l).name ? ` — ${this.who(l).name}` : ''}`, wide: true,
+      body: h('div', { class: 'fam-form' }, field('Sizes', list), field('Size notes', notes), field('Favorites', fav), field('Not a fan of / already has', dis), h('p', { class: 'fam-muted small' }, 'Kept with every list for this person, so it’s there next time too.')),
+      actions: [{ label: 'Cancel' }, { label: 'Save', primary: true, submit: true, onClick: (close) => close({
+        sizeList: rows.map((r) => ({ kind: String(r.kind || '').trim().slice(0, 40), value: String(r.value || '').trim().slice(0, 40) })).filter((r) => r.kind && r.value),
+        sizes: notes.value.trim(), favorites: fav.value.trim(), dislikes: dis.value.trim(),
+      }) }],
     });
     if (!out) return;
     // The same person's other lists get it too.
@@ -1141,6 +1194,63 @@ export class GiftLists {
     } catch (err) { toastError(err); }
   }
 
+  // --- Adding from a store's page in the browser ------------------------------------------
+
+  // Amazon, Walmart and Best Buy turn servers away, but the page is right there in your browser:
+  // a bookmark button reads it there (name, price, picture) and opens the organizer with it.
+  // Android phones can also Share a page (or a product in the store's app) to the organizer.
+  async browserButton() {
+    const code = bookmarklet(location.origin);
+    const btn = h('a', { class: 'fam-gift-bookmarklet', href: code, title: 'Drag me to your bookmarks bar', onclick: (e) => { e.preventDefault(); toast('Drag the button to your bookmarks bar, then click it on a product’s page', { timeout: 4000 }); } }, '🎁 Add to gift list');
+    const copy = h('button', { type: 'button', class: 'fam-btn small', onclick: async () => { try { await navigator.clipboard.writeText(code); toast('Copied — paste it as the bookmark’s address', { timeout: 3000 }); } catch { toast('Couldn’t copy here; long-press the button instead', { timeout: 3000 }); } } }, 'Copy the button’s code');
+    await sheet(this.app.root, {
+      title: 'Add gifts straight from a store', wide: true,
+      body: h('div', { class: 'fam-form fam-gift-howto-sheet' },
+        h('p', {}, 'Amazon, Walmart and Best Buy don’t let other servers read their pages, so a pasted link only brings the gift’s name. This button reads the page in your own browser instead, while you’re looking at it, and works on any store.'),
+        h('h4', {}, '💻 On a computer'),
+        h('ol', {}, h('li', {}, 'Drag this button to your browser’s bookmarks bar: ', btn), h('li', {}, 'Open a product’s page at Amazon, Walmart, Best Buy, Target or any store.'), h('li', {}, 'Click 🎁 Add to gift list. The organizer opens with the name, price, picture and link filled in, and asks which list it goes on.')),
+        h('h4', {}, '📱 On an iPhone or iPad'),
+        h('ol', {}, h('li', {}, copy), h('li', {}, 'In Safari, bookmark any page, then edit that bookmark: name it “Add to gift list” and paste the code as its address.'), h('li', {}, 'On a product’s page, open your bookmarks and tap it.')),
+        h('h4', {}, '🤖 On Android'),
+        h('p', {}, 'Add the organizer to your home screen (Chrome’s menu → Add to Home screen or Install). Then on a store’s page, or a product in the Amazon or Walmart app, tap Share → Family. The name and link come across; prices and pictures from Amazon and Walmart are added by hand.'),
+        h('p', { class: 'fam-muted small' }, `Pasted links from stores that do show their pages to servers (Home Depot, Costco, Target, and most smaller shops) fill in everything by themselves.`)),
+      actions: [{ label: 'Done', primary: true, value: true }],
+    });
+  }
+
+  // A gift sent from the browser button or Android's Share: which list, then its screen.
+  async takeIncoming() {
+    let gift = null;
+    try { gift = JSON.parse(sessionStorage.getItem('fam-incoming-gift') || 'null'); sessionStorage.removeItem('fam-incoming-gift'); } catch { return; }
+    if (!gift || (!gift.u && !gift.t)) return;
+    const link = /^https?:\/\//i.test(gift.u || '') ? gift.u : urlIn(gift.t);
+    const name = cleanShareText(String(gift.t || '').replace(link || '\u0000', ''));
+    const fields = { text: name, url: link || '', price: parsePrice(gift.p), image: /^https:\/\//i.test(gift.i || '') ? gift.i : null };
+    if (fields.url) fields.store = storeLabel(fields.url);
+    this.app.go('lists');
+    const lists = this.view.lists().filter((l) => isGift(l) && !l.archived && (this.canEdit(l) || this.isRecipient(l)));
+    const pick = sheet(this.app.root, {
+      title: name ? `Add “${name.length > 60 ? `${name.slice(0, 60)}…` : name}” to…` : 'Add this gift to…', wide: true,
+      body: h('div', { class: 'fam-form' },
+        fields.image ? h('img', { class: 'fam-gift-incoming-pic', src: fields.image, alt: '' }) : null,
+        lists.length ? h('div', { class: 'fam-gift-kinds' }, lists.map((l) => h('button', { type: 'button', class: 'fam-gift-kind', style: { '--c': l.color || '#d6336c' }, onclick: () => pick.close(l.id) },
+          h('span', { class: 'fam-gift-kind-emoji' }, l.emoji || '🎁'), h('b', {}, l.title), h('small', { class: 'fam-muted' }, this.isRecipient(l) ? 'Your wish list' : [KIND_LABELS[l.kind], l.folder].filter(Boolean).join(' · ')))))
+          : h('p', { class: 'fam-muted' }, 'There are no gift lists yet.'),
+        h('button', { type: 'button', class: 'fam-btn', onclick: () => pick.close('__new') }, '+ A new gift list')),
+      actions: [{ label: 'Cancel' }],
+    });
+    let id = await pick;
+    if (!id) return;
+    if (id === '__new') {
+      const kind = await this.pickKind();
+      if (!GIFT_KINDS.includes(kind)) return;
+      await this.editList(null, kind);
+      id = this.view.listId;
+    }
+    const l = this.store.get('lists', id);
+    if (l) { this.view.open(l.id); await this.newGift(l, fields); }
+  }
+
   // --- Reminders (from the organizer's clock, while it's open) ------------------------------
 
   reminders(from, now) {
@@ -1174,6 +1284,47 @@ export class GiftLists {
       try { if ('Notification' in window && Notification.permission === 'granted') new Notification(title, { body, tag }); } catch { /* not allowed */ }
     }
   }
+}
+
+// The ten sizes people ask about most, and the usual sizes for each.
+const ADULT = ['XS', 'S', 'M', 'L', 'XL', 'XXL', '3XL'];
+const KIDS = ['Kids XS (4–5)', 'Kids S (6–7)', 'Kids M (8)', 'Kids L (10–12)', 'Kids XL (14–16)', 'Kids 4', 'Kids 5', 'Kids 6', 'Kids 7', 'Kids 8', 'Kids 10', 'Kids 12', 'Kids 14', 'Kids 16'];
+const LITTLE = ['2T', '3T', '4T', '5T'];
+const BABY = ['Newborn', '0–3 months', '3–6 months', '6–9 months', '6–12 months', '12 months', '18 months', '24 months'];
+const WOMENS = ['0', '2', '4', '6', '8', '10', '12', '14', '16', '18', '20'];
+const CLOTHES = [['Adult', ADULT], ['Kids', KIDS], ['Toddler', LITTLE], ['Baby', BABY]];
+export const SIZE_KINDS = [
+  ['Shirt / top', CLOTHES],
+  ['Sweater / hoodie', CLOTHES],
+  ['Jacket / coat', CLOTHES],
+  ['Pants', [['Adult', ADULT], ['Waist', ['28', '30', '32', '34', '36', '38', '40', '42']], ['Women’s', WOMENS], ['Kids', KIDS], ['Toddler', LITTLE], ['Baby', BABY]]],
+  ['Jeans', [['Waist × length', ['28×30', '29×30', '30×30', '30×32', '31×32', '32×30', '32×32', '33×32', '34×30', '34×32', '36×30', '36×32', '38×32', '40×32']], ['Women’s', WOMENS], ['Kids', KIDS], ['Toddler', LITTLE]]],
+  ['Dress', [['Women’s', WOMENS], ['Letter', ADULT], ['Kids', KIDS], ['Toddler', LITTLE], ['Baby', BABY]]],
+  ['Shoes', [['Men’s', ['7', '7.5', '8', '8.5', '9', '9.5', '10', '10.5', '11', '11.5', '12', '13', '14']], ['Women’s', ['5', '5.5', '6', '6.5', '7', '7.5', '8', '8.5', '9', '9.5', '10', '11']], ['Big kids', ['1Y', '1.5Y', '2Y', '2.5Y', '3Y', '3.5Y', '4Y', '4.5Y', '5Y', '5.5Y', '6Y', '7Y']], ['Little kids', ['10C', '10.5C', '11C', '11.5C', '12C', '12.5C', '13C', '13.5C']], ['Toddler', ['4C', '5C', '6C', '7C', '8C', '9C']]]],
+  ['Pajamas', CLOTHES],
+  ['Underwear', CLOTHES],
+  ['Socks', [['Adult', ['S', 'M', 'L', 'XL', 'Shoe 6–9', 'Shoe 9–12', 'Shoe 12–15']], ['Kids', ['Kids S', 'Kids M', 'Kids L', 'Toddler', 'Baby']]]],
+];
+const sizeChoices = (kind) => SIZE_KINDS.find(([k]) => k === kind)?.[1] || [['Usual sizes', [...ADULT, ...KIDS.slice(0, 5)]]];
+const sizeList = (a) => (Array.isArray(a?.sizeList) ? a.sizeList.filter((x) => x && x.kind && x.value) : []);
+
+// Text that comes with a shared link ("Check out this deal on Amazon: …") without the chatter.
+export function cleanShareText(t) {
+  return String(t || '').replace(/^\s*(check out (this|these)( deal| item| product)?( on [\w.]+)?|i found this on [\w.]+|look at this|shared from [\w. ]+)\s*[:!\-–—]?\s*/i, '')
+    .replace(/\s*(via @?\w+|on (amazon|walmart|best buy|target|ebay)(\.com)?)\s*$/i, '').replace(/^["'“]+|["'”]+$/g, '').replace(/\s+/g, ' ').trim().slice(0, 300);
+}
+
+// A store's name from its address.
+const STORE_LABELS = { 'amazon.com': 'Amazon', 'a.co': 'Amazon', 'amzn.to': 'Amazon', 'walmart.com': 'Walmart', 'bestbuy.com': 'Best Buy', 'target.com': 'Target', 'ebay.com': 'eBay', 'etsy.com': 'Etsy', 'costco.com': 'Costco', 'homedepot.com': 'Home Depot', 'lowes.com': 'Lowe’s', 'kohls.com': 'Kohl’s', 'macys.com': 'Macy’s' };
+export function storeLabel(url) {
+  try { const host = new URL(url).hostname.replace(/^(www|smile|m)\./, ''); return STORE_LABELS[host] || host; } catch { return null; }
+}
+
+// The browser button: run on a store's page, it reads the product there (its schema.org details,
+// Amazon's own page parts, or the sharing tags) and opens the organizer with it.
+function bookmarklet(origin) {
+  const src = `(()=>{const d=document,q=s=>d.querySelector(s),m=n=>q('meta[property="'+n+'"],meta[name="'+n+'"]')?.content,t=x=>(x||'').replace(/\\s+/g,' ').trim();let j={};for(const s of d.querySelectorAll('script[type="application/ld+json"]')){try{const w=x=>{if(!x||typeof x!='object')return;if(Array.isArray(x))return x.forEach(w);if(/product/i.test([].concat(x['@type']).join()))j=j.name?j:x;w(x['@graph'])};w(JSON.parse(s.textContent))}catch(e){}}const o=[].concat(j.offers||[])[0]||{},im=q('#landingImage'),pic=im?.getAttribute('data-old-hires')||im?.src||[].concat(j.image||[]).map(x=>typeof x=='string'?x:x?.url)[0]||m('og:image')||'',g={u:location.href.split('#')[0],t:t(q('#productTitle')?.textContent)||t(j.name)||m('og:title')||d.title,p:t(q('#corePrice_feature_div .a-offscreen,#corePriceDisplay_desktop_feature_div .a-offscreen,.a-price .a-offscreen')?.textContent)||String(o.price||o.lowPrice||[].concat(o.offers||[])[0]?.price||'')||m('product:price:amount')||q('[itemprop=price]')?.getAttribute('content')||t(q('[data-test=product-price],[data-testid=customer-price] span,.priceView-customer-price span')?.textContent),i:pic};window.open(${JSON.stringify(`${origin}/family#gift=`)}+encodeURIComponent(JSON.stringify(g)),'_blank')})()`;
+  return `javascript:${src}`;
 }
 
 // A gift copied to a new list: the idea, without who got it or how far it got.

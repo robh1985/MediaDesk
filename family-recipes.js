@@ -144,7 +144,7 @@ function privateAddress(ip) {
   if (v.startsWith('::ffff:')) return privateAddress(v.slice(7));
   return v === '::1' || v === '::' || v.startsWith('fc') || v.startsWith('fd') || v.startsWith('fe8') || v.startsWith('fe9') || v.startsWith('fea') || v.startsWith('feb');
 }
-async function publicFetch(raw, { accept = 'text/html,application/xhtml+xml', limit = MAX_PAGE } = {}) {
+async function publicFetch(raw, { accept = 'text/html,application/xhtml+xml', limit = MAX_PAGE, timeout = 20e3 } = {}) {
   let url = raw;
   for (let hop = 0; hop < 6; hop++) {
     let u;
@@ -153,7 +153,7 @@ async function publicFetch(raw, { accept = 'text/html,application/xhtml+xml', li
     const host = u.hostname.replace(/^\[|\]$/g, '');
     const addrs = net.isIP(host) ? [{ address: host }] : await dns.lookup(host, { all: true }).catch(() => { throw new RecipeError(400, `Couldn’t find ${host}`); });
     if (!addrs.length || addrs.some((a) => privateAddress(a.address))) throw new RecipeError(400, 'Only public websites can be imported from');
-    const res = await fetch(u, { redirect: 'manual', headers: { 'User-Agent': UA, Accept: accept, 'Accept-Language': 'en' }, signal: AbortSignal.timeout(20e3) });
+    const res = await fetch(u, { redirect: 'manual', headers: { 'User-Agent': UA, Accept: accept, 'Accept-Language': 'en' }, signal: AbortSignal.timeout(timeout) });
     if (res.status >= 300 && res.status < 400 && res.headers.get('location')) { url = new URL(res.headers.get('location'), u).toString(); continue; }
     if (!res.ok) throw new RecipeError(502, `The website answered ${res.status}`);
     const len = Number(res.headers.get('content-length') || 0);

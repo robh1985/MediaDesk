@@ -204,11 +204,16 @@ const toPrice = (v) => {
   return Number.isFinite(n) && n > 0 ? Math.round(n * 100) / 100 : null;
 };
 
+// Pages stores show to servers they don't want reading them.
+const BLOCKED = /api-services-support@amazon\.com|<title[^>]*>\s*(Robot Check|Access Denied|Pardon Our Interruption|Just a moment)|blocked - redirecting|px-captcha|captcha-delivery\.com|Enter the characters you see below|sec-if-cpt-container|_Incapsula_Resource/i;
+const STORE_NAMES = { 'amazon.com': 'Amazon', 'walmart.com': 'Walmart', 'bestbuy.com': 'Best Buy', 'target.com': 'Target', 'ebay.com': 'eBay', 'etsy.com': 'Etsy', 'costco.com': 'Costco', 'homedepot.com': 'Home Depot', 'lowes.com': 'Lowe’s', 'a.co': 'Amazon', 'amzn.to': 'Amazon' };
+const blockedNote = (url) => `${STORE_NAMES[storeName(url)] || 'This store'} doesn’t let servers read its pages, so only the name came from the link. To bring the price and picture too, add it with the 🎁 Add to gift list button in your browser, while you’re on the product’s page.`;
+
 // A readable name from the address itself (for stores that won't show their page to a server).
 function nameFromUrl(raw) {
   try {
     const u = new URL(raw);
-    const parts = u.pathname.split('/').map((s) => decodeURIComponent(s)).filter((s) => /[a-z]/i.test(s) && s.length > 3 && !/^(dp|gp|product|products|p|ip|item|itm|s|en|us|shop)$/i.test(s));
+    const parts = u.pathname.split('/').map((s) => { try { return decodeURIComponent(s); } catch { return s; } }).filter((s) => /[a-z]/i.test(s) && s.length > 3 && !/^(dp|gp|product|products|p|ip|item|itm|s|en|us|shop|site)$/i.test(s) && !/^[A-Z0-9]{10}$/.test(s));
     const best = parts.filter((s) => /[-_+]/.test(s)).sort((a, b) => b.length - a.length)[0] || '';
     const text = best.replace(/\.(html?|aspx?|php)$/i, '').replace(/[-_+]+/g, ' ').replace(/\s+/g, ' ').trim();
     return text ? text.charAt(0).toUpperCase() + text.slice(1) : '';
@@ -231,11 +236,16 @@ function parsePreview(html, url) {
   const offers = [].concat(p.offers || []).flatMap((o) => [o, ...[].concat(o?.offers || [])]).filter(Boolean);
   const price = toPrice(offers.map((o) => o.price ?? o.lowPrice ?? o.priceSpecification?.price).find((x) => x != null))
     ?? toPrice(metaContent(html, ['product:price:amount', 'og:price:amount', 'price', 'twitter:data1']))
-    ?? toPrice(/itemprop=["']price["'][^>]*content=["']([^"']+)/i.exec(html)?.[1]);
+    ?? toPrice(/itemprop=["']price["'][^>]*content=["']([^"']+)/i.exec(html)?.[1])
+    // Store pages that keep it elsewhere: Amazon's price box, Walmart's and Target's page data.
+    ?? toPrice(/class=["']a-price[^"']*["'][^>]*>\s*<span class=["']a-offscreen["']>([^<]+)/i.exec(html)?.[1])
+    ?? toPrice(/"currentPrice":\{[^}]*?"price":([\d.]+)/.exec(html)?.[1])
+    ?? toPrice(/current_retail\\?":\s*([\d.]+)/.exec(html)?.[1]);
   const currency = offers.map((o) => o.priceCurrency).find(Boolean) || metaContent(html, ['product:price:currency', 'og:price:currency', 'priceCurrency']) || '';
   const img = [].concat(p.image || []).map((x) => (typeof x === 'string' ? x : x?.url || x?.contentUrl)).find(Boolean)
-    || metaContent(html, ['og:image:secure_url', 'og:image', 'twitter:image', 'twitter:image:src']);
-  const title = decode(p.name || '') || metaContent(html, ['og:title', 'twitter:title']) || decode(/<title[^>]*>([\s\S]*?)<\/title>/i.exec(html)?.[1] || '');
+    || metaContent(html, ['og:image:secure_url', 'og:image', 'twitter:image', 'twitter:image:src'])
+    || decode(/id=["']landingImage["'][^>]*data-old-hires=["']([^"']+)/i.exec(html)?.[1] || /data-old-hires=["']([^"']+)["'][^>]*id=["']landingImage/i.exec(html)?.[1] || '');
+  const title = decode(p.name || '') || decode(/id=["']productTitle["'][^>]*>([\s\S]*?)<\/span>/i.exec(html)?.[1] || '') || metaContent(html, ['og:title', 'twitter:title']) || decode(/<title[^>]*>([\s\S]*?)<\/title>/i.exec(html)?.[1] || '');
   const brand = decode(typeof p.brand === 'string' ? p.brand : p.brand?.name || '');
   return { title: cleanTitle(title, url) || nameFromUrl(url), price, currency: String(currency).slice(0, 3).toUpperCase(), image: img ? new URL(img, url).toString() : '', brand };
 }
@@ -262,11 +272,20 @@ function createGifts({ load, persist, recipes, mock = false }) {
     const fallback = (why) => ({ url, title: nameFromUrl(url), price: null, image: null, store: storeName(url), partial: true, note: why });
     if (mock) return { url, title: nameFromUrl(url) || 'Demo gift', price: 24.99, image: null, store: storeName(url), partial: true, note: 'The demo doesn’t read websites' };
     let page;
-    try { page = await publicFetch(url); } catch (err) {
+    try { page = await publicFetch(url, { timeout: 12e3 }); } catch (err) {
       // Big stores often turn servers away: the address still tells us something.
-      return fallback(err.status === 400 ? err.message : 'The store didn’t show its page to MediaDesk, so only the name from the address was filled in');
+      return { ...fallback(err.status === 400 ? err.message : blockedNote(url)), blocked: err.status !== 400 };
     }
-    const info = parsePreview(page.buf.toString('utf8'), page.url);
+    const html = page.buf.toString('utf8');
+    // A "you look like a robot" page instead of the product (Amazon, Walmart and others do this to
+    // servers): the name comes from the address, and the browser button brings the rest.
+    let landed = '';
+    try { landed = new URL(page.url).pathname; } catch { /* the address given */ }
+    if (BLOCKED.test(html.slice(0, 60000)) || /^\/blocked/.test(landed)) {
+      const where = /^\/blocked/.test(landed) ? url : page.url;
+      return { ...fallback(blockedNote(where)), url: where, title: nameFromUrl(where) || nameFromUrl(url), blocked: true };
+    }
+    const info = parsePreview(html, page.url);
     let image = null;
     if (info.image) {
       try {
@@ -312,7 +331,7 @@ function createGifts({ load, persist, recipes, mock = false }) {
       fields: (l.fields || []).map((f) => ({ id: f.id, label: f.label, type: f.type })),
       items: sharedItems(l).sort((a, b) => (b.mostWanted ? 1 : 0) - (a.mostWanted ? 1 : 0) || (b.stars || 0) - (a.stars || 0) || (a.order ?? 0) - (b.order ?? 0)).map((i) => ({
         id: i.id, text: i.text, url: /^https?:\/\//i.test(i.url || '') ? i.url : null, price: i.price ?? null, stars: i.stars || 0, mostWanted: Boolean(i.mostWanted), notes: i.notes || '',
-        image: i.image ? `/gift-share/${l.shareToken}/image/${encodeURIComponent(i.image)}` : null, values: i.values || {},
+        image: /^https:\/\//i.test(i.image || '') ? i.image : i.image ? `/gift-share/${l.shareToken}/image/${encodeURIComponent(i.image)}` : null, values: i.values || {},
         taken: Boolean(i.claimedBy || i.claimedName || ['bought', 'wrapped', 'given'].includes(i.status)), mine: Boolean(mine && i.claimKey === mine),
       })),
     };
@@ -377,4 +396,4 @@ function createGifts({ load, persist, recipes, mock = false }) {
   return { preview, setShare, publicHandle };
 }
 
-module.exports = { createGifts, guard, viewCollections, viewResult, parsePreview, nameFromUrl, isGift, canSee, canEdit, canClaim, itemVisible, GiftError };
+module.exports = { BLOCKED, createGifts, guard, viewCollections, viewResult, parsePreview, nameFromUrl, isGift, canSee, canEdit, canClaim, itemVisible, GiftError };

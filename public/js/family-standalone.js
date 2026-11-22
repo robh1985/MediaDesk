@@ -10,6 +10,19 @@ import { watchKeyboard } from './apps/family/shared.js';
 const root = document.getElementById('family');
 const params = new URLSearchParams(location.search);
 
+// A gift on its way in: from the 🎁 Add to gift list browser button (#gift=…), or shared to the
+// installed organizer from another app (Android's Share, set up in family.webmanifest: ?url=…&text=…&title=…). It's kept until
+// the organizer is open (signing in first if need be), then asks which list it goes on.
+try {
+  let gift = null;
+  if (location.hash.startsWith('#gift=')) gift = JSON.parse(decodeURIComponent(location.hash.slice(6)));
+  else if (params.has('url') || params.has('text')) gift = { u: params.get('url') || '', t: [params.get('title'), params.get('text')].filter(Boolean).join(' ') };
+  if (gift && typeof gift === 'object') {
+    sessionStorage.setItem('fam-incoming-gift', JSON.stringify(gift).slice(0, 8000));
+    history.replaceState(null, '', '/family');
+  }
+} catch { /* not a gift after all */ }
+
 // Light or dark before signing in: this device's choice, else its own light/dark setting. Once
 // signed in the organizer keeps it right (Settings → General → Appearance).
 const dark = matchMedia('(prefers-color-scheme: dark)');

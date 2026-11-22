@@ -200,7 +200,8 @@ export class Store {
     this.emit('local');
     return r.list;
   }
-  imageUrl(name) { return name ? `${BASE}/recipes/image/${encodeURIComponent(name)}` : null; }
+  // A gift's picture: one kept here, or one at the store (from the browser button).
+  imageUrl(name) { return !name ? null : /^https:\/\//i.test(name) ? name : `${BASE}/recipes/image/${encodeURIComponent(name)}`; }
   // Fetch everything now (after the server changed things itself, like a Mealie import).
   async refresh() { const d = await call('data'); this.apply(d); this.emit('remote'); }
 
