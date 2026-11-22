@@ -1,0 +1,37 @@
+:root { --bg: #f8f9fa; --fg: #16181d; --muted: #6b7280; --card: #fff; --line: #e5e7eb; --c: #d6336c; color-scheme: light dark; }
+@media (prefers-color-scheme: dark) { :root { --bg: #15171b; --fg: #e9ecef; --muted: #9aa0a8; --card: #1e2126; --line: #2e3238; } }
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.5 system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; }
+main { max-width: 760px; margin: 0 auto; padding: 20px 16px 40px; }
+.muted { color: var(--muted); }
+a { color: var(--c); }
+.gs-head { display: flex; gap: 14px; align-items: center; padding: 18px; border-radius: 16px; background: color-mix(in srgb, var(--c) 14%, var(--card)); border: 1px solid color-mix(in srgb, var(--c) 35%, var(--line)); }
+.gs-emoji { font-size: 44px; line-height: 1; }
+.gs-head h1 { margin: 0; font-size: 24px; line-height: 1.2; }
+.gs-head p { margin: 4px 0 0; }
+.gs-note { margin: 14px 0 0; padding: 12px 14px; border-radius: 12px; background: var(--card); border: 1px solid var(--line); white-space: pre-wrap; }
+.gs-tools { display: flex; gap: 8px; flex-wrap: wrap; margin: 16px 0 8px; align-items: center; }
+.gs-tools button, .gs-tools select { height: 34px; padding: 0 12px; border-radius: 999px; border: 1px solid var(--line); background: var(--card); color: inherit; font: inherit; font-size: 14px; cursor: pointer; }
+.gs-tools button.on { border-color: var(--c); background: color-mix(in srgb, var(--c) 14%, var(--card)); }
+.gs-list { display: flex; flex-direction: column; gap: 10px; margin-top: 8px; }
+.gs-item { display: flex; gap: 12px; align-items: center; padding: 12px; border-radius: 14px; background: var(--card); border: 1px solid var(--line); }
+.gs-item.taken { opacity: .6; }
+.gs-item.mine { opacity: 1; border-color: var(--c); }
+.gs-pic { width: 64px; height: 64px; border-radius: 10px; object-fit: cover; flex: none; background: var(--line); }
+.gs-body { flex: 1; min-width: 0; }
+.gs-name { font-weight: 650; overflow-wrap: anywhere; }
+.gs-meta { display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 13.5px; color: var(--muted); }
+.gs-meta b { color: var(--fg); }
+.gs-want { color: var(--c); font-weight: 700; }
+.gs-btn { flex: none; height: 38px; padding: 0 14px; border-radius: 10px; border: 1px solid var(--c); background: var(--c); color: #fff; font: inherit; font-weight: 650; cursor: pointer; }
+.gs-btn.ghost { background: transparent; color: var(--c); }
+.gs-btn:disabled { border-color: var(--line); background: transparent; color: var(--muted); cursor: default; }
+.gs-empty, .gs-gone { text-align: center; padding: 60px 0; }
+.gs-dialog { position: fixed; inset: 0; background: rgba(0,0,0,.45); display: grid; place-items: center; padding: 16px; }
+.gs-dialog form { width: min(420px, 100%); background: var(--card); border-radius: 16px; padding: 18px; display: flex; flex-direction: column; gap: 12px; }
+.gs-dialog h2 { margin: 0; font-size: 18px; }
+.gs-dialog input { height: 42px; padding: 0 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg); color: inherit; font: inherit; }
+.gs-dialog .row { display: flex; gap: 8px; justify-content: flex-end; }
+.gs-error { color: #e03131; font-size: 14px; min-height: 1em; }
+footer { margin-top: 30px; font-size: 12px; text-align: center; }
+@media (max-width: 520px) { .gs-item { flex-wrap: wrap; } .gs-btn { width: 100%; } .gs-pic { width: 54px; height: 54px; } }

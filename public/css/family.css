@@ -960,3 +960,124 @@ h3.fam-bk-h { font-size: .9em; letter-spacing: .14em; text-transform: uppercase;
 .fam-drawer .fam-lists-hidden { flex-direction: row; justify-content: center; gap: 6px; margin-top: 4px; }
 @media (prefers-reduced-motion: reduce) { .fam-drawer-shade, .fam-drawer-panel { transition: none; } }
 .fam-drawer .fam-list-tab.add > span:first-child { box-sizing: content-box; width: 20px; height: 20px; }
+
+/* Gift lists (gifts.js): Christmas folders, birthdays and lists for any occasion. */
+.fam-subrail .fam-list-child, .fam-drawer .fam-list-child { margin-left: 10px; border-left: 2px solid color-mix(in srgb, #2f9e44 35%, transparent); border-radius: 0 12px 12px 0; }
+.fam-subrail .fam-list-child { font-size: 11px !important; padding-top: 6px; padding-bottom: 6px; }
+.fam-list-folder { font-weight: 700; }
+.fam-gift-head { flex-wrap: wrap; row-gap: 6px; }
+.fam-gift-chip { display: inline-flex; align-items: center; gap: 4px; padding: 3px 10px; border-radius: 999px; font-size: 13px; font-weight: 600; background: color-mix(in srgb, var(--c, var(--f-accent)) 12%, var(--f-panel)); border: 1px solid color-mix(in srgb, var(--c, var(--f-accent)) 30%, var(--f-line)); white-space: nowrap; }
+.fam-gift-chip.milestone { background: color-mix(in srgb, #f08c00 18%, var(--f-panel)); border-color: #f08c00; }
+.fam-gift-chip.urgent { border-color: var(--f-danger); color: var(--f-danger); }
+.fam-gift-budget { display: inline-flex; flex-direction: column; gap: 3px; font-size: 12.5px; font-weight: 650; min-width: 120px; }
+.fam-gift-budget.over { color: var(--f-danger); }
+.fam-gift-bar { display: block; height: 6px; border-radius: 3px; background: var(--f-line); overflow: hidden; width: 100%; }
+.fam-gift-bar i { display: block; height: 100%; background: var(--c, var(--f-accent)); border-radius: 3px; }
+.fam-gift-budget.over .fam-gift-bar i { background: var(--f-danger); }
+.fam-gift-note { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 9px 12px; border-radius: 10px; font-size: 14px; background: color-mix(in srgb, var(--f-accent) 8%, var(--f-panel)); border: 1px solid color-mix(in srgb, var(--f-accent) 20%, var(--f-line)); }
+.fam-gift-note.quiet { background: none; border-color: transparent; padding: 0 2px; color: var(--f-muted); font-size: 13px; }
+.fam-gift-note.quiet:empty { display: none; }
+.fam-gift-note.hide { background: color-mix(in srgb, #f08c00 10%, var(--f-panel)); border-color: color-mix(in srgb, #f08c00 35%, var(--f-line)); }
+.fam-gift-tabs { display: flex; gap: 6px; flex-wrap: wrap; }
+.fam-gift-tabs .fam-chip { padding: 0 14px; }
+.fam-gift-filters { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.fam-gift-filters .fam-chip { height: 30px; padding: 0 11px; font-size: 13px !important; }
+.fam-gift-sort { width: auto; height: 32px; padding: 0 8px; font-size: 13px; margin-left: auto; }
+.fam-gift-price-in { width: 92px; flex: none; }
+.fam-gift { gap: 8px; }
+.fam-gift.wanted { background: color-mix(in srgb, var(--c) 5%, transparent); }
+.fam-gift-pic { width: 44px; height: 44px; flex: none; border-radius: 9px; object-fit: cover; background: var(--f-panel2); border: 1px solid var(--f-line); }
+.fam-gift-pic.none { display: inline-flex; align-items: center; justify-content: center; font-size: 22px; }
+.fam-gift-want { color: var(--c); }
+.fam-gift-price { color: var(--f-fg) !important; font-weight: 650; }
+.fam-gift-stars { color: #f08c00 !important; letter-spacing: 1px; }
+.fam-gift-secret { color: #c2255c !important; font-weight: 600; }
+.fam-gift-wish { color: #f08c00 !important; font-weight: 600; }
+.fam-gift-link { font-size: 12.5px; color: var(--f-accent); text-decoration: none; }
+.fam-gift-link:hover { text-decoration: underline; }
+.fam-gift-status { flex: none; display: inline-flex; align-items: center; gap: 4px; height: 32px; padding: 0 9px; border-radius: 9px; border: 1px solid var(--f-line); background: var(--f-panel2); cursor: pointer; font-size: 12.5px !important; font-weight: 600; }
+.fam-gift-status.s-bought { border-color: #1c7ed6; }
+.fam-gift-status.s-wrapped { border-color: #ae3ec9; }
+.fam-gift-status.s-given { border-color: #2f9e44; }
+.fam-gift-claim { flex: none; display: inline-flex; align-items: center; gap: 5px; height: 32px; padding: 0 11px; border-radius: 9px; border: 1px solid var(--c); background: var(--c); color: #fff !important; cursor: pointer; font-weight: 650; font-size: 13px !important; white-space: nowrap; }
+.fam-gift-claim.taken { background: var(--f-panel2); color: var(--f-fg) !important; border-color: var(--f-line); }
+.fam-gift-claim.taken.yours { border-color: var(--c); background: color-mix(in srgb, var(--c) 12%, var(--f-panel)); }
+.fam-gift-claim:disabled { cursor: default; opacity: .85; }
+.fam-gift-panel { border: 1px solid var(--f-line); border-radius: 10px; padding: 6px 12px; background: var(--f-panel2); }
+.fam-gift-panel summary { cursor: pointer; font-weight: 600; font-size: 14px; padding: 3px 0; }
+.fam-gift-panel[open] { display: flex; flex-direction: column; gap: 8px; padding-bottom: 10px; }
+.fam-gift-panel .fam-btn { align-self: flex-start; }
+.fam-gift-about { display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; margin: 0; font-size: 14px; }
+.fam-gift-about dt { color: var(--f-muted); }
+.fam-gift-about dd { margin: 0; white-space: pre-wrap; }
+.fam-gift-photos { display: flex; gap: 8px; flex-wrap: wrap; }
+.fam-gift-photos img { width: 96px; height: 96px; object-fit: cover; border-radius: 10px; display: block; }
+.fam-gift-photo { position: relative; }
+.fam-gift-photo .fam-icon-btn { position: absolute; top: 2px; right: 2px; background: var(--f-panel); }
+.fam-gift-links { margin: 0; padding-left: 20px; }
+.fam-gift-notes { white-space: pre-wrap; font-size: 14px; }
+.fam-gift-ship { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; font-size: 13px; }
+.fam-gift-history { margin-top: 10px; border-top: 1px solid var(--f-line); padding-top: 6px; }
+.fam-gift-history summary { cursor: pointer; font-weight: 600; color: var(--f-muted); padding: 6px 0; }
+.fam-gift-past { display: flex; justify-content: space-between; gap: 10px; padding: 6px 4px; border-bottom: 1px solid var(--f-line); }
+.fam-gift-buyer { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; border-radius: 10px; border: 1px dashed color-mix(in srgb, #c2255c 40%, var(--f-line)); background: color-mix(in srgb, #c2255c 4%, var(--f-panel)); }
+.fam-gift-chips { display: flex; flex-direction: column; gap: 6px; }
+.fam-gift-chip-row { align-items: center; }
+.fam-gift-pic-edit { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.fam-gift-pic-edit img { width: 64px; height: 64px; border-radius: 10px; object-fit: cover; }
+.fam-gift-people { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; overflow-y: auto; }
+.fam-gift-person { --c: var(--f-accent); display: flex; flex-direction: column; align-items: center; gap: 5px; padding: 14px 10px; border-radius: 14px; border: 1px solid var(--f-line); border-top: 4px solid var(--c); background: var(--f-panel2); cursor: pointer; text-align: center; }
+.fam-gift-person:hover { border-color: var(--c); }
+.fam-gift-person small { color: var(--f-muted); }
+.fam-gift-person.add { border-style: dashed; border-top-width: 1px; justify-content: center; color: var(--f-muted); }
+.fam-gift-person.add svg { width: 26px; height: 26px; }
+.fam-gift-row { display: flex; gap: 8px; flex-wrap: wrap; }
+.fam-gift-got { flex: none; height: 32px; padding: 0 9px; border-radius: 9px; border: 1px solid var(--f-line); background: var(--f-panel2); cursor: pointer; font-size: 12.5px !important; }
+.fam-gift-got.on { border-color: var(--c); background: color-mix(in srgb, var(--c) 12%, var(--f-panel)); font-weight: 600; }
+.fam-gift-party-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; padding: 8px 4px 10px; flex-wrap: wrap; }
+.fam-gift-section { margin-bottom: 8px; }
+.fam-gift-section .fam-list-add { margin-top: 6px; }
+.fam-gift-rsvp { flex: none; height: 32px; padding: 0 9px; border-radius: 9px; border: 1px solid var(--f-line); background: var(--f-panel2); cursor: pointer; font-size: 12.5px !important; white-space: nowrap; }
+.fam-gift-rsvp.r-yes { border-color: #2f9e44; }
+.fam-gift-rsvp.r-no { border-color: var(--f-danger); opacity: .8; }
+.fam-gift-rsvp.r-maybe { border-color: #f08c00; }
+.fam-gift-kinds { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 8px; }
+.fam-gift-kind { --c: var(--f-accent); display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 12px; border-radius: 12px; border: 1px solid var(--f-line); background: var(--f-panel2); cursor: pointer; text-align: left; }
+.fam-gift-kind:hover, .fam-gift-kind:focus-visible { border-color: var(--c); }
+.fam-gift-kind-emoji { font-size: 26px; }
+.fam-gift-menu { display: flex; flex-direction: column; gap: 4px; }
+.fam-gift-menu-item { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--f-line); background: var(--f-panel2); cursor: pointer; text-align: left; }
+.fam-gift-menu-item:hover { border-color: var(--f-accent); }
+.fam-gift-access summary { cursor: pointer; font-weight: 600; }
+.fam-gift-access[open] { display: flex; flex-direction: column; gap: 8px; }
+@media (max-width: 760px) {
+  .fam-gift-head .fam-gift-budget { min-width: 0; flex: 1 1 100%; order: 10; }
+  .fam-gift { flex-wrap: wrap; }
+  .fam-gift-status, .fam-gift-claim { height: 30px; }
+  .fam-gift-sort { margin-left: 0; }
+  .fam-gift-price-in { width: 72px; }
+  .fam-gift-people { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .fam-gift-filters { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+  .fam-gift-filters .fam-chip { flex: none; }
+}
+.fam-gift-line { display: flex; gap: 6px; align-items: center; }
+.fam-gift-line > .fam-input { flex: 1 1 0; min-width: 0; width: auto; }
+.fam-gift-line > select.fam-input { flex: 0 0 auto; }
+.fam-gift-line > .fam-gift-price-in { flex: 0 0 92px; }
+.fam-gift-line .fam-toggle { flex: none; }
+.fam-sub-extra { flex: none; }
+.fam-drawer .fam-list-count { flex: none; white-space: nowrap; min-width: 18px; width: auto; }
+@media (max-width: 760px) {
+  .fam-list-main > .fam-gift-head { flex-wrap: wrap; }
+  .fam-list-main > .fam-gift-head .fam-toolbar-title { flex: 1 1 calc(100% - 140px); white-space: normal; }
+  .fam-gift-ship { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+  .fam-gift-ship > * { flex: none; }
+  .fam-gift:has(.fam-gift-status) .fam-item-text { flex: 1 1 calc(100% - 60px); }
+  .fam-gift > .fam-gift-status { margin-left: 52px; }
+  .fam-gift > .fam-gift-claim:first-of-type { margin-left: auto; }
+  .fam-gift > .fam-gift-status + .fam-gift-claim { margin-left: 0; }
+  .fam-gift-line { flex-wrap: wrap; }
+}
+.fam-drawer .fam-rail-btn .fam-list-count { max-width: none; overflow: visible; text-overflow: clip; }
+.fam-drawer .fam-rail-btn > .fam-sub-extra { max-width: none; overflow: visible; }
+.fam-rail-btn .fam-sub-extra .fam-list-count { width: auto; height: 18px; }

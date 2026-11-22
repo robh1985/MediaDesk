@@ -1,10 +1,12 @@
 // Lists: groceries (sorted into aisles as you add them), to-dos with a person and a due date,
-// and any other list the family keeps.
+// and any other list the family keeps; gift lists (Christmas, birthdays, any occasion) are in
+// gifts.js.
 
 import { h, clear, toast, toastError } from '../../ui.js';
 import { ymd, parseYmd, fmtDate, todayYmd } from './dates.js';
 import { sheet, field, input, select, avatar, memberPicker, emojiButton, colorPicker, ICONS } from './shared.js';
 import { shoppingMode } from './shopping.js';
+import { GiftLists, isGiftish } from './gifts.js';
 import { DEFAULT_AISLES, aisles, aisleFor, findAisle, seedAisles, foods, matchFood, ownFood, searchFoods, guessAisle, foodKey, OTHER } from './groceries.js';
 
 // Which aisle a grocery item is in, from the food database; the family's aisles and foods.
@@ -16,7 +18,11 @@ export class ListsView {
     this.store = app.store;
     this.listId = null;
     this.showDone = true;
+    this.gifts = new GiftLists(this);
   }
+
+  // Show a list (or a Christmas folder, or the archive).
+  open(id) { this.listId = id; if (this.el) this.render(this.el); }
 
   // Signed in on the organizer's own page as a family member (not a parent): they assign to-dos
   // to themselves only. Parents (and MediaDesk itself) assign them to anyone.
@@ -63,21 +69,28 @@ export class ListsView {
     const lists = this.shown(all);
     // Lists the people picked at the top leave out (to-do lists for someone else): say so.
     const hidden = all.length - lists.length;
-    if (!lists.find((l) => l.id === this.listId)) this.listId = lists[0]?.id || null;
-    // The lists: a menu beside the left one (a grid at the top on a phone), each in its colour,
-    // with how many things are left on it and who it's for.
-    const row = this.app.subMenu('Lists', lists.map((l) => {
+    // The menu: everyday lists, Christmas folders with their lists, birthdays, other gift lists and
+    // the archive (gifts.js). Archived lists can still be opened from the archive.
+    let entries = [];
+    try { entries = this.gifts.menu(lists); } catch (err) { console.warn('Family Organizer: gift lists', err); entries = lists.filter((l) => !isGiftish(l)).map((list) => ({ list })); }
+    const known = (id) => entries.some((e) => (e.id || e.list.id) === id) || lists.some((l) => l.id === id && l.archived);
+    if (!this.listId || !known(this.listId)) this.listId = (entries.find((e) => e.list) || entries[0])?.list?.id || entries[0]?.id || null;
+    // The lists: a menu beside the left one (a drawer on a phone), each in its colour, with how
+    // many things are left on it (a countdown for gift lists) and who it's for.
+    const row = this.app.subMenu('Lists', entries.map((e) => {
+      if (!e.list) return [e.id, e.title, e.emoji, e.color, { cls: `fam-list-tab ${e.cls || ''}`, extra: e.count ? h('span', { class: 'fam-sub-extra' }, h('span', { class: 'fam-list-count' }, e.count)) : null }];
+      const l = e.list;
       // One odd list (no name, say) must never stop the others showing.
       const title = String(l.title || l.name || 'Untitled list');
       let extra = null;
       try {
-        const left = this.items(l.id).filter((i) => !i.done).length;
-        const who = (Array.isArray(l.members) ? l.members : []).map((id) => this.store.member(id)).filter(Boolean).slice(0, 3);
+        const left = e.quiet ? null : isGiftish(l) ? this.gifts.menuCount(l) : this.items(l.id).filter((i) => !i.done).length;
+        const who = (Array.isArray(l.members) ? l.members : l.recipient ? [l.recipient] : []).map((id) => this.store.member(id)).filter(Boolean).slice(0, 3);
         extra = h('span', { class: 'fam-sub-extra' },
           who.length ? h('span', { class: 'fam-agenda-who' }, who.map((m) => avatar(m, 'xs'))) : null,
           left ? h('span', { class: 'fam-list-count' }, left) : null);
       } catch (err) { console.warn('Family Organizer: list', l.id, err); }
-      return [l.id, title, typeof l.emoji === 'string' && l.emoji ? l.emoji : '📝', typeof l.color === 'string' && l.color ? l.color : '#1c7ed6', { cls: 'fam-list-tab', extra }];
+      return [l.id, title, typeof l.emoji === 'string' && l.emoji ? l.emoji : '📝', typeof l.color === 'string' && l.color ? l.color : '#1c7ed6', { cls: `fam-list-tab ${e.cls || ''}`, extra }];
     }), this.listId, (id) => { this.listId = id; this.render(el); }, 'fam-lists-nav', {
       after: h('div', { class: 'fam-sub-after' },
         h('button', { class: 'fam-rail-btn fam-list-tab add', style: { '--rc': '#868e96' }, onclick: () => this.editList(null) }, h('span', { html: ICONS.plus }), h('span', {}, 'New list')),
@@ -86,6 +99,8 @@ export class ListsView {
     });
     const main = h('div', { class: 'fam-list-main' });
     clear(el, row, h('div', { class: 'fam-lists' }, main));
+    if (String(this.listId).startsWith('folder:')) return this.gifts.drawFolder(main, this.listId.slice(7));
+    if (this.listId === 'archive') return this.gifts.drawArchive(main);
     const list = this.store.get('lists', this.listId);
     if (!list) {
       clear(main, h('div', { class: 'fam-empty' }, h('div', { class: 'fam-empty-emoji' }, '🛒'),
@@ -93,7 +108,7 @@ export class ListsView {
         hidden ? h('button', { class: 'fam-btn primary', onclick: () => this.app.clearFilter() }, 'Show everyone’s lists') : h('button', { class: 'fam-btn primary', onclick: () => this.editList(null) }, 'New list')));
       return;
     }
-    this.drawList(main, list);
+    if (isGiftish(list)) this.gifts.draw(main, list); else this.drawList(main, list);
   }
 
   drawList(main, list) {
@@ -537,10 +552,20 @@ export class ListsView {
     } catch (err) { toastError(err); }
   }
 
+  // A new list starts with its kind (everyday or a gift list); gift lists have settings of their own.
   async editList(l) {
-    const emoji = emojiButton(l?.emoji || '📝');
+    if (l && isGiftish(l) && l.kind !== 'cards') return this.gifts.editList(l);
+    if (l) return this.editPlainList(l);
+    const kind = await this.gifts.pickKind();
+    if (!kind) return null;
+    if (['christmas', 'birthday', 'gift'].includes(kind)) return this.gifts.editList(null, kind);
+    return this.editPlainList(null, kind);
+  }
+
+  async editPlainList(l, newKind = 'todo') {
+    const emoji = emojiButton(l?.emoji || (newKind === 'grocery' ? '🛒' : '📝'));
     const title = input({ value: l?.title || '', placeholder: 'List name', required: true, autofocus: true, maxlength: 80 });
-    const kind = select([['grocery', 'Grocery list (sorted into aisles)'], ['todo', 'To-do list'], ['other', 'Other']], l?.kind || 'todo');
+    const kind = select([['grocery', 'Grocery list (sorted into aisles)'], ['todo', 'To-do list'], ['other', 'Other'], ...(l?.kind === 'cards' ? [['cards', 'Christmas cards']] : [])], l?.kind || newKind);
     let color = l?.color || '#1c7ed6';
     const colors = colorPicker(color, (c) => { color = c; });
     // Who a to-do list is for. A family member's new list starts as theirs.

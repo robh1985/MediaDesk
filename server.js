@@ -101,7 +101,7 @@ function checkBuild() {
   if (Date.now() - buildCheckedAt < 10e3) return;
   buildCheckedAt = Date.now();
   const now = computeBuildId();
-  if (now !== BUILD_ID) { BUILD_ID = now; indexHtml = familyHtml = tripShareHtml = null; }
+  if (now !== BUILD_ID) { BUILD_ID = now; indexHtml = familyHtml = tripShareHtml = giftShareHtml = null; }
 }
 // Lets the server's own notification watcher call the service proxies without a login cookie.
 const INTERNAL_TOKEN = crypto.randomBytes(24).toString('hex');
@@ -353,6 +353,15 @@ function serveTripSharePage(req, res) {
   tripShareHtml ||= fs.readFileSync(path.join(PUBLIC_DIR, 'trip-share.html'), 'utf8').replace(/(href|src)="(css|js)\//g, `$1="/v/${BUILD_ID}/$2/`);
   res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store, max-age=0', 'X-Robots-Tag': 'noindex', 'Referrer-Policy': 'no-referrer' });
   res.end(req.method === 'HEAD' ? undefined : tripShareHtml);
+}
+
+// A shared gift list's page (no sign-in): people outside the family see it and mark a gift as taken.
+let giftShareHtml = null;
+function serveGiftSharePage(req, res) {
+  checkBuild();
+  giftShareHtml ||= fs.readFileSync(path.join(PUBLIC_DIR, 'gift-share.html'), 'utf8').replace(/(href|src)="(css|js)\//g, `$1="/v/${BUILD_ID}/$2/`);
+  res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store, max-age=0', 'X-Robots-Tag': 'noindex', 'Referrer-Policy': 'no-referrer' });
+  res.end(req.method === 'HEAD' ? undefined : giftShareHtml);
 }
 
 function serveStatic(req, res, pathname) {
@@ -897,6 +906,9 @@ async function handle(req, res) {
 
   // The family calendar for phones: its address has its own secret instead of a login.
   if (p.startsWith('/family-feed/') && req.method === 'GET') return family.feed(req, res, p, { sendJson });
+  // A family gift list shared by its secret link: seen, and gifts marked as taken, without signing in.
+  if (/^\/gifts\/[\w-]{20,}\/?$/.test(p) && (req.method === 'GET' || req.method === 'HEAD')) return serveGiftSharePage(req, res);
+  if (p.startsWith('/gift-share/')) return family.giftShare(req, res, url, { sendJson, readJson, ip: req.socket.remoteAddress || '' });
   // Trip Planner: a trip shared read-only by its secret link, and trips as calendar feeds.
   if (/^\/trip\/[\w-]{20,}\/?$/.test(p) && req.method === 'GET') return serveTripSharePage(req, res);
   if ((p.startsWith('/trip-share/') || p.startsWith('/trip-feed/')) && (req.method === 'GET' || req.method === 'HEAD')) return tripPlanner.publicHandle(req, res, url, { sendJson });

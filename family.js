@@ -13,6 +13,7 @@ const crypto = require('node:crypto');
 const { sniff } = require('./wallpapers');
 const { createFamilyAuth } = require('./family-auth');
 const { createRecipes } = require('./family-recipes');
+const gifts = require('./family-gifts');
 
 const COLLECTIONS = ['members', 'events', 'calendars', 'chores', 'chorelog', 'rewards', 'redemptions', 'lists', 'listitems', 'meals', 'recipes', 'photos', 'foods', 'aisles', 'cookbooks'];
 const MAX_PHOTO = 25 * 1024 * 1024;
@@ -294,9 +295,10 @@ function createFamily({ dataDir, mock = false }) {
     return writing;
   }
 
-  const publicState = () => {
+  // viewer: { parent, profile } — gift lists keep their surprises from whoever they're for.
+  const publicState = (viewer = { parent: true, profile: null }) => {
     const d = load();
-    return { rev: d.rev, settings: d.settings, collections: d.collections, feedToken: d.feedToken };
+    return { rev: d.rev, settings: d.settings, collections: gifts.viewCollections(d.collections, viewer), feedToken: d.feedToken, viewer };
   };
 
   // What a family member (signed in, not a parent) may change, checked before anything is saved.
@@ -350,6 +352,7 @@ function createFamily({ dataDir, mock = false }) {
   function applyOps(ops, who = { parent: true }) {
     guardOps(ops, who);
     const d = load();
+    const viewer = gifts.guard(ops, who, d);
     const results = [];
     for (const op of ops) {
       const col = d.collections[op.col];
@@ -361,6 +364,8 @@ function createFamily({ dataDir, mock = false }) {
         if (op.col === 'recipes' && old?.image) recipes.dropImage(old.image);
         if (op.col === 'members' && old?.photo) recipes.dropImage(old.photo);
         if (op.col === 'calendars') feeds.delete(op.id);
+        // A list goes with everything on it (including what this person couldn't see).
+        if (op.col === 'lists' && old) for (const [iid, it] of Object.entries(d.collections.listitems)) if (it.list === op.id) delete d.collections.listitems[iid];
         results.push({ id: op.id, deleted: true });
       } else if (op.op === 'put') {
         const item = op.item && typeof op.item === 'object' ? op.item : null;
@@ -383,7 +388,7 @@ function createFamily({ dataDir, mock = false }) {
     if (JSON.stringify(results).length > 4e6) throw new FamilyError(413, 'That’s too much to save at once');
     d.rev++;
     persist();
-    return { rev: d.rev, results };
+    return { rev: d.rev, results: results.map((r, n) => gifts.viewResult(ops[n].col, r, d, viewer)) };
   }
 
   // Subscribed calendars, read when asked for and kept for ten minutes.
@@ -479,7 +484,7 @@ function createFamily({ dataDir, mock = false }) {
   }
 
   // Settings anyone signed in may change; the rest are for parents.
-  const OPEN_SETTINGS = new Set(['calendarView', 'timeZone']);
+  const OPEN_SETTINGS = new Set(['calendarView', 'timeZone', 'giftShipping']);
   const PARENT_COLLECTIONS = new Set(['members', 'calendars']);
 
   // ctx: { portal: signed in to MediaDesk, ip }
@@ -506,7 +511,16 @@ function createFamily({ dataDir, mock = false }) {
       if (p === '/data' && req.method === 'GET') {
         const since = Number(url.searchParams.get('since'));
         if (since && since === load().rev) return sendJson(res, 200, { rev: since, same: true });
-        return sendJson(res, 200, publicState());
+        return sendJson(res, 200, publicState({ parent, profile: me.profile || null }));
+      }
+      // Gift lists: a store link's name, picture and price, and the list's share link.
+      if (p === '/gifts/preview' && req.method === 'POST') {
+        const body = await readJson(req);
+        return sendJson(res, 200, await giftTools.preview(body.url));
+      }
+      if (p === '/gifts/share' && req.method === 'POST') {
+        const body = await readJson(req);
+        return sendJson(res, 200, await giftTools.setShare(String(body.list || ''), Boolean(body.on), { parent, profile: me.profile || null }));
       }
       if (p === '/batch' && req.method === 'POST') {
         const body = await readJson(req);
@@ -608,9 +622,10 @@ function createFamily({ dataDir, mock = false }) {
 
   const auth = createFamilyAuth({ load, persist });
   const recipes = createRecipes({ dataDir, load, persist, mock });
+  const giftTools = gifts.createGifts({ load, persist, recipes, mock });
   if (mock) auth.seedDemo().catch(() => {});
 
-  return { handle, feed };
+  return { handle, feed, giftShare: giftTools.publicHandle };
 }
 
 // ---------------------------------------------------------------------------
@@ -682,6 +697,40 @@ function demoData() {
   item('l-todo', 'Book summer camp', { member: 'm-dad' });
   item('l-todo', 'Return library books', { member: 'm-emma' });
   ['Tent', 'Sleeping bags', 'Flashlights', 'Marshmallows', 'Bug spray'].forEach((t) => item('l-camp', t));
+
+  // Gift lists: Christmas for each kid (with something from Santa), a birthday coming up, and a
+  // baby shower list shared with friends.
+  const xmas = today.getMonth() === 0 ? today.getFullYear() - 1 : today.getFullYear();
+  d.collections.members['m-leo'].birthday = `2016-${ymd(day(12)).slice(5)}`;
+  ev('bday-m-leo', 'Leo’s birthday 🎂', `2016-${ymd(day(12)).slice(5)}`, `2016-${ymd(day(12)).slice(5)}`, { allDay: true, members: ['m-leo'], countdown: true, rrule: { freq: 'yearly', interval: 1 } });
+  const gl = (id, extra) => put('lists', { id, color: '#2f9e44', emoji: '🎄', order: 10, reminders: [14], ...extra });
+  gl('l-x-emma', { kind: 'christmas', title: 'Emma', recipient: 'm-emma', year: xmas, folder: `Christmas ${xmas}`, budget: 150, color: '#ae3ec9', owner: 'm-mom', about: { sizes: 'Shirt youth L, shoes 4', favorites: 'Purple, horses, art supplies, mystery books' } });
+  gl('l-x-leo', { kind: 'christmas', title: 'Leo', recipient: 'm-leo', year: xmas, folder: `Christmas ${xmas}`, budget: 150, color: '#2f9e44', owner: 'm-mom' });
+  gl('l-x-grandma', { kind: 'christmas', title: 'Grandma', recipientName: 'Grandma', year: xmas, folder: `Christmas ${xmas}`, budget: 60, color: '#e8590c', owner: 'm-mom' });
+  put('lists', { id: 'l-x-cards', kind: 'cards', title: 'Christmas cards', emoji: '💌', color: '#c2255c', year: xmas, folder: `Christmas ${xmas}`, order: 11 });
+  put('lists', { id: 'l-b-leo', kind: 'birthday', title: 'Leo’s birthday', emoji: '🎂', color: '#f08c00', recipient: 'm-leo', eventId: 'bday-m-leo', budget: 100, reminders: [14, 2], order: 12, owner: 'm-mom', party: { place: 'Lincoln Park pavilion' } });
+  put('lists', { id: 'l-g-baby', kind: 'gift', title: 'Baby shower for Priya', emoji: '🍼', color: '#1098ad', occasion: 'Priya’s baby shower', date: ymd(day(30)), reminders: [14, 2], order: 13, template: 'baby', fields: [{ id: 'f-size', label: 'Size', type: 'text' }, { id: 'f-store', label: 'Store', type: 'text' }], owner: 'm-mom', shareToken: 'demo-gift-share-token-0001' });
+  const gift = (list, text, extra = {}) => item(list, text, { status: 'idea', addedBy: 'm-mom', ...extra });
+  gift('l-x-emma', 'Watercolor paint set', { price: 32, stars: 3, mostWanted: true, claimedBy: 'm-dad', status: 'bought' });
+  gift('l-x-emma', 'Riding lessons (4 weeks)', { price: 120, group: true, chips: [{ who: 'm-mom', amount: 40 }, { who: 'm-dad', amount: 40 }, { name: 'Grandma', amount: 20 }] });
+  gift('l-x-emma', 'Horse lamp', { price: 28, secret: 'santa' });
+  gift('l-x-emma', 'Purple fuzzy socks', { price: 8, secret: 'stocking' });
+  gift('l-x-emma', 'The Mysterious Benedict Society', { price: 9, addedBy: 'm-emma', stars: 2 });
+  gift('l-x-leo', 'LEGO Technic race car', { price: 50, stars: 3, addedBy: 'm-leo' });
+  gift('l-x-leo', 'Soccer goal for the yard', { price: 85, claimedBy: 'm-mom', status: 'wrapped' });
+  gift('l-x-leo', 'Dinosaur pajamas', { price: 22 });
+  gift('l-x-grandma', 'Photo calendar of the kids', { price: 25, claimedBy: 'm-mom' });
+  gift('l-x-grandma', 'Warm slippers', { price: 30, notes: 'Size 8' });
+  ['The Johnsons', 'Aunt Sue & Uncle Ray', 'Coach Miller', 'The Patels'].forEach((t, n) => item('l-x-cards', t, { done: n < 2, received: n === 0 }));
+  gift('l-b-leo', 'Dinosaur fossil dig kit', { price: 20, addedBy: 'm-leo' });
+  gift('l-b-leo', 'Bike helmet', { price: 35, claimedBy: 'm-dad', status: 'bought' });
+  gift('l-b-leo', 'Remote control truck', { price: 45, status: 'given', givenYear: xmas - 1 });
+  ['Max', 'Sofia', 'Jayden', 'Ava'].forEach((t, n) => item('l-b-leo', t, { part: 'guest', rsvp: ['yes', 'yes', 'maybe', ''][n] }));
+  item('l-b-leo', 'Dinosaur cake', { part: 'food' });
+  item('l-b-leo', 'Balloons', { part: 'decor', done: true });
+  gift('l-g-baby', 'Baby carrier', { price: 120, stars: 3, mostWanted: true, values: { 'f-store': 'Target' } });
+  gift('l-g-baby', 'Onesies', { price: 18, values: { 'f-size': '0–3 months' }, claimedName: 'Aunt Sue', status: 'bought' });
+  gift('l-g-baby', 'Board books', { price: 15 });
 
   const recipes = [
     { id: 'rc-tacos', title: 'Sheet-pan chicken tacos', emoji: '🌮', minutes: 35, servings: 4, ingredients: ['1.5 lb chicken thighs', '2 bell peppers', '1 onion', '2 tbsp taco seasoning', '8 tortillas', 'Salsa', 'Sour cream'], steps: 'Slice the chicken, peppers and onion. Toss with oil and seasoning.\nRoast at 425°F for 20–25 minutes.\nServe in warm tortillas with salsa and sour cream.', tags: ['Dinner', 'Kid favourite'] },

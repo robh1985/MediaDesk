@@ -87,6 +87,8 @@ export class Store {
     this.data = d.collections || {};
     this.settings = d.settings || {};
     this.feedToken = d.feedToken || '';
+    // Who this device is to the server (gift lists keep surprises from whoever they're for).
+    this.viewer = d.viewer || { parent: true, profile: null };
   }
 
   start() {
@@ -189,6 +191,16 @@ export class Store {
   mealieSave(body) { return call('mealie', { method: 'POST', body }); }
   async mealieSync() { const r = await call('mealie/sync', { method: 'POST', body: {} }); await this.refresh(); return r; }
   mealieDisconnect(removeRecipes) { return call(`mealie${removeRecipes ? '?recipes=remove' : ''}`, { method: 'DELETE' }); }
+  // Gift lists: a store link's name, picture and price; the list's share link.
+  giftPreview(url) { return call('gifts/preview', { method: 'POST', body: { url } }); }
+  async giftShare(listId, on) {
+    const r = await call('gifts/share', { method: 'POST', body: { list: listId, on } });
+    this.data.lists[listId] = r.list;
+    this.rev = r.rev;
+    this.emit('local');
+    return r.list;
+  }
+  imageUrl(name) { return name ? `${BASE}/recipes/image/${encodeURIComponent(name)}` : null; }
   // Fetch everything now (after the server changed things itself, like a Mealie import).
   async refresh() { const d = await call('data'); this.apply(d); this.emit('remote'); }
 

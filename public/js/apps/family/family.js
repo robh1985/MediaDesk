@@ -408,6 +408,8 @@ class FamilyOrganizer {
         if (at > from && at <= now) due.push(o);
       }
     }
+    // Gift lists' countdown reminders and Christmas shipping cutoffs.
+    try { this.views.lists?.gifts?.reminders(from, now); } catch (err) { console.warn('Family Organizer: gift reminders', err); }
     for (const o of due) {
       const when = o.allDay ? 'Today' : `${fmtTime(o.start)}`;
       toast(o.ev.title, { body: `${when}${o.ev.location ? ` · ${o.ev.location}` : ''}`, icon: ICONS.bell, timeout: 15000 });

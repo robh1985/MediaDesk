@@ -408,7 +408,7 @@ function createRecipes({ dataDir, load, persist, mock = false, log = console.log
     return null;
   }
 
-  return { handle, sync, dropImage };
+  return { handle, sync, dropImage, saveImage, imageFile: (name) => path.join(imgDir, path.basename(name)) };
 }
 
-module.exports = { createRecipes, findRecipe, fromMealie, minutes, shape, stepLines, quantity, RecipeError };
+module.exports = { createRecipes, findRecipe, fromMealie, minutes, shape, stepLines, quantity, RecipeError, publicFetch, decode, IMAGE_TYPES, MAX_IMAGE };
