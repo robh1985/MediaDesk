@@ -31,13 +31,13 @@ export const WALLPAPERS = {
   daylight: { name: 'Daylight', css: 'radial-gradient(at 15% 10%, #bae6fd 0, transparent 50%), radial-gradient(at 85% 20%, #fbcfe8 0, transparent 45%), radial-gradient(at 60% 90%, #c7d2fe 0, transparent 55%), #e0e7ff' },
 };
 export const ACCENTS = { blue: '#3b82f6', violet: '#8b5cf6', pink: '#ec4899', orange: '#f97316', green: '#22c55e', teal: '#14b8a6', graphite: '#64748b' };
-const DEFAULTS = { theme: 'auto', accent: 'blue', wallpaper: 'aurora', wallpaperFit: 'fill', customWallpaper: null, widgets: true, icons: true, reduceMotion: false };
+export const APPEARANCE_DEFAULTS = { theme: 'auto', accent: 'blue', wallpaper: 'aurora', wallpaperFit: 'fill', customWallpaper: null, widgets: true, icons: true, reduceMotion: false };
 // How a custom picture fills the screen, as in Windows: [background-size, background-repeat].
 export const WALLPAPER_FITS = { fill: ['Fill', 'cover', 'no-repeat'], fit: ['Fit', 'contain', 'no-repeat'], stretch: ['Stretch', '100% 100%', 'no-repeat'], center: ['Centre', 'auto', 'no-repeat'], tile: ['Tile', 'auto', 'repeat'] };
 const THUMB_KEY = 'mediadesk.wallpaperThumb';
 
 export function appearance() {
-  try { return { ...DEFAULTS, ...JSON.parse(localStorage.getItem('mediadesk.appearance') || '{}') }; } catch { return { ...DEFAULTS }; }
+  try { return { ...APPEARANCE_DEFAULTS, ...JSON.parse(localStorage.getItem('mediadesk.appearance') || '{}') }; } catch { return { ...APPEARANCE_DEFAULTS }; }
 }
 
 export function applyAppearance(a = appearance()) {

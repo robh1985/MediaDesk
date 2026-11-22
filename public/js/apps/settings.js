@@ -5,7 +5,7 @@ import { LEAGUES } from '../scores.js';
 import { h, clear, toast, toastError, spinner, confirmDialog, contextMenu, debounce } from '../ui.js';
 import { icon, appIcon } from '../icons.js';
 import { portal, state, radarr, sonarr, nzbget, jellyfin, isConfigured } from '../api.js';
-import { applyAppearance, appearance, WALLPAPERS, ACCENTS, WALLPAPER_FITS, useCustomWallpaper, setWallpaperFromFile } from '../desktop.js';
+import { applyAppearance, appearance, APPEARANCE_DEFAULTS, WALLPAPERS, ACCENTS, WALLPAPER_FITS, useCustomWallpaper, setWallpaperFromFile } from '../desktop.js';
 import { pickFile } from '../fileapi.js';
 import { layout, updateDock, updateDesktop, resetLayout, PLACEABLE_EXCLUDE } from '../layout.js';
 import { getApps } from '../wm.js';
@@ -31,8 +31,18 @@ const NOTIFICATIONS = {
   plex: [['notifyPlayback', 'Someone starts watching something'], ['notifyAdded', 'New movies or episodes are added']],
 };
 
+// Colours that tell General's parts apart: on their tab, their menu entry and their page.
+const PART_COLORS = { general: '#3b82f6', notifications: '#f59e0b', menubar: '#22c55e', appearance: '#ec4899', dock: '#8b5cf6', screensaver: '#14b8a6' };
+
+// Where a page's settings are kept, shown at the top of the page.
+const SCOPES = {
+  device: { label: 'Saved on this device', icon: icon.disk, help: 'Kept in this browser only, so your phone and computer can be set up differently.' },
+  everyone: { label: 'Saved for everyone', icon: icon.globe, help: 'Kept on the MediaDesk server and used on every device, for everyone.' },
+  account: { label: 'Saved to your account', icon: icon.user, help: 'Kept on the MediaDesk server with your account, so it follows you to every device.' },
+};
+
 export const settingsApp = {
-  id: 'settings', name: 'Settings', icon: appIcon.settings, size: [900, 680], description: 'Apps, connections & appearance',
+  id: 'settings', name: 'Settings', icon: appIcon.settings, size: [980, 680], description: 'Apps, connections & appearance',
   open(win, opts = {}) {
     const page = (id, label, ic, render, extra = {}) => ({ id, label, icon: ic, render, ...extra });
     const appIconSmall = (svc) => `<span class="settings-nav-app">${appIcon[svc]}</span>`;
@@ -40,115 +50,235 @@ export const settingsApp = {
     const admin = !state.me || state.me.role === 'admin';
     const has = (a) => !state.me || state.me.allowed.includes(a);
     const signIn = Boolean(state.config?.auth);
-    // General comes first and holds the everyday options as its parts.
+    const part = (id, label, ic, render, extra) => page(id, label, ic, render, { color: PART_COLORS[id], ...extra });
+    // General comes first and holds the everyday options as its parts, each with its own colour.
     const general = [
-      admin ? page('general', 'Overview', icon.sliders, renderGeneral) : null,
-      page('appearance', 'Appearance', icon.image, renderAppearance),
-      page('dock', 'Dock & Desktop', icon.grid, renderDockPage),
-      page('screensaver', 'Screensaver', icon.moon, renderScreensaver),
+      admin ? part('general', 'Connections', icon.heartPulse, renderConnections, { desc: 'Test every app’s connection', scope: 'everyone', keys: 'test status connected server' }) : null,
+      admin ? part('notifications', 'Notifications', icon.bell, renderNotifications, { desc: 'Pop-ups and app badges', scope: 'everyone', keys: 'popups pop-ups toast badge count bell alerts' }) : null,
+      admin ? part('menubar', 'Menu bar', icon.bolt, renderMenuBar, { desc: 'Live sports scores', scope: 'everyone', keys: 'scores nfl nba nhl mlb football basketball hockey baseball teams sports' }) : null,
+      part('appearance', 'Appearance', icon.image, renderAppearance, { desc: 'Theme, accent colour, wallpaper', scope: 'device', keys: 'theme dark light mode accent color colour wallpaper background picture widgets icons motion transparency window positions' }),
+      part('dock', 'Dock & Desktop', icon.grid, renderDockPage, { desc: 'Dock size, position and apps', scope: 'device', keys: 'dock magnification autohide hide position desktop icons groups apps title bar' }),
+      part('screensaver', 'Screensaver', icon.moon, renderScreensaver, { desc: 'Screensaver, delay and lock', scope: admin ? 'everyone' : 'account', keys: 'screen saver lock password idle toasters matrix maze pipes 3d text' }),
     ].filter(Boolean);
+    const svcKeys = { radarr: 'movies', sonarr: 'tv shows series episodes', nzbget: 'downloads usenet', jellyfin: 'media server playback', pikvm: 'kvm remote keyboard video', plex: 'media server sign in token libraries' };
+    const svcDesc = { radarr: 'Connection, alerts and movies', sonarr: 'Connection, alerts and shows', nzbget: 'Connection, alerts and downloads', jellyfin: 'Connection and playback', pikvm: 'Connection and sign-in', plex: 'Sign-in, alerts and libraries' };
+    const services = admin ? Object.keys(SERVICES).map((svc) => page(svc, SERVICES[svc].name, appIconSmall(svc), (c) => renderApp(c, svc),
+      { desc: svcDesc[svc], scope: 'everyone', keys: `${svcKeys[svc]} url api key address connection`, service: svc, setUp: Boolean(state.config.services?.[svc]?.configured) })) : [];
     const apps = [
-      ...(admin ? Object.keys(SERVICES).map((svc) => page(svc, SERVICES[svc].name, appIconSmall(svc), (c) => renderApp(c, svc))) : []),
-      admin ? page('music', 'Music', appIconSmall('music'), renderMusic) : null,
-      admin ? page('files', 'Files', appIconSmall('files'), renderFiles) : null,
-      admin ? page('console', 'The Game Console', appIconSmall('console'), renderConsole) : null,
-      admin ? page('ebooks', 'eBook Reader', appIconSmall('ebooks'), renderEbooks) : has('ebooks') ? page('ebooks', 'eBook Reader', appIconSmall('ebooks'), renderMyKindle) : null,
+      ...services,
+      admin ? page('music', 'Music', appIconSmall('music'), renderMusic, { desc: 'Music library folder', scope: 'everyone', keys: 'songs albums library folder' }) : null,
+      admin ? page('files', 'Files', appIconSmall('files'), renderFiles, { desc: 'Shared folders, shares and cloud', scope: 'everyone', keys: 'folders network shares smb nfs webdav cloud google drive onedrive icloud dropbox usb 7-zip archive' }) : null,
+      admin ? page('console', 'The Game Console', appIconSmall('console'), renderConsole, { desc: 'Games folder', scope: 'everyone', keys: 'games roms emulator' }) : null,
+      admin ? page('ebooks', 'eBook Reader', appIconSmall('ebooks'), renderEbooks, { desc: 'Books folder and Send to Kindle', scope: 'everyone', keys: 'books kindle calibre library' })
+        : has('ebooks') ? page('ebooks', 'eBook Reader', appIconSmall('ebooks'), renderMyKindle, { desc: 'Send to Kindle', scope: 'account', keys: 'books kindle email' }) : null,
     ].filter(Boolean);
+    // Apps not connected yet wait under "Set up more apps", so the list shows what's in use.
+    const ready = apps.filter((p) => !p.service || p.setUp);
+    const notReady = apps.filter((p) => p.service && !p.setUp);
     const layout = settingsLayout([
       { id: 'general', label: 'General', icon: icon.sliders, parts: general },
-      signIn ? page('account', 'My account', icon.user, renderAccount) : null,
-      admin ? page('users', 'Users', icon.users, renderUsers) : null,
+      signIn ? page('account', 'My account', icon.user, renderAccount, { desc: 'Name, password and sign-in', scope: 'account', keys: 'profile password passkey two-step 2fa avatar colour log out' }) : null,
+      admin ? page('users', 'Users', icon.users, renderUsers, { desc: 'Accounts and app access', scope: 'everyone', keys: 'accounts invite people roles admin access' }) : null,
       apps.length ? { heading: 'Apps' } : null,
-      ...apps,
+      ...ready,
+      notReady.length ? { more: 'Set up more apps', pages: notReady } : null,
       { heading: '' },
-      page('about', 'About', icon.heartPulse, renderAbout),
-    ].filter(Boolean), { initial: opts.tab });
+      page('about', 'About', icon.heartPulse, renderAbout, { desc: 'Version, shortcuts and reload', keys: 'version keyboard shortcuts reload log out' }),
+    ].filter(Boolean), { initial: opts.tab, services: Object.keys(SERVICES).filter((s) => services.some((p) => p.id === s)) });
     win.body.append(h('div', { class: 'settings' }, layout.root));
     win.on('reopen', (o) => { if (o?.tab) layout.show(o.tab); });
   },
 };
 
-// Settings' pages are listed in a drawer that slides in from the left, opened with the ☰ button
-// beside each page's title. An entry with `parts` (General) is a page of its own whose parts show
-// as tabs along its top and indented under it in the drawer; `{ heading }` labels a group.
-function settingsLayout(entries, { initial } = {}) {
+// The open Settings window's hooks: the page's one "Saved" tick, and connection results for the
+// dots beside each app in the menu.
+let flashSaved = () => {};
+let connResults = () => {};
+
+// Settings' pages are listed in a menu: pinned on the left when the window is wide enough, otherwise
+// a drawer that slides in from the left behind the ☰ button. An entry with `parts` (General) is a
+// page whose parts show as coloured tabs along its top and indented under it in the menu;
+// `{ heading }` labels a group, and `{ more, pages }` folds pages away behind one button.
+function settingsLayout(entries, { initial, services = [] } = {}) {
+  const pageBox = h('div', { class: 'settings-page' });
   const content = h('div', { class: 'app-content settings-pages' });
   const pages = [];
   for (const e of entries) {
     if (e.parts) e.parts.forEach((p) => pages.push({ ...p, parent: e }));
-    else if (!e.heading && e.heading !== '') pages.push(e);
+    else if (e.pages) pages.push(...e.pages);
+    else if (!('heading' in e)) pages.push(e);
   }
   const buttons = new Map();
+  const dots = new Map();
   let current = null;
   let cleanup = null;
+  const history = [];
 
-  // One ☰ button floats at the top left, over the start of each page's title row, so pages that
-  // redraw themselves keep it.
+  // The bar along the top of every page: ☰ (when the menu isn't pinned), Back, the "Saved" tick
+  // and where this page's settings are kept.
   const menuBtn = h('button', { class: 'btn btn-icon settings-menu-btn', title: 'All settings', 'aria-label': 'Show all settings', 'aria-expanded': 'false', html: icon.menu, onclick: () => openDrawer() });
+  const backBtn = h('button', { class: 'btn btn-sm settings-back', hidden: true, onclick: () => goBack() });
+  const saved = h('span', { class: 'settings-saved', 'aria-live': 'polite' }, h('span', { html: icon.check }), 'Saved');
+  const scopeTag = h('span', { class: 'settings-scope small' });
+  const bar = h('div', { class: 'settings-bar' }, menuBtn, backBtn, h('span', { class: 'settings-bar-gap' }), saved, scopeTag);
+  content.append(bar, pageBox);
+
+  const label = (p) => (p.parent ? `${p.parent.label} › ${p.label}` : p.label);
   const navBtn = (p, cls = '') => {
-    const b = h('button', { class: `nav-item ${cls}`, onclick: () => { closeDrawer(); show(p.id); } }, h('span', { class: 'nav-icon', html: p.icon || '' }), h('span', {}, p.label));
+    const dot = p.service ? h('span', { class: 'settings-nav-dot', title: 'Checking…' }) : null;
+    if (dot) dots.set(p.service, dot);
+    const b = h('button', { class: `nav-item settings-nav-item ${cls}`, style: p.color ? { '--sc': p.color } : null, dataset: { search: `${p.label} ${p.desc || ''} ${p.keys || ''} ${p.parent?.label || ''}`.toLowerCase() }, onclick: () => { closeDrawer(); show(p.id); } },
+      h('span', { class: 'nav-icon', html: p.icon || '' }),
+      h('span', { class: 'settings-nav-text' }, h('span', { class: 'settings-nav-label' }, p.label), p.desc ? h('span', { class: 'settings-nav-desc' }, p.desc) : null),
+      dot);
     buttons.set(p.id, b);
     return b;
   };
+  const search = h('input', { class: 'input settings-search', type: 'search', placeholder: 'Search settings', 'aria-label': 'Search settings', spellcheck: 'false' });
+  const noMatch = h('p', { class: 'small muted settings-nomatch', hidden: true }, 'No settings match.');
   const list = h('nav', { class: 'settings-drawer-list', 'aria-label': 'Settings' });
+  let moreBox = null;
   for (const e of entries) {
     if (e.parts) {
       const head = h('button', { class: 'nav-item settings-nav-group', onclick: () => { closeDrawer(); show(e.parts[0].id); } }, h('span', { class: 'nav-icon', html: e.icon }), h('span', {}, e.label));
       buttons.set(`group:${e.id}`, head);
-      list.append(head, h('div', { class: 'settings-nav-parts' }, e.parts.map((p) => navBtn(p, 'settings-nav-part'))));
+      list.append(h('div', { class: 'settings-nav-section' }, head, h('div', { class: 'settings-nav-parts' }, e.parts.map((p) => navBtn(p, 'settings-nav-part')))));
+    } else if (e.pages) {
+      const inner = h('div', { class: 'settings-nav-more-list', hidden: true }, e.pages.map((p) => navBtn(p)));
+      const toggle = h('button', { class: 'nav-item settings-nav-more', 'aria-expanded': 'false', onclick: () => {
+        inner.hidden = !inner.hidden;
+        toggle.setAttribute('aria-expanded', String(!inner.hidden));
+      } }, h('span', { class: 'nav-icon', html: icon.plus }), h('span', { class: 'settings-nav-text' }, h('span', { class: 'settings-nav-label' }, `${e.more} (${e.pages.length})`), h('span', { class: 'settings-nav-desc' }, 'Not connected yet')));
+      moreBox = { inner, toggle };
+      list.append(h('div', { class: 'settings-nav-section' }, toggle, inner));
     } else if ('heading' in e) list.append(e.heading ? h('div', { class: 'settings-nav-heading' }, e.heading) : h('div', { class: 'settings-nav-sep' }));
     else list.append(navBtn(e));
   }
-  const drawer = h('div', { class: 'settings-drawer', hidden: true, onkeydown: (e) => { if (e.key === 'Escape') { e.stopPropagation(); closeDrawer(); } } },
-    h('div', { class: 'settings-drawer-shade', onclick: () => closeDrawer() }),
-    h('div', { class: 'settings-drawer-panel', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'All settings' },
-      h('div', { class: 'settings-drawer-head' }, h('span', {}, 'Settings'),
-        h('button', { class: 'btn btn-icon', 'aria-label': 'Close', title: 'Close', html: icon.x, onclick: () => closeDrawer() })),
-      list));
+  list.append(noMatch);
 
+  // Search: keep the entries whose name, description or keywords match every word typed.
+  const filter = () => {
+    const words = search.value.toLowerCase().split(/\s+/).filter(Boolean);
+    list.classList.toggle('searching', words.length > 0);
+    let any = false;
+    list.querySelectorAll('.settings-nav-item').forEach((b) => {
+      const hit = words.every((w) => b.dataset.search.includes(w));
+      b.hidden = words.length > 0 && !hit;
+      if (hit) any = true;
+    });
+    list.querySelectorAll('.settings-nav-section').forEach((s) => { s.hidden = words.length > 0 && !s.querySelector('.settings-nav-item:not([hidden])'); });
+    if (moreBox) moreBox.inner.hidden = words.length ? false : moreBox.toggle.getAttribute('aria-expanded') !== 'true';
+    noMatch.hidden = !words.length || any;
+  };
+  search.addEventListener('input', filter);
+  search.addEventListener('keydown', (e) => {
+    // preventDefault: otherwise the Enter also presses ☰, which has the focus once the menu closes.
+    if (e.key === 'Enter') { e.preventDefault(); list.querySelector('.settings-nav-item:not([hidden])')?.click(); }
+    if (e.key === 'Escape' && search.value) { e.stopPropagation(); search.value = ''; filter(); }
+  });
+
+  const closeBtn = h('button', { class: 'btn btn-icon settings-drawer-close', 'aria-label': 'Close', title: 'Close', html: icon.x, onclick: () => closeDrawer() });
+  const panel = h('div', { class: 'settings-drawer-panel', 'aria-label': 'All settings' },
+    h('div', { class: 'settings-drawer-head' }, h('span', {}, 'Settings'), closeBtn),
+    h('div', { class: 'settings-search-row' }, search),
+    list);
+  const drawer = h('div', { class: 'settings-drawer', hidden: true, onkeydown: (e) => { if (e.key === 'Escape' && !pinned) { e.stopPropagation(); closeDrawer(); } } },
+    h('div', { class: 'settings-drawer-shade', onclick: () => closeDrawer() }), panel);
+
+  // Wide windows keep the menu pinned open on the left; narrow ones (and phones) use the drawer.
+  let pinned = false;
   let openedBy = null;
   let isOpen = false;
+  function setPinned(on) {
+    if (on === pinned) return;
+    pinned = on;
+    root.classList.toggle('pinned', on);
+    isOpen = false;
+    drawer.classList.remove('open');
+    drawer.hidden = !on;
+    panel.setAttribute('role', on ? 'navigation' : 'dialog');
+    if (on) panel.removeAttribute('aria-modal'); else panel.setAttribute('aria-modal', 'true');
+  }
   function openDrawer() {
+    if (pinned) return;
     openedBy = document.activeElement;
     isOpen = true;
     drawer.hidden = false;
+    menuBtn.setAttribute('aria-expanded', 'true');
     // Slide in on the next frame, unless it was closed again in the meantime.
     requestAnimationFrame(() => drawer.classList.toggle('open', isOpen));
-    menuBtn.setAttribute('aria-expanded', 'true');
     (buttons.get(current) || list.querySelector('.nav-item'))?.focus({ preventScroll: true });
   }
   function closeDrawer() {
-    if (!isOpen) return;
+    if (pinned || !isOpen) return;
     isOpen = false;
     drawer.classList.remove('open');
     menuBtn.setAttribute('aria-expanded', 'false');
-    setTimeout(() => { if (!isOpen) drawer.hidden = true; }, 230);
+    setTimeout(() => { if (!isOpen && !pinned) drawer.hidden = true; }, 230);
     if (openedBy?.isConnected) openedBy.focus({ preventScroll: true });
   }
 
-  function show(id) {
+  flashSaved = () => {
+    saved.classList.add('show');
+    clearTimeout(saved.timer);
+    saved.timer = setTimeout(() => saved.classList.remove('show'), 1600);
+  };
+  connResults = (res) => {
+    for (const [svc, dot] of dots) {
+      const r = res?.[svc];
+      if (!r) continue;
+      dot.className = `settings-nav-dot ${r.ok ? 'ok' : 'bad'}`;
+      dot.title = r.ok ? 'Connected' : `Not connected: ${r.error || ''}`;
+    }
+  };
+
+  function goBack() {
+    const id = history.pop();
+    if (id) show(id, { back: true });
+  }
+
+  function show(id, { back = false } = {}) {
     const p = pages.find((x) => x.id === id) || pages[0];
+    // A finished search is cleared, so the whole menu shows again.
+    if (search.value) { search.value = ''; filter(); }
+    if (!back && current && current !== p.id) { history.push(current); if (history.length > 20) history.shift(); }
     current = p.id;
     buttons.forEach((b, key) => b.classList.toggle('active', key === p.id || key === `group:${p.parent?.id}`));
+    if (moreBox && moreBox.inner.contains(buttons.get(p.id))) { moreBox.inner.hidden = false; moreBox.toggle.setAttribute('aria-expanded', 'true'); }
+    const prev = pages.find((x) => x.id === history[history.length - 1]);
+    backBtn.hidden = !prev;
+    if (prev) { clear(backBtn, h('span', { class: 'settings-back-arrow' }, '←'), h('span', { class: 'settings-back-text' }, h('span', { class: 'settings-back-to' }, 'Back to '), prev.label)); backBtn.title = `Back to ${label(prev)}`; }
+    const scope = SCOPES[p.scope];
+    scopeTag.hidden = !scope;
+    if (scope) { clear(scopeTag, h('span', { html: scope.icon }), scope.label); scopeTag.title = scope.help; }
+    saved.classList.remove('show');
+    content.style.setProperty('--sc', p.color || 'var(--accent)');
     if (typeof cleanup === 'function') cleanup();
-    clear(content);
+    clear(pageBox);
     content.scrollTop = 0;
     const nav = { show };
     if (p.parent) {
-      // General: its title, then its parts as tabs, then the chosen part.
+      // General: its title, then its parts as coloured tabs, then the chosen part.
       const body = h('div', { class: 'settings-part' });
-      content.append(
+      pageBox.append(
         h('div', { class: 'pane-header' }, h('h2', {}, p.parent.label)),
-        p.parent.parts.length > 1 ? h('div', { class: 'seg settings-tabs', role: 'tablist' }, p.parent.parts.map((x) =>
-          h('button', { class: `seg-btn ${x.id === p.id ? 'active' : ''}`, role: 'tab', 'aria-selected': String(x.id === p.id), onclick: () => show(x.id) }, x.label))) : null,
+        p.parent.parts.length > 1 ? h('div', { class: 'settings-tabs', role: 'tablist' }, p.parent.parts.map((x) =>
+          h('button', { class: `settings-tab ${x.id === p.id ? 'active' : ''}`, style: { '--sc': x.color }, role: 'tab', 'aria-selected': String(x.id === p.id), onclick: () => show(x.id) },
+            h('span', { class: 'settings-tab-icon', html: x.icon }), x.label))) : null,
         body);
       cleanup = p.render(body, nav);
-    } else cleanup = p.render(content, nav);
+      // On a phone the tabs scroll sideways: bring the chosen one into view.
+      pageBox.querySelector('.settings-tab.active')?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    } else cleanup = p.render(pageBox, nav);
   }
 
-  const root = h('div', { class: 'app-layout settings-layout' }, content, menuBtn, drawer);
+  const root = h('div', { class: 'app-layout settings-layout' }, drawer, content);
+  // Pin the menu when the window is wide enough for it and the page side by side.
+  const ro = new ResizeObserver(() => { if (root.clientWidth) setPinned(root.clientWidth >= 760); });
+  ro.observe(root);
   show(initial);
-  return { root, show, refresh: () => show(current), destroy: () => typeof cleanup === 'function' && cleanup() };
+  if (services.length) portal.test().then((res) => connResults(res)).catch(() => {});
+  return { root, show, refresh: () => show(current), destroy: () => { ro.disconnect(); if (typeof cleanup === 'function') cleanup(); } };
 }
 
 // ---------------------------------------------------------------------------
@@ -158,79 +288,60 @@ function settingsLayout(entries, { initial } = {}) {
 const prefs = (app) => state.config.appSettings?.[app] || {};
 const connected = (version) => `Connected${version ? ` · ${/^\d/.test(version) ? 'v' : ''}${version}` : ''}`;
 
-// Preferences save as soon as they change; a small "Saved" appears next to the section title.
-async function savePref(app, patch, status) {
+// Preferences save as soon as they change; one "Saved" tick shows at the top of the page.
+async function savePref(app, patch) {
   try {
     state.config = await portal.saveConfig({ appSettings: { [app]: patch } });
     dispatchEvent(new CustomEvent('mediadesk:prefs', { detail: { app } }));
-    if (status) {
-      clear(status, h('span', { html: icon.check }), 'Saved');
-      status.classList.add('show');
-      clearTimeout(status.timer);
-      status.timer = setTimeout(() => status.classList.remove('show'), 1500);
-    }
+    flashSaved();
   } catch (err) { toastError(err, 'Could not save'); }
 }
 
 function section(title, ...children) {
-  const status = h('span', { class: 'saved-flag' });
-  const el = h('section', { class: 'settings-section' }, h('h3', { class: 'section-title' }, title, status), ...children);
-  el.status = status;
-  return el;
+  return h('section', { class: 'settings-section' }, h('h3', { class: 'section-title' }, title), ...children);
 }
 
-function toggle(app, key, label, help, sec) {
+// "Reset this page" at the foot of a page, after a confirmation.
+function resetRow(what, message, run) {
+  return h('div', { class: 'settings-reset' }, h('button', { class: 'btn', onclick: async () => {
+    if (!(await confirmDialog({ title: `Reset ${what}?`, message, confirm: 'Reset', danger: true }))) return;
+    await run();
+    flashSaved();
+    toast(`${what} reset`);
+  } }, h('span', { html: icon.refresh }), 'Reset this page'));
+}
+
+function toggle(app, key, label, help) {
   const input = h('input', { type: 'checkbox', checked: prefs(app)[key] });
-  input.addEventListener('change', () => savePref(app, { [key]: input.checked }, sec().status));
+  input.addEventListener('change', () => savePref(app, { [key]: input.checked }));
   return h('label', { class: 'pref-row' }, input, h('span', {}, h('span', {}, label), help ? h('span', { class: 'small muted pref-help' }, help) : null));
 }
 
-function select(app, key, label, options, sec, { numeric = false, help } = {}) {
+function select(app, key, label, options, _sec, { numeric = false, help } = {}) {
   const el = h('select', { class: 'input' }, options.map(([v, l]) => h('option', { value: v, selected: String(prefs(app)[key]) === String(v) }, l)));
-  el.addEventListener('change', () => savePref(app, { [key]: numeric ? Number(el.value) : el.value }, sec().status));
+  el.addEventListener('change', () => savePref(app, { [key]: numeric ? Number(el.value) : el.value }));
   return h('label', { class: 'pref-row pref-select' }, h('span', {}, h('span', {}, label), help ? h('span', { class: 'small muted pref-help' }, help) : null), el);
 }
 
 // ---------------------------------------------------------------------------
-// General
+// General: Connections, Notifications, Menu bar
 // ---------------------------------------------------------------------------
 
-function renderGeneral(container, nav) {
-  const cfg = state.config;
-  const statusList = h('div', { class: 'conn-list' });
-  let sec;
-  const popups = h('input', { type: 'checkbox', checked: prefs('general').actionPopups !== false });
-  popups.addEventListener('change', () => savePref('general', { actionPopups: popups.checked }, sec.status));
-  sec = section('Pop-ups',
-    h('label', { class: 'pref-row' }, popups, h('span', {}, h('span', {}, 'Show a pop-up to confirm things I do'),
-      h('span', { class: 'small muted pref-help' }, 'For example “Movie added” or “Downloads paused”. Errors always pop up.'))));
-  // Live scores in the menu bar: each league on or off, and only some teams.
-  let nflSec;
-  const leagueRow = ([l, name]) => {
-    const on = h('input', { type: 'checkbox', checked: prefs('general')[`${l}Scores`] !== false });
-    const teams = h('input', { class: 'input sc-teams', value: prefs('general')[`${l}Teams`] || '', placeholder: { nfl: 'All teams — or e.g. KC, BUF', nba: 'All teams — or e.g. BOS, LAL', nhl: 'All teams — or e.g. TOR, EDM', mlb: 'All teams — or e.g. NYY, LAD' }[l], spellcheck: 'false', autocapitalize: 'characters', disabled: !on.checked, 'aria-label': `${name} teams` });
-    on.addEventListener('change', () => { teams.disabled = !on.checked; savePref('general', { [`${l}Scores`]: on.checked }, nflSec.status); });
-    teams.addEventListener('change', () => { const v = teams.value.toUpperCase().split(/[^A-Za-z]+/).filter(Boolean).join(', '); teams.value = v; savePref('general', { [`${l}Teams`]: v }, nflSec.status); });
-    return h('div', { class: 'pref-row sc-row', dataset: { league: l } }, h('label', { class: 'sc-on' }, on, h('span', {}, `Show live ${name} scores`)), teams);
-  };
-  nflSec = section('Menu bar',
-    h('p', { class: 'small muted' }, 'While games are on, each one shows in turn in the menu bar with the teams’ logos and scores. Click the score for the day’s games. Type team abbreviations to show only their games there (blank for every game).'),
-    LEAGUES.map(leagueRow));
+const demoNotice = () => (state.config.mock ? h('div', { class: 'notice' }, 'Demo mode: connections and folders can’t be changed, but preferences can be tried out until the demo restarts.') : null);
 
-  container.append(
-    cfg.mock ? h('div', { class: 'notice' }, 'Demo mode: connections and folders can’t be changed, but preferences can be tried out until the demo restarts.') : null,
+function renderConnections(container, nav) {
+  const statusList = h('div', { class: 'conn-list' });
+  container.append(demoNotice(),
     section('Connections',
-      h('p', { class: 'small muted' }, 'Each app’s connection details are on its own page, under Apps in the ☰ menu.'),
+      h('p', { class: 'small muted' }, 'Click an app to change its connection. Each app’s page is also under Apps in the menu.'),
       statusList,
-      h('div', { class: 'btn-row' }, h('button', { class: 'btn', onclick: () => testAll() }, h('span', { html: icon.heartPulse }), 'Test all connections'))),
-    section('Notifications',
-      h('p', { class: 'small muted' }, 'Things that happen in your apps, such as a finished download, add to the number on that app’s icon instead of popping up. Opening the app clears its number, and the bell in the menu bar lists everything. MediaDesk keeps counting even when no browser is open. Choose what counts on each app’s page.')),
-    sec, nflSec);
+      h('div', { class: 'btn-row' }, h('button', { class: 'btn', onclick: () => testAll() }, h('span', { html: icon.heartPulse }), 'Test all connections'))));
 
   const testAll = async () => {
     clear(statusList, Object.entries(SERVICES).map(([svc, s]) => h('div', { class: 'conn-row' }, h('span', { class: 'service-icon', html: appIcon[svc] }), s.name, h('span', { class: 'conn-status' }, h('span', { class: 'spinner sm' })))));
     try {
       const res = await portal.test();
+      connResults(res);
       clear(statusList, Object.entries(SERVICES).map(([svc, s]) => {
         const r = res[svc];
         return h('button', { class: 'conn-row', title: `${s.name} settings`, onclick: () => nav.show(svc) },
@@ -240,6 +351,32 @@ function renderGeneral(container, nav) {
     } catch (err) { toastError(err); }
   };
   testAll();
+}
+
+function renderNotifications(container) {
+  const popups = h('input', { type: 'checkbox', checked: prefs('general').actionPopups !== false });
+  popups.addEventListener('change', () => savePref('general', { actionPopups: popups.checked }));
+  container.append(demoNotice(),
+    section('Pop-ups',
+      h('label', { class: 'pref-row' }, popups, h('span', {}, h('span', {}, 'Show a pop-up to confirm things I do'),
+        h('span', { class: 'small muted pref-help' }, 'For example “Movie added” or “Downloads paused”. Errors always pop up.')))),
+    section('App badges',
+      h('p', { class: 'small muted' }, 'Things that happen in your apps, such as a finished download, add to the number on that app’s icon instead of popping up. Opening the app clears its number, and the bell in the menu bar lists everything. MediaDesk keeps counting even when no browser is open. Choose what counts on each app’s page.')));
+}
+
+function renderMenuBar(container) {
+  // Live scores in the menu bar: each league on or off, and only some teams.
+  const leagueRow = ([l, name]) => {
+    const on = h('input', { type: 'checkbox', checked: prefs('general')[`${l}Scores`] !== false });
+    const teams = h('input', { class: 'input sc-teams', value: prefs('general')[`${l}Teams`] || '', placeholder: { nfl: 'All teams — or e.g. KC, BUF', nba: 'All teams — or e.g. BOS, LAL', nhl: 'All teams — or e.g. TOR, EDM', mlb: 'All teams — or e.g. NYY, LAD' }[l], spellcheck: 'false', autocapitalize: 'characters', disabled: !on.checked, 'aria-label': `${name} teams` });
+    on.addEventListener('change', () => { teams.disabled = !on.checked; savePref('general', { [`${l}Scores`]: on.checked }); });
+    teams.addEventListener('change', () => { const v = teams.value.toUpperCase().split(/[^A-Za-z]+/).filter(Boolean).join(', '); teams.value = v; savePref('general', { [`${l}Teams`]: v }); });
+    return h('div', { class: 'pref-row sc-row', dataset: { league: l } }, h('label', { class: 'sc-on' }, on, h('span', {}, `Show live ${name} scores`)), teams);
+  };
+  container.append(demoNotice(),
+    section('Live scores',
+      h('p', { class: 'small muted' }, 'While games are on, each one shows in turn in the menu bar with the teams’ logos and scores. Click the score for the day’s games. Type team abbreviations to show only their games there (blank for every game).'),
+      LEAGUES.map(leagueRow)));
 }
 
 // ---------------------------------------------------------------------------
@@ -801,7 +938,7 @@ function previewHelpers(cfg) {
 
 function renderAppearance(container) {
   const a = appearance();
-  const set = (patch) => { applyAppearance({ ...appearance(), ...patch }); clear(container); renderAppearance(container); };
+  const set = (patch) => { applyAppearance({ ...appearance(), ...patch }); clear(container); renderAppearance(container); flashSaved(); };
   container.append(
     h('p', { class: 'small muted' }, 'Appearance is saved in this browser, so each device can look different.'),
     h('h3', { class: 'section-title' }, 'Theme'),
@@ -819,7 +956,10 @@ function renderAppearance(container) {
     h('div', { class: 'btn-row' }, h('button', { class: 'btn', onclick: () => {
       Object.keys(localStorage).filter((k) => k.startsWith('mediadesk.win.')).forEach((k) => localStorage.removeItem(k));
       toast('Window positions reset');
-    } }, 'Reset window positions')));
+    } }, 'Reset window positions')),
+    resetRow('Appearance', 'Theme, accent colour, wallpaper and desktop options go back to how they started on this device. Your uploaded pictures are kept.', () => {
+      applyAppearance({ ...APPEARANCE_DEFAULTS }); clear(container); renderAppearance(container);
+    }));
 }
 
 // Built-in wallpapers, your own pictures, and how a picture fills the screen.
@@ -900,11 +1040,11 @@ function renderDockPage(container) {
   const d = layout().dock;
   const phone = innerWidth < 760;
   const rerender = () => { clear(container); renderDockPage(container); };
-  const set = (patch) => { updateDock(patch); rerender(); };
+  const set = (patch) => { updateDock(patch); rerender(); flashSaved(); };
   const slider = (label, key, min, max, disabled) => {
     const out = h('span', { class: 'small muted slider-val' }, `${d[key]} px`);
     const input = h('input', { type: 'range', min, max, step: 2, value: d[key], disabled, class: 'pref-slider' });
-    input.addEventListener('input', () => { out.textContent = `${input.value} px`; updateDock({ [key]: Number(input.value) }); });
+    input.addEventListener('input', () => { out.textContent = `${input.value} px`; updateDock({ [key]: Number(input.value) }); flashSaved(); });
     return h('label', { class: `pref-row pref-select ${disabled ? 'dimmed' : ''}` }, h('span', {}, h('span', {}, label)), input, out);
   };
   const check = (label, key, help, disabled) => h('label', { class: `pref-row ${disabled ? 'dimmed' : ''}` },
@@ -944,6 +1084,7 @@ function renderDockPage(container) {
           }
         });
         rerender();
+        flashSaved();
       } }))));
   const appsSec = section('Apps', h('p', { class: 'small muted' }, d.onlyOpen
     ? 'The Dock shows only open apps, so “In Dock” applies when “Show only open apps” is off. Drop one desktop icon onto another to make a group.'
@@ -957,7 +1098,10 @@ function renderDockPage(container) {
       } }, 'Reset desktop icons & groups')));
 
   container.append(h('p', { class: 'small muted' }, 'Saved in this browser, so your phone and computer can be arranged differently.'),
-    dock, appsSec);
+    dock, appsSec,
+    resetRow('Dock & Desktop', 'The Dock and the desktop icons go back to how they started on this device, and icon groups are removed.', () => {
+      resetLayout('dock'); resetLayout('desktop'); rerender();
+    }));
 }
 
 function renderScreensaver(container) {
@@ -997,7 +1141,12 @@ function renderScreensaver(container) {
     h('label', { class: 'pref-row pref-select' }, h('span', {}, h('span', {}, '3D Text message'), h('span', { class: 'small muted pref-help' }, 'The words shown by the 3D Text screensaver.')), text));
 
   container.append(main, pick, opts,
-    h('p', { class: 'small muted' }, 'Tip: the MediaDesk menu (top left) can start the screensaver or lock the screen at any time.'));
+    h('p', { class: 'small muted' }, 'Tip: the MediaDesk menu (top left) can start the screensaver or lock the screen at any time.'),
+    // The same starting values as the server's (appsettings.js).
+    resetRow('Screensaver', 'The screensaver goes back to its starting settings: off, after 10 minutes, Flying Toasters, no password.', async () => {
+      await savePref('screensaver', { enabled: false, timeoutMin: 10, saver: 'toasters', requirePassword: false, skipVideo: true, text: 'MediaDesk' });
+      clear(container); renderScreensaver(container);
+    }));
   refreshDisabled();
 }
 

@@ -2260,30 +2260,85 @@ button.notes-st:hover { background: var(--hover); color: var(--text); }
 .fm-connect-drive { color: var(--accent); }
 .fm-usb-big svg { width: 48px; height: 48px; }
 
-/* Settings: every page is listed in a drawer that slides in from the left, opened with the ☰
-   button at the top left. General holds Overview, Appearance, Dock & Desktop and Screensaver as tabs. */
+/* Settings: every page is listed in a menu, pinned on the left in wide windows and a drawer behind ☰
+   in narrow ones. General's parts (Connections … Screensaver) each have a colour (--sc) used on their
+   tab, their menu entry and their page. */
 .settings-layout { position: relative; }
-.settings-pages > .pane-header:first-child { padding-left: 44px; min-height: 34px; }
-.settings-menu-btn { position: absolute; top: 18px; left: 18px; z-index: 6; width: 34px; height: 34px; background: var(--surface); border: 1px solid var(--border); box-shadow: 0 1px 3px rgba(0, 0, 0, .08); }
+.settings-pages { padding-top: 0; --sc: var(--accent); }
+.settings-bar { position: sticky; top: 0; z-index: 5; display: flex; align-items: center; gap: 8px; min-height: 52px; margin: 0 -22px 4px; padding: 10px 22px 8px; background: var(--surface); border-bottom: 1px solid transparent; }
+.settings-bar-gap { flex: 1; }
+.settings-menu-btn { width: 34px; height: 34px; flex: none; }
 .settings-menu-btn svg { width: 18px; height: 18px; }
-.settings-tabs { display: flex; width: max-content; max-width: 100%; overflow-x: auto; scrollbar-width: none; margin: -4px 0 18px; }
-.settings-tabs .seg-btn { white-space: nowrap; padding: 5px 14px; }
+.settings-back { gap: 6px; min-width: 0; max-width: 60%; white-space: nowrap; }
+.settings-scope, .settings-menu-btn { flex-shrink: 0; }
+.settings-back-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.settings-back[hidden] { display: none; }
+.settings-back-arrow { font-size: 15px; line-height: 1; }
+.settings-saved { display: inline-flex; align-items: center; gap: 4px; flex: none; font-size: 12px; font-weight: 650; color: var(--ok); }
+.settings-saved.show { opacity: 1; }
+.settings-saved:not(.show) { display: none; }
+.settings-saved svg { width: 14px; height: 14px; }
+.settings-scope { display: inline-flex; align-items: center; gap: 5px; padding: 3px 9px; border-radius: 999px; background: var(--surface-2); color: var(--text-muted); white-space: nowrap; cursor: help; }
+.settings-scope[hidden] { display: none; }
+.settings-scope svg { width: 13px; height: 13px; }
+.settings-page > .pane-header:first-child h2 { color: var(--text); }
+
+/* General's coloured tabs, and the colour carried onto the page. */
+.settings-tabs { display: flex; flex-wrap: wrap; gap: 6px; overflow-x: auto; scrollbar-width: none; margin: -4px 0 18px; padding-bottom: 2px; }
+.settings-tab { display: inline-flex; align-items: center; gap: 7px; flex: none; padding: 6px 12px 6px 7px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface); color: var(--text); font-weight: 600; cursor: pointer; white-space: nowrap; }
+.settings-tab:hover { background: color-mix(in srgb, var(--sc) 9%, var(--surface)); }
+.settings-tab-icon { display: inline-flex; width: 22px; height: 22px; padding: 4px; box-sizing: border-box; border-radius: 7px; background: var(--sc); color: #fff; }
+.settings-tab-icon svg { width: 14px; height: 14px; }
+.settings-tab.active { background: color-mix(in srgb, var(--sc) 16%, var(--surface)); border-color: color-mix(in srgb, var(--sc) 55%, transparent); color: color-mix(in srgb, var(--sc) 70%, var(--text)); }
+.settings-part { border-left: 3px solid var(--sc); padding-left: 16px; }
+.settings-part .section-title { color: color-mix(in srgb, var(--sc) 75%, var(--text)); }
+.settings-part input[type="checkbox"], .settings-part input[type="range"] { accent-color: var(--sc); }
+.settings-reset { display: flex; justify-content: flex-end; margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--border); }
+
+/* The menu. */
 .settings-drawer { position: absolute; inset: 0; z-index: 20; }
 .settings-drawer[hidden] { display: none; }
 .settings-drawer-shade { position: absolute; inset: 0; background: rgba(15, 18, 25, .32); opacity: 0; transition: opacity .2s; }
 .settings-drawer.open .settings-drawer-shade { opacity: 1; }
-.settings-drawer-panel { position: absolute; top: 0; bottom: 0; left: 0; width: min(270px, 84%); display: flex; flex-direction: column; background: var(--surface); border-right: 1px solid var(--border); box-shadow: 4px 0 24px rgba(0, 0, 0, .18); transform: translateX(-100%); transition: transform .22s ease-out; }
+.settings-drawer-panel { position: absolute; top: 0; bottom: 0; left: 0; width: min(280px, 86%); display: flex; flex-direction: column; background: var(--surface); border-right: 1px solid var(--border); box-shadow: 4px 0 24px rgba(0, 0, 0, .18); transform: translateX(-100%); transition: transform .22s ease-out; }
 .settings-drawer.open .settings-drawer-panel { transform: none; }
-.settings-drawer-head { display: flex; align-items: center; justify-content: space-between; padding: 12px 10px 6px 18px; font-size: 12px; font-weight: 750; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); }
-.settings-drawer-list { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; display: flex; flex-direction: column; gap: 2px; padding: 4px 10px 14px; }
-.settings-drawer-list .nav-item { flex: none; }
+.settings-drawer-head { display: flex; align-items: center; justify-content: space-between; min-height: 32px; padding: 10px 10px 4px 18px; font-size: 12px; font-weight: 750; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); }
+.settings-search-row { padding: 4px 10px 8px; }
+.settings-search { width: 100%; max-width: none; }
+.settings-drawer-list { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; display: flex; flex-direction: column; gap: 2px; padding: 0 10px 14px; }
+.settings-drawer-list .nav-item { flex: none; align-items: center; }
+.settings-nav-section { display: flex; flex-direction: column; gap: 2px; }
+.settings-nav-section[hidden], .settings-drawer-list .nav-item[hidden] { display: none; }
+.settings-nav-text { display: flex; flex-direction: column; flex: 1; min-width: 0; }
+.settings-nav-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.settings-nav-desc { font-size: 11.5px; font-weight: 450; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .settings-nav-parts { display: flex; flex-direction: column; gap: 2px; margin: 0 0 4px 18px; padding-left: 8px; border-left: 1px solid var(--border); }
-.settings-nav-part { padding: 6px 10px; font-weight: 500; }
+.settings-nav-part { padding: 5px 8px; font-weight: 550; }
+.settings-nav-part .nav-icon { width: 24px; height: 24px; padding: 5px; box-sizing: border-box; border-radius: 7px; background: var(--sc); color: #fff; flex: none; }
+.settings-nav-part .nav-icon svg { width: 14px; height: 14px; }
+.settings-nav-part.active { background: color-mix(in srgb, var(--sc) 15%, transparent); color: color-mix(in srgb, var(--sc) 70%, var(--text)); }
 .settings-nav-group.active { background: none; color: var(--text); }
+.settings-nav-dot { width: 8px; height: 8px; flex: none; border-radius: 50%; background: var(--border-strong); }
+.settings-nav-dot.ok { background: var(--ok); }
+.settings-nav-dot.bad { background: var(--bad); }
+.settings-nav-more { color: var(--text-muted); }
+.settings-nav-more-list { display: flex; flex-direction: column; gap: 2px; padding-left: 12px; }
+.settings-nav-more-list[hidden] { display: none; }
+.settings-drawer-list.searching .settings-nav-heading, .settings-drawer-list.searching .settings-nav-sep, .settings-drawer-list.searching .settings-nav-more { display: none; }
 .settings-nav-heading { margin: 10px 10px 2px; font-size: 11px; font-weight: 750; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); }
 .settings-nav-sep { height: 1px; margin: 8px 10px; background: var(--border); }
+.settings-nomatch { padding: 6px 10px; }
+
+/* Wide windows: the menu stays open beside the page. */
+.settings-layout.pinned .settings-drawer { position: static; flex: none; width: 270px; display: flex; }
+.settings-layout.pinned .settings-drawer-shade, .settings-layout.pinned .settings-menu-btn, .settings-layout.pinned .settings-drawer-close { display: none; }
+.settings-layout.pinned .settings-drawer-panel { position: static; width: 100%; transform: none; transition: none; box-shadow: none; background: var(--sidebar); }
+.settings-layout.pinned .settings-drawer-head { padding-left: 18px; }
 @media (prefers-reduced-motion: reduce) { .settings-drawer-shade, .settings-drawer-panel { transition: none; } }
 @media (max-width: 760px) {
-  .settings-menu-btn { top: 12px; left: 12px; }
-  .settings-pages > .pane-header:first-child { padding-left: 42px; }
+  .settings-bar { margin: 0 -14px 4px; padding: 8px 14px; }
+  .settings-part { padding-left: 10px; }
+  .settings-tabs { flex-wrap: nowrap; }
+  .settings-back-to { display: none; }
+  .settings-scope { font-size: 11px; padding: 2px 7px; }
 }
