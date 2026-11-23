@@ -28,7 +28,6 @@ const { createCloudStorage } = require('./cloudstorage');
 const { createMaps } = require('./maps');
 const { createSports } = require('./sports');
 const { createUpdater } = require('./updater');
-const { createRoms } = require('./roms');
 
 const ROOT = __dirname;
 
@@ -836,8 +835,6 @@ function gamesFor(u) {
   return personalGames.get(u.id);
 }
 const maps = createMaps({ geo: tripPlanner.geo, mock: MOCK });
-// ROM Librarian: DATs, scans and fixes of the ROM collection (7-Zip from the Archive Expander for 7z).
-const roms = createRoms({ dataDir: DATA_DIR, mock: MOCK, getSevenZip: () => archive.status().path, demo: MOCK ? require('./mock-roms').createDemo : null });
 const sports = createSports({ dataDir: MOCK ? path.join(require('node:os').tmpdir(), 'mediadesk-demo-data') : path.dirname(CONFIG_PATH), mock: MOCK });
 const family = createFamily({ dataDir: MOCK ? path.join(require('node:os').tmpdir(), 'mediadesk-demo-data') : path.dirname(CONFIG_PATH), mock: MOCK });
 const archive = createArchive({ getConfig: () => filesConfigFor(reqUser()), resolveInShared: files.resolveInShared, filesEnabled: () => filesStatus(reqUser()).enabled });
@@ -887,7 +884,7 @@ const FILE_APPS = ['files', 'music', 'notes', 'paint', 'paintpro', 'logs', 'arch
 const FILE_WRITERS = ['files', 'notes', 'paint', 'paintpro', 'archive'];
 const ROUTE_APPS = [
   ['/api/radarr/', ['radarr']], ['/api/sonarr/', ['sonarr']], ['/api/nzbget', ['nzbget']], ['/api/jellyfin/', ['jellyfin', 'music']],
-  ['/api/plex/', ['plex', 'plexviewer']], ['/api/pikvm/', ['pikvm']], ['/portal/games/', ['console']], ['/portal/roms/', ['roms']], ['/portal/trips/', ['trips']], ['/portal/maps/', ['maps']],
+  ['/api/plex/', ['plex', 'plexviewer']], ['/api/pikvm/', ['pikvm']], ['/portal/games/', ['console']], ['/portal/trips/', ['trips']], ['/portal/maps/', ['maps']],
   ['/portal/ebooks/', ['ebooks', 'files']], ['/portal/archive/', ['archive', 'files']], ['/portal/files/', FILE_APPS],
 ];
 const appsFor = (p) => ROUTE_APPS.find(([prefix]) => p.startsWith(prefix))?.[1] || null;
@@ -1067,8 +1064,6 @@ async function handle(req, res) {
   if (p.startsWith('/portal/sports/')) return sports.handle(req, res, p, { sendJson });
   if (p.startsWith('/portal/maps/')) return maps.handle(req, res, url, { sendJson });
   if (p.startsWith('/portal/games/')) return games.handle(req, res, url, { sendJson, readJson });
-  // Looking is for everyone with the app; changing the collection is for admins and parents.
-  if (p.startsWith('/portal/roms/')) return roms.handle(req, res, url, { sendJson, readJson, canChange: MOCK || canUpdate(me) });
   if (p.startsWith('/portal/trips/')) return tripPlanner.handle(req, res, url, { sendJson, readJson });
   if (p.startsWith('/portal/ebooks/')) return ebooks.handle(req, res, url, { sendJson, readJson, readBody });
   if (p.startsWith('/portal/archive/')) return archive.handle(req, res, url, { sendJson, readJson });
