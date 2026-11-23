@@ -54,7 +54,7 @@ $port = Get-MediaDeskPort
 Write-Host ''
 if (Wait-MediaDesk $port 45) {
     $log = Join-Path $MediaDeskLogDir 'mediadesk.log'
-    $started = if (Test-Path $log) { Get-Content $log -Tail 80 | Where-Object { $_ -match 'MediaDesk .* starting' } | Select-Object -Last 1 } else { $null }
+    $started = if (Test-Path $log) { Get-Content $log -Encoding UTF8 -Tail 80 | Where-Object { $_ -match 'MediaDesk .* starting' } | Select-Object -Last 1 } else { $null }
     Write-Host 'MediaDesk restarted.' -ForegroundColor Green
     if ($started -match 'MediaDesk (.*) starting') { Write-Host "  Running version: $($Matches[1])" }
     Write-Host "  http://localhost:$port  (reload the page in your browser)"

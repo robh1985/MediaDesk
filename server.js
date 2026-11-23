@@ -38,7 +38,7 @@ let logStream = null;
 const exitAfterLog = (code) => (logStream ? logStream.end(() => process.exit(code)) : process.exit(code));
 if (logArg !== -1 && process.argv[logArg + 1]) {
   const logFile = path.resolve(process.argv[logArg + 1]);
-  fs.mkdirSync(path.dirname(logFile), { recursive: true });
+  try { require('./logfile').prepareLog(logFile); } catch { fs.mkdirSync(path.dirname(logFile), { recursive: true }); }
   const stream = (logStream = fs.createWriteStream(logFile, { flags: 'a' }));
   const stamp = (fn) => (...args) => fn(`[${new Date().toISOString()}]`, ...args);
   const fileConsole = new console.Console({ stdout: stream, stderr: stream });
@@ -445,7 +445,7 @@ async function proxyRest(req, res, svc, rest, search) {
       upstream.body?.cancel().catch(() => {});
       return sendJson(res, upstream.status, { code: 'plex-not-admin', error: upstream.status === 401
         ? 'Plex rejected MediaDesk’s token. Sign in again in Settings → Plex.'
-        : 'Plex only allows this for the server owner. MediaDesk’s Plex token isn’t the owner’s admin token — in Settings → Plex, click “Sign in with Plex” and sign in as the account (and Plex Home profile) that owns the server.' });
+        : 'Plex only allows this for the server owner, and MediaDesk’s Plex token isn’t the owner’s. Settings → Plex says which account it is signed in as; click “Sign in with Plex” there and sign in as the owner.' });
     }
     await pipeUpstream(res, upstream);
   } catch (err) {
@@ -591,10 +591,13 @@ async function testService(svc) {
       if (!r.ok) return { ok: false, error: `HTTP ${r.status}` };
       const mc = (await r.json()).MediaContainer || {};
       // Now Playing, history and tasks need the owner's (admin) token.
-      const admin = await fetch(`${base}/status/sessions`, { headers: { ...plexHeaders(c.apiKey), Accept: 'application/json' }, signal: AbortSignal.timeout(8e3) })
-        .then((x) => { x.body?.cancel().catch(() => {}); return x.status !== 401 && x.status !== 403; }).catch(() => true);
-      return { ok: true, version: mc.version, name: mc.friendlyName, plexPass: Boolean(mc.myPlexSubscription), admin,
-        ...(admin ? {} : { warning: 'Connected, but not as the server owner: Now Playing, history and scheduled tasks won’t work. Sign in with Plex as the owner.' }) };
+      const admin = (await plexIsAdmin(base, c.apiKey)) !== false;
+      const out = { ok: true, version: mc.version, name: mc.friendlyName, plexPass: Boolean(mc.myPlexSubscription), admin };
+      if (!admin) {
+        const who = await plexWhoIs(c.apiKey, mc.machineIdentifier);
+        Object.assign(out, { account: who.account || null, warning: plexNotAdminReason(who) });
+      }
+      return out;
     }
     r = await fetch(`${base}/api/v3/system/status`, { headers: { 'X-Api-Key': c.apiKey }, signal: AbortSignal.timeout(8e3) });
     if (!r.ok) return { ok: false, error: `HTTP ${r.status}` };
@@ -602,6 +605,43 @@ async function testService(svc) {
   } catch (err) {
     return { ok: false, error: err.cause?.code || err.message };
   }
+}
+
+// Can this token use the owner-only parts of a Plex server (Now Playing, history, tasks)?
+// true / false, or null when the server can't be asked.
+async function plexIsAdmin(base, token) {
+  try {
+    const r = await fetch(`${base}/status/sessions`, { headers: { ...plexHeaders(token), Accept: 'application/json' }, signal: AbortSignal.timeout(8e3) });
+    r.body?.cancel().catch(() => {});
+    return r.status !== 401 && r.status !== 403;
+  } catch { return null; }
+}
+
+// Who a Plex token belongs to, from plex.tv: the account or Plex Home profile, whether it's a
+// managed profile, and whether it owns the server with this machine id. Fields are missing when
+// plex.tv can't be asked (or the token is a server-only token plex.tv doesn't know).
+async function plexWhoIs(token, machineId) {
+  const who = {};
+  try {
+    const u = await plexTv('/api/v2/user', { token });
+    Object.assign(who, { account: u.title || u.username || '', managed: Boolean(u.restricted), home: Boolean(u.home), homeAdmin: Boolean(u.homeAdmin) });
+  } catch { /* unknown */ }
+  try {
+    const list = await plexTv('/api/v2/resources?includeHttps=1', { token });
+    const server = list.find((x) => x.clientIdentifier === machineId);
+    if (server) Object.assign(who, { found: true, owned: Boolean(server.owned), owner: server.sourceTitle || '' });
+  } catch { /* unknown */ }
+  return who;
+}
+
+// Why the token can't use the owner-only parts, as precisely as plex.tv lets us say.
+function plexNotAdminReason(who) {
+  const as = who.account ? `MediaDesk is signed in to Plex as “${who.account}”` : 'MediaDesk’s Plex token';
+  const fix = 'In Settings → Plex, click “Sign in with Plex” and sign in as the account that owns the server (in Plex Home, pick the owner’s profile, not a managed one).';
+  if (who.managed) return `${as}, a managed Plex Home profile, so Now Playing, history and scheduled tasks won’t work. ${fix}`;
+  if (who.found && !who.owned) return `${as}, which has access to this server but doesn’t own it${who.owner ? ` (it’s ${who.owner}’s)` : ''}, so Now Playing, history and scheduled tasks won’t work. ${fix}`;
+  if (who.found && who.owned) return `${as}, the server’s owner, but this token was refused for Now Playing, history and scheduled tasks. Click “Sign in with Plex” again: MediaDesk will pick a token that has full access.`;
+  return `Connected, but not as the server owner: Now Playing, history and scheduled tasks won’t work. ${fix}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -661,9 +701,14 @@ async function plexSignIn(req, res, p) {
       if (MOCK) return sendJson(res, 200, publicConfig());
       const next = fs.existsSync(CONFIG_PATH) ? readConfigFile() : {};
       next.services = next.services || {};
-      // On a server you own, your account token has full admin rights (Now Playing, history, tasks).
-      // The per-server token from plex.tv can be more limited, so it is only used for shared servers.
-      next.services.plex = { ...(next.services.plex || {}), url: uri, apiKey: server.owned ? pin.token : (server.accessToken || pin.token) };
+      // On a server you own, your account token normally has full admin rights (Now Playing,
+      // history, tasks), and the per-server token from plex.tv can be more limited; on a shared
+      // server it's the other way round. Try them in that order and keep the first one the server
+      // accepts for the owner-only parts, so an unexpected token doesn't leave those broken.
+      const tokens = [...new Set((server.owned ? [pin.token, server.accessToken] : [server.accessToken, pin.token]).filter(Boolean))];
+      let apiKey = tokens[0];
+      for (const t of tokens) { if (await plexIsAdmin(uri, t)) { apiKey = t; break; } }
+      next.services.plex = { ...(next.services.plex || {}), url: uri, apiKey };
       saveConfig(next);
       return sendJson(res, 200, publicConfig());
     }

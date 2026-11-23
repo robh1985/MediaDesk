@@ -568,6 +568,12 @@ function plexSignInBox(statusEl) {
         const t = (await portal.test()).plex;
         clear(statusEl, h('span', { class: `dot ${t.ok ? 'ok' : 'bad'}` }), t.ok ? connected(t.version) : t.error);
         if (!t.ok) { toastError(new Error(t.error), 'Signed in, but MediaDesk can’t reach that address'); use.disabled = false; return; }
+        if (t.warning) {
+          // Signed in, but not with full access: say so here rather than reloading past it.
+          clear(box, h('div', { class: 'notice' }, t.warning));
+          toast('Plex connected, with limited access', { body: 'Reload the page when you’re done.', type: 'warning' });
+          return;
+        }
         toast('Plex connected', { body: 'Reloading…', type: 'success' });
         setTimeout(() => location.reload(), 1200);
       } catch (err) { toastError(err, 'Could not save'); use.disabled = false; }

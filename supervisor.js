@@ -33,7 +33,8 @@ const logFile = logArg !== -1 && argv[logArg + 1] ? path.resolve(argv[logArg + 1
 const stdinStop = argv.includes('--stdin-stop');
 const serverArgs = argv.filter((a, i) => a !== '--stdin-stop' && i !== logArg && i !== logArg + 1);
 
-if (logFile) fs.mkdirSync(path.dirname(logFile), { recursive: true });
+// The log starts with a UTF-8 byte-order mark so Windows tools show ’ and — properly (see logfile.js).
+if (logFile) { try { require('./logfile').prepareLog(logFile); } catch { fs.mkdirSync(path.dirname(logFile), { recursive: true }); } }
 function log(...parts) {
   const line = `[${new Date().toISOString()}] Supervisor: ${parts.join(' ')}`;
   if (logFile) { try { fs.appendFileSync(logFile, `${line}\n`); } catch { /* log unavailable */ } } else console.log(line);

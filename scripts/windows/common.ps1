@@ -106,6 +106,6 @@ function Show-MediaDeskLogTail {
     if (Test-Path $log) {
         Write-Host ''
         Write-Host "Last lines of $log :" -ForegroundColor Yellow
-        Get-Content $log -Tail 10 | ForEach-Object { Write-Host "  $_" }
+        Get-Content $log -Encoding UTF8 -Tail 10 | ForEach-Object { Write-Host "  $_" }
     }
 }

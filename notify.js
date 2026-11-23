@@ -174,11 +174,19 @@ function createNotifier({ file, isConfigured, settings, callApi, log = () => {} 
   // --- Scheduling ---------------------------------------------------------------
 
   const running = new Set();
+  const failing = new Map();   // check name -> the error last logged for it
   function every(name, ms, fn, when) {
     const tick = async () => {
       if (when() && !running.has(name)) {
         running.add(name);
-        try { await fn(); } catch (err) { log(`Notification check "${name}" failed: ${err.message}`); }
+        try {
+          await fn();
+          if (failing.delete(name)) log(`Notification check "${name}" works again.`);
+        } catch (err) {
+          // Log a failure once, not every time the check runs (every 20-60 s for some).
+          if (failing.get(name) !== err.message) log(`Notification check "${name}" failed: ${err.message}`);
+          failing.set(name, err.message);
+        }
         running.delete(name);
       }
     };
@@ -188,8 +196,16 @@ function createNotifier({ file, isConfigured, settings, callApi, log = () => {} 
 
   function start() {
     every('nzbget', EVERY.nzbget, watchNzbget, () => isConfigured('nzbget'));
-    every('jellyfin', EVERY.sessions, watchSessions, () => isConfigured('jellyfin'));
-    every('plex', EVERY.sessions, watchPlexSessions, () => isConfigured('plex'));
+    // Who's watching is only asked for while its notification is on. Plex only tells the server
+    // owner, so asking with another account's token would fail every 30 s for nothing.
+    // While it's off, forget who was watching, so turning it on doesn't announce old sessions.
+    const watching = (svc) => {
+      if (isConfigured(svc) && settings()[svc]?.notifyPlayback) return true;
+      if (data.cursors[`${svc}Playing`]) { delete data.cursors[`${svc}Playing`]; failing.delete(svc); save(); }
+      return false;
+    };
+    every('jellyfin', EVERY.sessions, watchSessions, () => watching('jellyfin'));
+    every('plex', EVERY.sessions, watchPlexSessions, () => watching('plex'));
     every('plex-added', EVERY.history, watchPlexAdded, () => isConfigured('plex'));
     for (const svc of ['radarr', 'sonarr']) {
       every(`${svc}-health`, EVERY.health, () => watchHealth(svc), () => isConfigured(svc));

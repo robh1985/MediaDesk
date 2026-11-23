@@ -162,6 +162,8 @@ namespace MediaDesk
                 Directory.CreateDirectory(Path.GetDirectoryName(logFile));
                 using (FileStream fs = new FileStream(logFile, FileMode.Append, FileAccess.Write, FileShare.ReadWrite | FileShare.Delete))
                 {
+                    // A new log starts with the UTF-8 byte-order mark, so Windows tools read it as UTF-8.
+                    if (fs.Length == 0) fs.Write(new byte[] { 0xEF, 0xBB, 0xBF }, 0, 3);
                     byte[] bytes = Encoding.UTF8.GetBytes(line);
                     fs.Write(bytes, 0, bytes.Length);
                 }
