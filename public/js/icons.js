@@ -70,6 +70,7 @@ export const appIcon = {
   console: tile('#ff6a88', '#6a2ff7', '<path d="M21 23h22a9 9 0 0 1 8.6 6.4l2.6 9.2a5 5 0 0 1-8.7 4.4L42 39H22l-3.5 4a5 5 0 0 1-8.7-4.4l2.6-9.2A9 9 0 0 1 21 23z"/><path d="M22 28v8M18 32h8"/><circle cx="41" cy="29.5" r="1.6" fill="#fff"/><circle cx="45" cy="34" r="1.6" fill="#fff"/>'),
   logs: tile('#94a3b8', '#334155', '<rect x="13" y="12" width="38" height="40" rx="4"/><path d="M19 22h4M27 22h18M19 30h4M27 30h18M19 38h4M27 38h12M19 46h4M27 46h16"/><path d="M27 38h12" stroke="#ff6b6b"/><path d="M27 30h18" stroke="#ffd43b"/>'),
   pikvm: tile('#5fd38d', '#0b6b3a', '<rect x="11" y="13" width="42" height="28" rx="3"/><path d="M26 51h12M32 41v10"/><path d="M19 24h5l3 6 4-10 3 7h11" stroke-width="3"/>'),
+  roms: tile('#a7f3d0', '#047857', '<path d="M18 12h22l6 6v34H18z"/><path d="M18 22h28M24 12v10M30 12v10M36 12v10"/><path d="M25 37l5 5 9-10" stroke-width="3.2"/>'),
   archive: tile('#f9a8d4', '#9d174d', '<rect x="16" y="12" width="32" height="40" rx="4"/><path d="M32 12v6M28 18h4M32 22h4M28 26h4M32 30h4"/><rect x="27.5" y="34" width="9" height="9" rx="2"/>'),
   convert: tile('#67e8f9', '#0e7490', '<path d="M16 24h30M38 16l8 8-8 8"/><path d="M48 40H18M26 32l-8 8 8 8"/>'),
   paint: tile('#ffd75e', '#e8590c', '<path d="M40 12l12 12-16 16-12-12z"/><path d="M24 28c-6 0-10 4-10 9 0 4-2 6-4 8 9 1 17-2 18-11"/><circle cx="44" cy="46" r="3.5" fill="#fff" stroke-width="1"/><circle cx="52" cy="38" r="2.5" fill="#fff" stroke-width="1"/>'),

@@ -402,8 +402,8 @@ async function fixZip(fixZip, fileProcessQueue, counter) {
             if (state.rvSettings.DetailedFixReporting) Report.fix(treeDir(tree), treeBase(tree), t.Name, t.Size, 'Delete', '', '', '');
             const d = await U.doubleCheckDelete(orig);
             if (d.rc !== ReturnCode.Good) return fail(d, 'Double Check Delete');
-            t.GotStatus = GotStatus.NotGot;
           }
+          t.GotStatus = GotStatus.NotGot;
           break;
         case RepStatus.Correct: case RepStatus.InToSort: case RepStatus.NeededForFix: case RepStatus.Corrupt: {
           if (t.GotStatus === GotStatus.Corrupt && t.FileType === FileType.FileSevenZip) { t.GotStatus = GotStatus.NotGot; break; }

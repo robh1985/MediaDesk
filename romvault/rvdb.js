@@ -280,8 +280,9 @@ class RvFile {
     this.RepStatus = rs ? rs[0] : RepStatus.Error;
   }
 
+  // RomVault walks up until a game or DAT; a file no DAT knows has neither, so the port also stops at a tree folder.
   fileNameInsideGame() {
-    if (this.Game != null || this.Dat != null) return this.Name;
+    if (this.Game != null || this.Dat != null || this.Parent == null || this.Parent.Tree != null) return this.Name;
     return treeJoin(this.Parent.fileNameInsideGame(), this.Name);
   }
 

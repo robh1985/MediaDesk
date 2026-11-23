@@ -26,3 +26,13 @@ Changes made in this port:
   of going through RomVault's DatHeader converter; MIA flags are not written.
 - New 7z sets default to solid LZMA (RomVault's default) and are written by
   the 7-Zip tool, then given RomVault's header layout and marker block.
+- RvFile.FileNameInsideGame also stops at a folder of the tree, so reports work
+  for files no DAT knows.
+- Fix/FixAZip: the port at first marked only deleted entries as gone after a
+  zip was rebuilt; it now does it for every entry RomVault does (Missing,
+  NotCollected, Rename, Delete, Incomplete).
+- report.js is a port of ROMVault/Report.cs (Full Report and Fix Report) that
+  returns the text instead of writing it through a save dialog.
+- worker.js, the app (public/js/apps/roms.js) and roms.js are MediaDesk's own;
+  the screens follow RomVault's main window (tree, DAT info, game and ROM grids,
+  colours, menus, DAT rules, directory mappings and ToSort options).

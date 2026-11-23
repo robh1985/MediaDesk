@@ -1,0 +1,170 @@
+/* ROM Manager (public/js/apps/roms.js). Status colours are RomVault's (UIDisplayColors.cs); in dark mode they are
+   mixed into the surface so rows stay readable. */
+.rv-app { --rv-ink: #111; position: relative; display: flex; flex-direction: column; flex: 1; min-height: 0; min-width: 0; overflow: hidden; }
+.rv-toolbar { display: flex; align-items: center; gap: 6px; padding: 8px 10px; border-bottom: 1px solid var(--border); background: var(--surface-2); overflow-x: auto; flex: none; }
+.rv-tool { flex: none; gap: 6px; }
+.rv-tool > span:first-child { display: inline-flex; }
+.rv-tool svg, .rv-toolbar .btn-icon svg { width: 16px; height: 16px; }
+.rv-caret { display: inline-flex; margin-left: -2px; opacity: .6; }
+.rv-caret svg { width: 12px !important; height: 12px !important; }
+.rv-gap { flex: 1; }
+.rv-menu-btn { display: none; flex: none; }
+.rv-busy .rv-tool { opacity: .5; pointer-events: none; }
+.rv-busy .rv-tick { pointer-events: none; opacity: .6; }
+
+.rv-body { position: relative; display: flex; flex: 1; min-height: 0; min-width: 0; overflow: hidden; }
+.rv-side { width: 360px; flex: none; display: flex; flex-direction: column; min-height: 0; border-right: 1px solid var(--border); background: var(--sidebar); }
+.rv-side-head { display: none; }
+.rv-shade { display: none; }
+.rv-tree { flex: 1; overflow: auto; overscroll-behavior: contain; padding: 6px 4px 12px; }
+.rv-tree-empty { padding: 14px; }
+.rv-node { display: flex; align-items: center; gap: 4px; min-height: 26px; padding: 1px 6px 1px calc(4px + var(--depth, 0) * 18px); border-radius: 6px; cursor: pointer; outline: none; white-space: nowrap; }
+.rv-node:hover { background: var(--hover); }
+.rv-node:focus-visible { box-shadow: inset 0 0 0 2px var(--accent); }
+.rv-node.sel { background: #3399ff; color: #fff; }
+.rv-node.sel .rv-node-sub, .rv-node.sel .rv-role { color: #f5deb3; }
+.rv-node-dat { padding: 0 6px 2px calc(48px + var(--depth, 0) * 18px); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rv-twist { width: 15px; height: 15px; flex: none; display: grid; place-items: center; padding: 0; border: 1px solid var(--border-strong); border-radius: 3px; background: var(--surface); color: var(--text-muted); font: 700 12px/1 var(--mono); cursor: pointer; }
+.rv-twist-space { width: 15px; flex: none; }
+.rv-tick { width: 15px; height: 15px; flex: none; padding: 0; border: 1px solid var(--border-strong); border-radius: 3px; background: var(--surface); cursor: pointer; display: grid; place-items: center; }
+.rv-tick:disabled { cursor: default; }
+.rv-tick-on::after { content: ""; width: 8px; height: 4px; border: solid var(--accent); border-width: 0 0 2px 2px; transform: translateY(-1px) rotate(-45deg); }
+.rv-tick-lock { background: color-mix(in srgb, var(--warn) 25%, var(--surface)); }
+.rv-tick-lock::after { content: ""; width: 7px; height: 6px; border-radius: 1px; background: var(--warn); box-shadow: 0 -3px 0 -1px var(--surface), 0 -4px 0 0 var(--warn); }
+.rv-node-icon, .rv-node-icon svg { width: 18px; height: 18px; flex: none; display: inline-flex; }
+.rv-node-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-size: 13px; }
+.rv-node-sub { color: var(--text-muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.rv-role { font-weight: 600; color: var(--text-muted); }
+.rv-presets { display: flex; align-items: center; gap: 6px; padding: 8px 10px; border-top: 1px solid var(--border); flex: none; }
+.rv-presets > span { margin-right: auto; }
+.rv-preset { min-width: 32px; }
+
+.rv-main { flex: 1; min-width: 0; display: flex; flex-direction: column; min-height: 0; }
+.rv-info { display: flex; gap: 14px; padding: 10px 14px; border-bottom: 1px solid var(--border); flex: none; flex-wrap: wrap; }
+.rv-info-grid { flex: 1; min-width: 260px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1px 16px; font-size: 12.5px; }
+.rv-info-row { display: flex; gap: 8px; min-width: 0; }
+.rv-info-row:nth-child(1), .rv-info-row:nth-child(2), .rv-info-row:nth-child(7) { grid-column: 1 / -1; }
+.rv-info-l { flex: none; width: 82px; color: var(--text-muted); }
+.rv-info-v { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rv-stats { display: grid; grid-template-columns: repeat(2, minmax(120px, auto)); gap: 6px; align-content: start; }
+.rv-stat { display: flex; align-items: baseline; gap: 6px; padding: 4px 10px; border-radius: 8px; background: var(--surface-2); border-left: 4px solid var(--c); font-size: 12px; }
+.rv-stat b { font-size: 15px; font-variant-numeric: tabular-nums; }
+.rv-filters { display: flex; align-items: center; gap: 4px 12px; padding: 6px 14px; border-bottom: 1px solid var(--border); flex-wrap: wrap; flex: none; font-size: 12.5px; }
+.rv-filter { display: inline-flex; align-items: center; gap: 5px; cursor: pointer; white-space: nowrap; }
+.rv-search { margin-left: auto; width: 200px; height: 28px; }
+
+.rv-split { flex: 1; min-height: 0; min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(80px, var(--split, 55%)) 6px minmax(80px, 1fr); }
+.rv-games, .rv-roms { min-height: 0; min-width: 0; display: flex; flex-direction: column; }
+.rv-splitter { cursor: row-resize; background: var(--surface-2); border-block: 1px solid var(--border); }
+.rv-splitter:hover { background: color-mix(in srgb, var(--accent) 25%, var(--surface-2)); }
+.rv-pane-head { display: flex; align-items: center; gap: 8px; padding: 5px 12px; min-height: 32px; border-bottom: 1px solid var(--border); flex: none; overflow: hidden; }
+.rv-rom-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; display: flex; align-items: center; gap: 6px; }
+.rv-rom-title b { overflow: hidden; text-overflow: ellipsis; }
+.rv-back { display: none; flex: none; gap: 4px; }
+.rv-back svg { width: 14px; height: 14px; }
+
+/* Virtual tables */
+.rv-table { position: relative; flex: 1; min-height: 0; overflow: auto; outline: none; font-size: 12.5px; }
+.rv-table:focus-visible { box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--accent) 50%, transparent); }
+.rv-th { position: sticky; top: 0; z-index: 2; display: grid; grid-template-columns: var(--cols); min-width: var(--minw); background: var(--surface-2); border-bottom: 1px solid var(--border-strong); }
+.rv-thc { padding: 4px 8px; font-weight: 650; font-size: 12px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; user-select: none; border-right: 1px solid var(--border); }
+.rv-thc:hover { color: var(--text); }
+.rv-sort { margin-left: 4px; font-size: 9px; }
+.rv-spacer { position: relative; min-width: var(--minw); }
+.rv-tbody { position: absolute; inset: 0; }
+.rv-tr { position: absolute; left: 0; right: 0; height: var(--rh, 26px); display: grid; grid-template-columns: var(--cols); min-width: var(--minw); align-items: center; cursor: default; background: var(--c, transparent); }
+.rv-tr[style*="--c"] { color: var(--rv-ink); }
+:root[data-theme="dark"] .rv-tr[style*="--c"] { background: color-mix(in srgb, var(--c) 34%, var(--surface)); color: var(--text); }
+.rv-tr:hover { filter: brightness(.96); }
+:root[data-theme="dark"] .rv-tr:hover { filter: brightness(1.15); }
+.rv-tr.sel { box-shadow: inset 0 0 0 2px #3399ff; filter: none; }
+.rv-td { padding: 0 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; border-right: 1px solid color-mix(in srgb, currentColor 8%, transparent); height: 100%; display: flex; align-items: center; }
+.rv-two { display: flex; flex-direction: column; min-width: 0; line-height: 1.2; }
+.rv-two > span { overflow: hidden; text-overflow: ellipsis; }
+.rv-num { justify-content: flex-end; font-variant-numeric: tabular-nums; }
+.rv-mono { font-family: var(--mono); font-size: 11.5px; }
+.rv-tempty { position: absolute; top: 40px; left: 0; right: 0; text-align: center; padding: 10px; }
+.rv-counts { display: inline-flex; gap: 8px; }
+.rv-count { display: inline-flex; align-items: center; gap: 3px; font-variant-numeric: tabular-nums; }
+.rv-sw { width: 10px; height: 10px; border-radius: 2px; background: var(--c); box-shadow: 0 0 0 1px rgba(0, 0, 0, .35); flex: none; }
+.rv-chip { display: inline-block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; padding: 0 6px; border-radius: 5px; line-height: 18px; font-size: 11.5px; font-weight: 600; background: var(--c); color: #111; box-shadow: 0 0 0 1px rgba(0, 0, 0, .25); }
+.rv-type { display: inline-flex; align-items: center; gap: 2px; }
+.rv-tb { display: inline-block; padding: 0 4px; border-radius: 4px; font: 700 10px/16px var(--mono); background: color-mix(in srgb, currentColor 14%, transparent); border: 1px solid color-mix(in srgb, currentColor 30%, transparent); }
+.rv-tb-miss { border-style: dashed; opacity: .65; background: none; }
+.rv-tb-bad { color: #b91c1c; }
+.rv-conv { font-size: 11px; opacity: .7; }
+.rv-bad { color: var(--bad); }
+
+/* Progress panel */
+.rv-job { flex: none; border-top: 1px solid var(--border-strong); background: var(--surface-2); padding: 8px 12px; max-height: 40%; overflow: auto; }
+.rv-job[hidden] { display: none; }
+.rv-job-head { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.rv-job-head .btn svg { width: 13px; height: 13px; }
+.rv-job-rows { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; }
+.rv-job-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; }
+.rv-indet .progress-fill { animation: rv-slide 1.2s ease-in-out infinite; }
+@keyframes rv-slide { 0% { margin-left: -30%; } 100% { margin-left: 100%; } }
+.rv-job-errors { margin-top: 6px; }
+.rv-job-errors summary { cursor: pointer; color: var(--bad); font-weight: 600; }
+.rv-err-list { max-height: 140px; overflow: auto; display: flex; flex-direction: column; gap: 2px; margin-top: 4px; }
+.rv-err { display: flex; gap: 8px; }
+.rv-err b { flex: none; max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.rv-err span { overflow-wrap: anywhere; white-space: pre-wrap; }
+
+/* Setup and dialogs */
+.rv-setup .rv-presets, .rv-setup .rv-filters { display: none; }
+.rv-over { position: absolute; inset: 0 0 0 var(--side-w, 360px); z-index: 3; background: var(--surface); overflow: auto; }
+.rv-narrow .rv-over { left: 0; }
+.rv-setup-box { padding: 20px 24px 40px; overflow: auto; max-width: 760px; }
+.rv-setup-head { display: flex; gap: 14px; align-items: flex-start; margin-bottom: 12px; }
+.rv-setup-icon, .rv-setup-icon svg { width: 52px; height: 52px; flex: none; }
+.rv-dialog { width: min(520px, calc(100vw - 24px)); max-height: calc(100vh - 32px); display: flex; flex-direction: column; }
+.rv-dialog.rv-wide { width: min(980px, calc(100vw - 24px)); }
+.rv-dialog-body { overflow: auto; min-height: 0; display: flex; flex-direction: column; gap: 10px; margin-top: 8px; padding-right: 2px; }
+.rv-dialog .dialog-actions { align-items: center; }
+.rv-field > span:first-child { font-size: 12.5px; font-weight: 600; }
+.rv-group { border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }
+.rv-group-title { font-size: 11.5px; font-weight: 750; letter-spacing: .05em; text-transform: uppercase; color: var(--text-muted); }
+.rv-row2 { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px; align-items: end; }
+.rv-inline { display: flex; align-items: center; min-height: 36px; }
+.rv-check { margin: 0; padding: 7px 10px; gap: 10px; }
+.rv-check > span { flex-direction: row; }
+.rv-mins { width: 72px; flex: none !important; height: 28px; }
+.rv-textarea { height: auto; min-height: 70px; padding: 6px 10px; font-family: var(--mono); font-size: 12px; resize: vertical; }
+.rv-error { color: var(--bad); min-height: 0; margin-top: 6px; }
+.rv-error:empty { display: none; }
+.rv-rule-list { display: flex; flex-direction: column; max-height: 180px; overflow: auto; border: 1px solid var(--border); border-radius: 8px; }
+.rv-rule-row { display: flex; justify-content: space-between; gap: 10px; padding: 5px 10px; border: 0; border-bottom: 1px solid var(--border); background: none; text-align: left; cursor: pointer; color: inherit; font: inherit; }
+.rv-rule-row:hover { background: var(--hover); }
+.rv-rule-row.sel { background: color-mix(in srgb, #22c55e 22%, transparent); }
+.rv-rule-row.parent { background: color-mix(in srgb, #eab308 18%, transparent); }
+.rv-rule-key { font-family: var(--mono); font-size: 12px; overflow-wrap: anywhere; }
+.rv-report { margin: 0; padding: 10px; max-height: 60vh; overflow: auto; background: var(--surface-2); border-radius: 8px; font: 12px/1.4 var(--mono); white-space: pre; }
+.rv-fixlog { height: 55vh; flex: none; border: 1px solid var(--border); border-radius: 8px; }
+.rv-key { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 6px 12px; }
+.rv-key-row { display: flex; align-items: center; gap: 8px; }
+.rv-key-row .rv-chip { min-width: 110px; text-align: center; }
+
+/* Narrow windows and phones: the tree is a drawer, and a set's files open over the list of sets. */
+.rv-narrow .rv-menu-btn { display: inline-flex; }
+.rv-narrow .rv-tool-label { display: none; }
+.rv-narrow .rv-tool { padding: 0 8px; }
+.rv-narrow .rv-side { position: absolute; z-index: 5; top: 0; bottom: 0; left: 0; width: min(380px, 88%); transform: translateX(-102%); transition: transform .22s var(--ease); box-shadow: var(--shadow-pop); background: var(--surface); }
+.rv-narrow.rv-drawer-open .rv-side { transform: none; }
+.rv-narrow .rv-side-head { display: flex; align-items: center; justify-content: space-between; padding: 8px 10px; font-weight: 700; border-bottom: 1px solid var(--border); }
+.rv-narrow.rv-drawer-open .rv-shade { display: block; position: absolute; inset: 0; z-index: 4; background: rgba(0, 0, 0, .3); }
+.rv-narrow .rv-info { padding: 8px 12px; gap: 8px; }
+.rv-narrow .rv-info-grid { grid-template-columns: minmax(0, 1fr); min-width: 0; }
+.rv-narrow .rv-info-row:nth-child(n+3):not(:nth-child(7)) { display: none; }
+.rv-narrow .rv-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); width: 100%; }
+.rv-narrow .rv-search { width: 100%; margin-left: 0; }
+.rv-narrow .rv-split { display: flex; flex-direction: column; }
+.rv-narrow .rv-splitter { display: none; }
+.rv-narrow .rv-games { flex: 1; }
+.rv-narrow .rv-roms { display: none; }
+.rv-narrow.rv-show-roms .rv-games, .rv-narrow.rv-show-roms .rv-info, .rv-narrow.rv-show-roms .rv-filters { display: none; }
+.rv-narrow.rv-show-roms .rv-roms { display: flex; flex: 1; }
+.rv-narrow .rv-back { display: inline-flex; }
+.rv-narrow .rv-tr, .rv-narrow .rv-th { font-size: 13px; }
+.rv-narrow .rv-row2 { grid-template-columns: minmax(0, 1fr); }
+.rv-narrow .rv-job { max-height: 50%; }
