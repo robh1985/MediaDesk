@@ -775,7 +775,7 @@ function rebuildStatus(f) {
 
 function altHeaderFile(h) {
   return h === HeaderFileType.A7800 || h === HeaderFileType.Lynx || h === HeaderFileType.NES || h === HeaderFileType.FDS ||
-    h === HeaderFileType.PCE || h === HeaderFileType.PSID || h === HeaderFileType.SNES || h === HeaderFileType.SPC;
+    h === HeaderFileType.PCE || h === HeaderFileType.PSID || h === HeaderFileType.SNES || h === HeaderFileType.SPC || h === HeaderFileType.CHD;
 }
 
 function getDatTreePath(rootPath) {

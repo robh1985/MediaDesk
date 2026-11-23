@@ -57,7 +57,7 @@ function defaults() {
     FixDatOutPath: null,
     DeleteOldCueFiles: false,
     CheckCHDVersion: false,
-    sevenZDefaultStruct: 3,
+    sevenZDefaultStruct: 0, // RomVault defaults to 3 (solid zstd); the 7-Zip tool used here has no zstd, so solid LZMA
     // ToSort directories: the first is the primary. RomVault keeps these in its cache; the port keeps them here too
     // so they can be edited in Settings before a cache exists.
   };
