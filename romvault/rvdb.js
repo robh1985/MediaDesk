@@ -584,6 +584,20 @@ class RvFile {
     return true;
   }
 
+  // RvFile.CopyTo: used by the zip fixer to work on a temporary copy of each entry. (MIA is not ported.)
+  copyTo(c) {
+    c.Size = this.Size; c.CRC = this.CRC; c.SHA1 = this.SHA1; c.MD5 = this.MD5;
+    c.Merge = this.Merge; c.Status = this.Status; c._fileStatus = this._fileStatus;
+    c.AltSize = this.AltSize; c.AltCRC = this.AltCRC; c.AltSHA1 = this.AltSHA1; c.AltMD5 = this.AltMD5;
+    c.ZipFileIndex = this.ZipFileIndex; c.ZipFileHeaderPosition = this.ZipFileHeaderPosition; c.CHDVersion = this.CHDVersion;
+    if (c._headerFileType === HeaderFileType.Nothing) c._headerFileType = this._headerFileType;
+    c.Name = this.Name; c.FileName = this.FileName; c.Dat = this.Dat;
+    c.FileModTimeStamp = this.FileModTimeStamp;
+    c._datStatus = this._datStatus; c._gotStatus = this._gotStatus;
+    c.RepStatus = this.RepStatus;
+    c.FileGroup = this.FileGroup;
+  }
+
   fileTestFix(file) {
     if (this._testMatch(file, false)) return;
     if (!this._testMatch(file, true)) return;

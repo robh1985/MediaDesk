@@ -266,7 +266,7 @@ class SevenZipWriter {
     const tmp = path.join(this.work, String(this.files.length).padStart(8, '0'));
     let crc = 0; let size = 0;
     try {
-      await pipeline(entry.source, new Transform({ transform(chunk, _e, cb) { crc = crc32(chunk, crc); size += chunk.length; onData?.(chunk.length); cb(null, chunk); } }), fs.createWriteStream(tmp));
+      await pipeline(entry.source, new Transform({ transform(chunk, _e, cb) { crc = crc32(chunk, crc); size += chunk.length; onData?.(chunk); cb(null, chunk); } }), fs.createWriteStream(tmp));
     } catch { return { zr: ZipReturn.ZipErrorWritingToOutputStream }; }
     if (size !== entry.size) return { zr: ZipReturn.ZipErrorWritingToOutputStream };
     f.CRC = hex8(crc); f._tmp = path.basename(tmp);
