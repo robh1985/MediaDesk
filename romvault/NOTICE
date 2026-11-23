@@ -19,3 +19,10 @@ Changes made in this port:
   deep CHD verification.
 - Compare.CompareAltHash checked the MD5 condition the wrong way round; the
   port uses the corrected check.
+- FindSourceFile ranked an unstructured (or ZipDTD/ZipDTZ) zip source as
+  verified when it was not deep scanned, and the other way round; the port
+  ranks it by the deep-scan flag.
+- Fix DATs are written straight from the database tree as Logiqx XML instead
+  of going through RomVault's DatHeader converter; MIA flags are not written.
+- New 7z sets default to solid LZMA (RomVault's default) and are written by
+  the 7-Zip tool, then given RomVault's header layout and marker block.
