@@ -44,6 +44,18 @@ state.me = session.user || null;
 [dashboardApp, makeArrApp('radarr'), makeArrApp('sonarr'), nzbgetApp, jellyfinApp, plexApp, plexViewerApp, pikvmApp, consoleApp, musicApp, filesApp, notesApp, logViewerApp, archiveApp, convertApp, paintApp, paintProApp, familyApp, ebooksApp, tripsApp, mapsApp, previewApp, calculatorApp, settingsApp, webviewApp,
   { id: 'launcher', name: 'Search', icon: '', open() {} }].filter(mayUse).forEach(registerApp);
 
+// Admins and parents hear about updates published on GitHub (Settings → About applies them).
+function watchForUpdates() {
+  const look = () => fetch('/portal/update', { headers: { Accept: 'application/json' }, credentials: 'same-origin' })
+    .then((r) => (r.ok ? r.json() : null))
+    .then((st) => {
+      if (!st?.behind || st.busy) return;
+      addSystemNotice({ id: `update-${st.latest}`, title: 'MediaDesk update available', body: `${st.behind} new change${st.behind === 1 ? '' : 's'}: ${st.changes[0]?.subject || ''}`, action: { label: 'See update', onClick: () => openApp('settings', { tab: 'about' }) } });
+    }).catch(() => {});
+  setTimeout(look, 5000);
+  setInterval(look, 6 * 36e5);
+}
+
 async function boot() {
   state.config = await portal.config();
   applyAppearance();
@@ -60,6 +72,7 @@ async function boot() {
     openApp('dashboard');
   }
   try { sessionStorage.setItem('mediadesk.booted', '1'); } catch { /* ignore */ }
+  if (state.config.canUpdate) watchForUpdates();
   if (state.config.mock) addSystemNotice({ id: 'demo', title: 'Demo mode', body: 'Showing sample data — no real servers are being contacted.' });
   const left = sessionStorage.getItem('mediadesk.recoveryNotice');
   if (left !== null) {

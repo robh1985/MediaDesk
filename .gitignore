@@ -6,3 +6,8 @@ logs/
 config/rclone.conf
 config/rclone-cache/
 config/network/
+# The Windows service program (built by install-windows.cmd), installer backups, update progress.
+service/
+backups/
+config/update-state.json
+config/update-state.json.tmp

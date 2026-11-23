@@ -107,30 +107,45 @@ There are no dependencies and nothing to `npm install`.
 ### Windows
 
 1. Install **Node.js LTS** from <https://nodejs.org> (the default options are fine).
-2. Download MediaDesk: either `git clone https://github.com/robh1985/MediaDesk.git`, or on GitHub click *Code → Download ZIP* and extract it. A permanent spot like `C:\MediaDesk` works best.
-3. Pick how you want to run it:
+2. Install **Git** (`winget install Git.Git`), so MediaDesk can update itself. The installer offers to do this if it's missing.
+3. Download MediaDesk: either `git clone https://github.com/robh1985/MediaDesk.git`, or on GitHub click *Code → Download ZIP* and extract it. A permanent spot like `C:\MediaDesk` or `D:\MediaDesk` works best.
+4. Pick how you want to run it:
 
 | | How | Good for |
 | --- | --- | --- |
 | **Try it** | Double-click `start-windows.cmd`. To use sample data instead, run `start-windows.cmd --mock` from a command prompt. | Testing. It stops when you close the window. |
-| **Run all the time** | Double-click `install-windows.cmd` and approve the admin prompt. | Everyday use. It starts with Windows (even before anyone logs in) and restarts if it crashes. |
+| **Run all the time** | Double-click `install-windows.cmd` and approve the admin prompt. | Everyday use. It installs the **MediaDesk** service, which starts with Windows (even before anyone logs in), restarts MediaDesk if it stops, and installs updates from *Settings → About*. |
 
 `install-windows.cmd` does the following:
-- asks for a portal password
-- registers a startup task called **MediaDesk**
+- finds older installations: the old **MediaDesk** startup task, an earlier service, or a copy running from another folder. It stops them, copies their settings, accounts and data (the `config` folder, without mounted network or cloud shares) into this folder, and removes the old startup task. The old folder itself isn't changed. Run with `-MigrateFrom D:\OldMediaDesk` to name the folder yourself
+- backs up this folder's settings to `backups\<date>` first
+- sets the folder up for updates: a ZIP copy is turned into a Git copy of the `main` branch (its program files are backed up and replaced; settings are kept)
+- asks for a portal password if there are no accounts yet
+- installs the **MediaDesk** service (as SYSTEM, delayed automatic start, restarts if it fails). It builds the small service program, `service\MediaDeskService.exe`, from `scripts\windows\MediaDeskService.cs` with the C# compiler built into Windows, so nothing is downloaded. If the service can't be installed it falls back to a startup task, as older versions used (`-UseTask` chooses that)
 - opens the port in Windows Firewall for Private networks
-- starts the portal and opens it in your browser
-- prints the address other devices on your network can use
+- starts the portal and opens it in your browser, and prints the address other devices on your network can use
 
-To use a different port, run it from a command prompt as `install-windows.cmd -Port 8081`. Run it again at any time to change the password or port.
+To use a different port, run it from a command prompt as `install-windows.cmd -Port 8081`; `-Yes` takes the recommended answer to every question. Run it again at any time: it's also how to repair or upgrade the installation.
+
+#### Updates from MediaDesk
+
+Admins, and anyone an admin made a **parent** (Settings → Users → Family Organizer), see *MediaDesk update available* in the notifications when something new is on GitHub (checked every 6 hours), and *Settings → About → Updates* lists what changed. **Update and restart** does the rest:
+
+1. The server checks it can update: installed with Git, running as the service, on `main`, and no MediaDesk files changed by hand. Who may update is checked by the server, not the page.
+2. The service moves the code forward (`git merge --ff-only`) and checks every file parses.
+3. It starts the new version, which must be answering within two minutes and keep running for 30 seconds.
+4. If not, it puts the previous version back (`git reset --hard`), starts that, and *Settings → About* says what went wrong. The log (`logs\mediadesk.log`) has the details.
+
+Settings, accounts and data aren't touched by an update. Progress is kept in `config\update-state.json`, so an update interrupted by a restart carries on (or is undone) when the service starts again.
 
 Notes for Windows:
 - **Service URLs:** if Radarr, Sonarr, NZBGet or Jellyfin run on the same PC, use `http://localhost:7878` and so on on each app's page in *Settings*.
 - **Other devices can't connect:** check that the network is set to *Private* in Windows Settings → Network. The firewall rule doesn't apply to *Public* networks.
-- **Update:** double-click `update-windows.cmd`. It downloads the latest version from the `main` branch (switching to `main` if you're on another branch) and restarts MediaDesk. If you installed from a ZIP, extract the new ZIP over the old folder and double-click `restart-windows.cmd`. Your settings are kept either way. Settings → About shows which version is running.
-- **Restart:** double-click `restart-windows.cmd`. This stops any leftover copy of MediaDesk before starting it again; ending the task in Task Scheduler doesn't always do that.
+- **Update by hand:** double-click `update-windows.cmd`. It downloads the latest version from the `main` branch (switching to `main` if you're on another branch) and restarts MediaDesk, without the automatic roll-back. Settings → About shows which version is running.
+- **Restart:** double-click `restart-windows.cmd`, or restart **MediaDesk** in `services.msc`. Stopping the service stops MediaDesk cleanly (cloud drives are unmounted) and ends anything it left running.
+- **Try the service in a window:** `service\MediaDeskService.exe --console "C:\Program Files\nodejs\node.exe" "D:\MediaDesk"` runs it in the foreground until you press Enter (stop the service first).
 - **Logs:** the background version writes to `logs\mediadesk.log`, including the version it started with and any startup errors.
-- **Remove:** double-click `uninstall-windows.cmd`. Your settings are kept.
+- **Remove:** double-click `uninstall-windows.cmd`. It removes the service (or startup task) and the firewall rule; your settings are kept.
 - **Docker Desktop** also works with `docker compose up -d --build`. In that case, services running on the Windows host are reached at `http://host.docker.internal:7878`, not `localhost`.
 
 ## Configuration

@@ -27,6 +27,7 @@ const { createNetShares } = require('./netshares');
 const { createCloudStorage } = require('./cloudstorage');
 const { createMaps } = require('./maps');
 const { createSports } = require('./sports');
+const { createUpdater } = require('./updater');
 
 const ROOT = __dirname;
 
@@ -204,7 +205,7 @@ function publicConfig(u = reqUser()) {
     };
   }
   return {
-    services, mock: MOCK, auth: users.enabled(), files: filesStatus(u), version: VERSION,
+    services, mock: MOCK, auth: users.enabled(), files: filesStatus(u), version: VERSION, canUpdate: canUpdate(u),
     // An admin's preferences are everyone's defaults; others can have their own on top.
     appSettings: appSettings.resolve(u.role === 'admin' ? config.appSettings : appSettings.merge(config.appSettings || {}, users.byId(u.id)?.appSettings || {})),
     usersFolder: u.role === 'admin' ? personalBase() : undefined,
@@ -844,6 +845,10 @@ const ROUTE_APPS = [
 const appsFor = (p) => ROUTE_APPS.find(([prefix]) => p.startsWith(prefix))?.[1] || null;
 // Changing MediaDesk itself (connections, signing in to Plex, testing services).
 const ADMIN_ROUTES = ['/portal/test', '/portal/plex', '/portal/netshares'];
+// Updating MediaDesk from GitHub (Settings → About): admins, and people an admin made a parent in
+// the Family Organizer. Checked here, for every update address.
+const canUpdate = (u) => Boolean(u) && (!users.enabled() || u.role === 'admin' || (users.can(u, 'family') && u.family?.role === 'parent'));
+const updater = createUpdater({ root: ROOT, dataDir: MOCK ? path.join(require('node:os').tmpdir(), 'mediadesk-demo-data') : path.dirname(CONFIG_PATH), mock: MOCK, onRestart: (code) => exitAfterLog(code) });
 // Notifications only about apps a person has.
 function notesFor(u, summary) {
   if (u.role === 'admin' || !summary || typeof summary !== 'object') return summary;
@@ -927,6 +932,10 @@ async function handle(req, res) {
   // Apps that only open files (Music, eBook Reader, Preview, Log Viewer) can read shared folders, not change them.
   if (p.startsWith('/portal/files/') && !['GET', 'HEAD'].includes(req.method) && !FILE_WRITERS.some((a) => users.can(me, a))) return sendJson(res, 403, { error: 'You can open files, but not change them. Ask an admin for Files.' });
 
+  if (p === '/portal/update' || p.startsWith('/portal/update/')) {
+    if (!canUpdate(me)) return sendJson(res, 403, { error: 'Only a parent or an admin can update MediaDesk' });
+    return updater.handle(req, res, p, { sendJson, user: me });
+  }
   if (p === '/portal/wallpapers' || p.startsWith('/portal/wallpapers/')) {
     return wallpapers.handle(req, res, url, {
       sendJson, readJson,
@@ -1072,6 +1081,14 @@ if (resetArg !== -1) {
 } else users.migrate().catch((err) => console.error(`Accounts: ${err.message}`)).then(() => server.listen(PORT, HOST, () => {
   netShares.connectAll().catch((err) => console.error(`Network shares: ${err.message}`));
   console.log(`MediaDesk ${VERSION} starting`);
+  // Run by the supervisor (the Windows service): tell it the server started, which is how it
+  // knows an update worked, and stop cleanly when it asks.
+  if (process.send) {
+    process.send({ type: 'ready' });
+    process.on('message', (m) => { if (m && m.type === 'shutdown') { console.log('Stopping (asked by the service)'); exitAfterLog(0); } });
+    process.on('disconnect', () => exitAfterLog(0));
+  }
+  updater.startSchedule();
   notifier.start();
   media.detect(config).then((t) => {
     const w = media.where();

@@ -83,7 +83,7 @@ export const settingsApp = {
       ...ready,
       notReady.length ? { more: 'Set up more apps', pages: notReady } : null,
       { heading: '' },
-      page('about', 'About', icon.heartPulse, renderAbout, { desc: 'Version, shortcuts and reload', keys: 'version keyboard shortcuts reload log out' }),
+      page('about', 'About', icon.heartPulse, renderAbout, { desc: 'Version, updates, shortcuts and reload', keys: 'version update upgrade github keyboard shortcuts reload log out restart' }),
     ].filter(Boolean), { initial: opts.tab, services: Object.keys(SERVICES).filter((s) => services.some((p) => p.id === s)) });
     win.body.append(h('div', { class: 'settings' }, layout.root));
     win.on('reopen', (o) => { if (o?.tab) layout.show(o.tab); });
@@ -1156,6 +1156,7 @@ function renderAbout(container) {
     h('h2', {}, 'MediaDesk'),
     h('p', { class: 'muted' }, 'One desktop for Radarr, Sonarr, NZBGet and Jellyfin.'),
     h('p', { class: 'small muted' }, `Version ${state.config.version || 'unknown'}`),
+    state.config.canUpdate ? renderUpdates() : null,
     h('p', { class: 'small muted' }, 'API keys stay on the MediaDesk server; your browser only talks to MediaDesk.'),
     h('div', { class: 'kbd-list' },
       h('div', {}, h('kbd', {}, 'Ctrl'), ' + ', h('kbd', {}, 'Space'), ' or ', h('kbd', {}, '/'), ' Search everything'),
@@ -1166,4 +1167,88 @@ function renderAbout(container) {
       // The same as "Reload now" after an update: loads MediaDesk afresh.
       h('button', { class: 'btn', title: 'Load MediaDesk again (picks up an update)', onclick: () => location.reload() }, h('span', { html: icon.refresh }), 'Reload'),
       state.config.auth ? h('button', { class: 'btn', onclick: () => portal.logout().then(() => location.reload()) }, h('span', { html: icon.lock }), 'Log out') : null)));
+}
+
+// Updates from GitHub, for admins and parents. The server checks who may; the service applies
+// the update, restarts MediaDesk and goes back to the old version if the new one doesn't start.
+function renderUpdates() {
+  const box = h('section', { class: 'update-panel' });
+  const short = (sha) => String(sha || '').slice(0, 7);
+  const when = (d) => (d ? new Date(d).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) : '');
+  let polling = null;
+
+  const resultNote = (last) => {
+    if (!last || ['pending', 'applying', 'trial'].includes(last.status)) return null;
+    const ago = last.finishedAt ? ` on ${when(last.finishedAt)}` : '';
+    if (last.status === 'done') return h('p', { class: 'update-note update-ok' }, `✓ Updated to ${short(last.to)}${ago}${last.by ? ` by ${last.by}` : ''}.`);
+    return h('p', { class: 'update-note update-bad' }, `${last.status === 'rolled-back' ? '↩ Update undone' : '⚠ Update failed'}${ago}. ${last.error || ''}`);
+  };
+
+  const draw = (st, { busyText } = {}) => {
+    const head = h('div', { class: 'update-head' },
+      h('h3', {}, 'Updates'),
+      h('span', { class: `update-badge ${st?.behind ? 'update-badge-new' : ''}` }, !st ? '' : st.busy ? 'Updating…' : st.behind ? `${st.behind} new change${st.behind === 1 ? '' : 's'}` : st.error ? 'Couldn’t check' : st.git ? 'Up to date' : 'Not set up'));
+    if (!st) return clear(box, head, h('p', { class: 'small muted' }, busyText || 'Checking GitHub…'));
+    const rows = [];
+    if (st.current) rows.push(h('p', { class: 'small' }, 'Running ', h('code', {}, short(st.current.sha)), ` · ${st.current.subject}`, h('span', { class: 'muted' }, ` (${when(st.current.date)})`)));
+    if (st.busy) {
+      rows.push(h('p', { class: 'update-note' }, h('span', { class: 'update-spin' }), `${busyText || 'Updating and restarting MediaDesk. This page reconnects by itself; it usually takes under a minute.'}`));
+    } else {
+      rows.push(resultNote(st.last));
+      if (st.error) rows.push(h('p', { class: 'update-note update-bad' }, `Couldn’t reach GitHub: ${st.error}`));
+      if (st.behind) {
+        rows.push(h('ul', { class: 'update-list' }, st.changes.slice(0, 15).map((c) => h('li', {}, h('span', {}, c.subject), h('span', { class: 'small muted' }, ` ${when(c.date)}`)))),
+          st.behind > 15 ? h('p', { class: 'small muted' }, `…and ${st.behind - 15} more.`) : null);
+        if (st.why) rows.push(h('p', { class: 'update-note update-bad' }, st.why));
+      } else if (!st.git) rows.push(h('p', { class: 'update-note' }, st.why || 'This copy wasn’t installed with Git, so it can’t update itself.'));
+      else if (!st.error) rows.push(h('p', { class: 'small muted' }, 'MediaDesk is up to date.'));
+    }
+    const apply = h('button', { class: 'btn btn-primary', disabled: !st.canApply, onclick: () => confirmApply(st) }, h('span', { html: icon.download }), 'Update and restart');
+    const recheck = h('button', { class: 'btn', disabled: st.busy, onclick: async () => {
+      recheck.disabled = true;
+      try { draw(await req('/portal/update/check', 'POST')); } catch (err) { toastError(err, 'Couldn’t check for updates'); recheck.disabled = false; }
+    } }, h('span', { html: icon.refresh }), 'Check now');
+    clear(box, head, ...rows.filter(Boolean),
+      h('div', { class: 'btn-row' }, st.behind ? apply : null, recheck),
+      h('p', { class: 'small muted' }, `Last checked ${when(st.checkedAt)}${st.remote ? ` · ${st.remote.replace(/^https?:\/\//, '').replace(/\.git$/, '')}` : ''}. Settings, accounts and data are kept; if the new version doesn’t start, the previous one is put back.`));
+    if (st.busy) watch(st.last?.id);
+  };
+
+  const req = (url, method = 'GET') => fetch(url, { method, headers: { 'X-MediaDesk': '1', Accept: 'application/json' }, credentials: 'same-origin' })
+    .then(async (r) => { const d = await r.json().catch(() => ({})); if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`); return d; });
+
+  async function confirmApply(st) {
+    const ok = await confirmDialog({ title: 'Update MediaDesk?', message: `MediaDesk will download ${st.behind} change${st.behind === 1 ? '' : 's'} and restart. Everyone using it will be disconnected for about a minute, and videos or music playing through MediaDesk will stop.`, confirm: 'Update and restart' });
+    if (!ok) return;
+    draw(null, { busyText: 'Starting the update…' });
+    try {
+      const { job } = await req('/portal/update/apply', 'POST');
+      draw({ ...st, busy: true, last: job, canApply: false });
+    } catch (err) { toastError(err, 'Couldn’t update'); draw(await req('/portal/update').catch(() => st)); }
+  }
+
+  // While the server restarts, requests fail; keep asking until the update has an outcome.
+  function watch(id) {
+    if (polling) return;
+    const started = Date.now();
+    polling = setInterval(async () => {
+      if (!box.isConnected) { clearInterval(polling); polling = null; return; }
+      let st = null;
+      try { st = await req('/portal/update'); } catch { /* restarting */ }
+      if (st && !st.busy && (!id || st.last?.id === id)) {
+        clearInterval(polling); polling = null;
+        draw(st);
+        if (st.last?.status === 'done') {
+          toast('MediaDesk was updated', { body: 'Reload to use the new version.', timeout: 0, action: { label: 'Reload now', onClick: () => location.reload() } });
+        } else if (st.last) toast('The update didn’t work', { type: 'error', body: st.last.error || 'The previous version is still running.', timeout: 12000 });
+      } else if (Date.now() - started > 5 * 60e3) {
+        clearInterval(polling); polling = null;
+        clear(box, h('h3', {}, 'Updates'), h('p', { class: 'update-note update-bad' }, 'MediaDesk hasn’t come back after five minutes. On the server, open logs\\mediadesk.log, or run restart-windows.cmd.'));
+      }
+    }, 2500);
+  }
+
+  draw(null);
+  req('/portal/update').then((st) => draw(st)).catch((err) => clear(box, h('h3', {}, 'Updates'), h('p', { class: 'update-note update-bad' }, err.message)));
+  return box;
 }

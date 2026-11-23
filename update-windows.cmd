@@ -1,5 +1,6 @@
 @echo off
 rem Downloads the latest MediaDesk from GitHub and restarts it.
+rem Admins and parents can also update from MediaDesk itself: Settings -> About.
 setlocal
 cd /d "%~dp0"
 
