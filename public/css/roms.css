@@ -155,7 +155,7 @@
 .rv-narrow.rv-drawer-open .rv-shade { display: block; position: absolute; inset: 0; z-index: 4; background: rgba(0, 0, 0, .3); }
 .rv-narrow .rv-info { padding: 8px 12px; gap: 8px; }
 .rv-narrow .rv-info-grid { grid-template-columns: minmax(0, 1fr); min-width: 0; }
-.rv-narrow .rv-info-row:nth-child(n+3):not(:nth-child(7)) { display: none; }
+.rv-narrow .rv-info-extra { display: none; }
 .rv-narrow .rv-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); width: 100%; }
 .rv-narrow .rv-search { width: 100%; margin-left: 0; }
 .rv-narrow .rv-split { display: flex; flex-direction: column; }
@@ -168,3 +168,65 @@
 .rv-narrow .rv-tr, .rv-narrow .rv-th { font-size: 13px; }
 .rv-narrow .rv-row2 { grid-template-columns: minmax(0, 1fr); }
 .rv-narrow .rv-job { max-height: 50%; }
+
+/* "What to do next" bar */
+.rv-guide { --g: var(--accent); display: flex; align-items: center; gap: 12px; margin: 10px 14px 0; padding: 10px 12px 10px 14px; border-radius: 10px;
+  background: color-mix(in srgb, var(--g) 9%, var(--surface)); border: 1px solid color-mix(in srgb, var(--g) 30%, var(--border)); border-left: 4px solid var(--g); min-width: 0; }
+.rv-guide[hidden] { display: none; }
+.rv-guide[data-tone="ok"] { --g: var(--ok, #22c55e); }
+.rv-guide[data-tone="fix"] { --g: #eab308; }
+.rv-guide[data-tone="warn"] { --g: var(--bad, #ef4444); }
+.rv-guide-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.rv-guide-title { font-weight: 600; font-size: 14px; }
+.rv-guide-text { color: var(--text-muted); line-height: 1.4; }
+.rv-guide-acts { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; flex-shrink: 0; }
+.rv-guide-acts .btn > span svg, .rv-folder svg, .rv-picker-item svg, .rv-path .btn svg, .rv-help-name svg { width: 15px; height: 15px; }
+.rv-guide-x { align-self: flex-start; flex-shrink: 0; }
+.rv-meter { display: block; height: 6px; border-radius: 3px; background: color-mix(in srgb, #ef4444 22%, var(--surface-2)); overflow: hidden; margin-top: 3px; max-width: 420px; }
+.rv-meter > span { display: block; height: 100%; background: var(--ok, #22c55e); border-radius: 3px; }
+.rv-narrow .rv-guide { flex-wrap: wrap; margin: 8px 10px 0; gap: 8px; }
+.rv-narrow .rv-guide-main { flex-basis: calc(100% - 40px); }
+.rv-narrow .rv-guide-text { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.rv-narrow .rv-guide-acts { justify-content: flex-start; width: 100%; }
+.rv-narrow.rv-show-roms .rv-guide { display: none; }
+
+/* Folder overview (a folder with no sets of its own) */
+.rv-folders { display: none; overflow: auto; padding: 8px 14px 14px; min-height: 0; flex: 1; }
+.rv-games.rv-show-folders .rv-folders { display: flex; flex-direction: column; gap: 6px; }
+.rv-games.rv-show-folders .rv-table { display: none; }
+.rv-folders-head { padding: 2px 2px 4px; }
+.rv-folder { display: flex; align-items: center; gap: 10px; text-align: left; width: 100%; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--border);
+  background: var(--surface); color: var(--text); cursor: pointer; font: inherit; min-width: 0; }
+.rv-folder:hover { background: var(--hover); }
+.rv-folder .rv-node-icon svg { width: 22px; height: 22px; }
+.rv-folder-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
+.rv-folder-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Setup: numbered folders, folder picker */
+.rv-step { display: inline-flex; align-items: center; gap: 8px; }
+.rv-step-n { display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: var(--accent); color: #fff; font-size: 12px; flex-shrink: 0; }
+.rv-path { display: flex; gap: 6px; min-width: 0; }
+.rv-path .input { flex: 1; min-width: 0; }
+.rv-path .btn { flex-shrink: 0; display: inline-flex; align-items: center; gap: 6px; }
+.rv-more { margin-top: 14px; }
+.rv-more > summary { cursor: pointer; font-weight: 600; padding: 6px 0; }
+.rv-picker-bar { display: flex; gap: 6px; align-items: center; }
+.rv-picker-bar .input { flex: 1; min-width: 0; font-family: var(--mono); font-size: 13px; }
+.rv-picker-list { margin-top: 8px; height: min(46vh, 380px); overflow: auto; border: 1px solid var(--border); border-radius: 8px; padding: 4px; }
+.rv-picker-item { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; padding: 7px 8px; border: 0; border-radius: 6px; background: none; color: var(--text); font: inherit; cursor: pointer; }
+.rv-picker-item:hover, .rv-picker-item:focus-visible { background: var(--hover); }
+.rv-picker-item svg { color: #eab308; flex-shrink: 0; }
+.rv-picker-empty { padding: 12px; }
+.rv-picker-msg { margin-top: 6px; color: var(--bad, #ef4444); }
+
+/* Help */
+.rv-help-steps { display: flex; flex-direction: column; gap: 10px; margin: 10px 0; }
+.rv-help-step { display: flex; gap: 10px; align-items: flex-start; }
+.rv-help-name { display: flex; align-items: center; gap: 6px; font-weight: 600; }
+.rv-help-list { margin: 6px 0 0; padding-left: 18px; display: flex; flex-direction: column; gap: 5px; }
+.rv-narrow .rv-guide { position: relative; padding-right: 40px; }
+.rv-narrow .rv-guide-x { position: absolute; top: 6px; right: 6px; }
+.rv-narrow .rv-guide-main { flex-basis: 100%; }
+.rv-folders-mode .rv-split { display: flex; flex-direction: column; }
+.rv-folders-mode .rv-splitter, .rv-folders-mode .rv-roms, .rv-folders-mode .rv-filters { display: none; }
+.rv-folders-mode .rv-games { flex: 1; }

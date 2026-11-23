@@ -25,11 +25,14 @@ function createRoms({ dataDir, mock = false, getSevenZip = async () => null, dem
   let job = null;
   let ready = null;
   let closing = false;
+  // The worker's job snapshots can arrive out of order: a quick job's "finished" message can beat the reply that
+  // started it. Keep whichever is newest, so a finished job never goes back to "running".
+  const takeJob = (j) => { if (!j || !job || j.id > job.id || (j.id === job.id && (j.rev || 0) >= (job.rev || 0))) job = j; return job; };
 
   function start() {
     worker = new Worker(path.join(__dirname, 'romvault', 'worker.js'), { workerData: { dataDir: dir, cancelBuf } });
     worker.on('message', (m) => {
-      if (m?.type === 'job') { job = m.job; return; }
+      if (m?.type === 'job') { takeJob(m.job); return; }
       const p = pending.get(m?.id);
       if (!p) return;
       pending.delete(m.id);
@@ -62,7 +65,7 @@ function createRoms({ dataDir, mock = false, getSevenZip = async () => null, dem
     }
     await set7z();
     const st = await call('status');
-    job = st.job;
+    takeJob(st.job);
     if (demo) {
       await call('job', { type: 'updateDats' });
       await waitIdle();
@@ -75,7 +78,7 @@ function createRoms({ dataDir, mock = false, getSevenZip = async () => null, dem
   async function waitIdle() {
     for (let i = 0; i < 600; i++) {
       const st = await call('status');
-      if (!st.job || st.job.state !== 'running') { job = st.job; return; }
+      if (!st.job || st.job.state !== 'running') { takeJob(st.job); return; }
       await new Promise((r) => setTimeout(r, 100));
     }
   }
@@ -96,6 +99,27 @@ function createRoms({ dataDir, mock = false, getSevenZip = async () => null, dem
     return tmp;
   }
 
+  // Folder picker for the setup page: the folders on the MediaDesk server (drive letters first on Windows).
+  async function browse(where) {
+    const win = process.platform === 'win32';
+    if (!where) {
+      if (win) {
+        const drives = [];
+        for (const l of 'CDEFGHIJKLMNOPQRSTUVWXYZ') { try { await fsp.access(`${l}:\\`); drives.push(`${l}:\\`); } catch { /* no such drive */ } }
+        return { path: '', parent: null, dirs: drives, full: true };
+      }
+      where = '/';
+    }
+    if (!path.isAbsolute(where)) throw new RomError(400, 'Type a full path, for example D:\\ROMs');
+    const at = path.resolve(where);
+    let ents;
+    try { ents = await fsp.readdir(at, { withFileTypes: true }); } catch { throw new RomError(400, `Can’t open ${at}. Check it exists and MediaDesk can read it.`); }
+    const dirs = ents.filter((e) => e.isDirectory() && !/^(\$|System Volume Information$)/.test(e.name)).map((e) => e.name)
+      .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base', numeric: true }));
+    const up = path.dirname(at);
+    return { path: at, parent: up !== at ? up : win ? '' : null, dirs: dirs.slice(0, 3000) };
+  }
+
   const textOut = (res, text, name, download) => {
     res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store', ...(download ? { 'Content-Disposition': `attachment; filename="${name}"` } : {}) });
     res.end(text);
@@ -109,7 +133,7 @@ function createRoms({ dataDir, mock = false, getSevenZip = async () => null, dem
     const post = req.method === 'POST';
     try {
       await (ready ||= init().catch((err) => { console.error(`ROM Manager: ${err.stack || err.message}`); }));
-      if (p === '/status' && !post) return sendJson(res, 200, { ...(await call('status')), canChange, mock });
+      if (p === '/status' && !post) { const st = await call('status'); return sendJson(res, 200, { ...st, job: takeJob(st.job), canChange, mock }); }
       if (p === '/job' && !post) return sendJson(res, 200, { job });
       if (p === '/tree' && !post) return sendJson(res, 200, await call('tree'));
       if (p === '/games' && !post) {
@@ -118,6 +142,7 @@ function createRoms({ dataDir, mock = false, getSevenZip = async () => null, dem
         return sendJson(res, 200, await call('games', { id: q.get('id') || '', q: q.get('q') || '', show }));
       }
       if (p === '/roms' && !post) return sendJson(res, 200, await call('roms', { id: q.get('id') || '', game: q.get('game'), showMerged: q.get('merged') === '1' }));
+      if (p === '/browse' && !post) { change(); return sendJson(res, 200, await browse(q.get('path') || '')); }
       if (p === '/settings' && !post) return sendJson(res, 200, await call('settings'));
       if (p === '/fixlog' && !post) return sendJson(res, 200, await call('fixLog'));
       if (p === '/errors' && !post) return sendJson(res, 200, { errors: await call('errors') });
@@ -145,10 +170,10 @@ function createRoms({ dataDir, mock = false, getSevenZip = async () => null, dem
       const body = await readJson(req);
       switch (p) {
         case '/job': {
-          if (!['updateDats', 'refreshDats', 'scan', 'findFixes', 'fix', 'auto'].includes(body.type)) throw new RomError(400, 'Unknown job');
+          if (!['all', 'updateDats', 'refreshDats', 'scan', 'findFixes', 'fix', 'auto'].includes(body.type)) throw new RomError(400, 'Unknown job');
           await set7z();
           Atomics.store(cancelFlag, 0, 0);
-          job = await call('job', { type: body.type, level: body.level, id: typeof body.id === 'string' ? body.id : '' });
+          takeJob(await call('job', { type: body.type, level: body.level, id: typeof body.id === 'string' ? body.id : '' }));
           return sendJson(res, 200, { job });
         }
         case '/cancel':

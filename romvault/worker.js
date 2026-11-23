@@ -31,6 +31,7 @@ const dataDir = workerData.dataDir;
 const cancelFlag = new Int32Array(workerData.cancelBuf);
 const settingsFile = path.join(dataDir, 'settings.json');
 const fixLogFile = path.join(dataDir, 'last-fix.json');
+const stepsFile = path.join(dataDir, 'steps.json');
 const tmpDir = path.join(dataDir, 'tmp');
 fs.mkdirSync(tmpDir, { recursive: true });
 
@@ -498,8 +499,28 @@ let job = null;
 let fixRows = readFixLog();
 function readFixLog() { try { return JSON.parse(fs.readFileSync(fixLogFile, 'utf8')); } catch { return { finished: null, rows: [] }; } }
 
-const LABEL = { updateDats: 'Updating DATs', refreshDats: 'Refreshing all DATs', scan: 'Scanning ROMs', findFixes: 'Finding fixes', fix: 'Fixing ROMs', auto: 'Scan, find fixes and fix' };
+// When each step last finished, so the app can say what to do next.
+let steps = {};
+try { steps = JSON.parse(fs.readFileSync(stepsFile, 'utf8')) || {}; } catch { steps = {}; }
+function stepDone(name) {
+  steps[name] = Date.now();
+  try { fs.writeFileSync(stepsFile, JSON.stringify(steps)); } catch { /* only used for hints */ }
+}
+// The whole collection in a few numbers, for the "what to do next" bar.
+function overview() {
+  const root = DB.DirRoot.child(0);
+  const s = root.DirStatus;
+  let dats = 0;
+  const countDats = (t) => { dats += t.DirDatCount || 0; for (let i = 0; i < t.ChildCount; i++) { const c = t.child(i); if (c.IsDirectory) countDats(c); } };
+  countDats(root);
+  let toSortFiles = 0;
+  for (let i = 1; i < DB.DirRoot.ChildCount; i++) toSortFiles += DB.DirRoot.child(i).DirStatus.countInToSort();
+  return { dats, have: s.countCorrect(), missing: s.countMissing(), fixes: s.countFixesNeeded(), unknown: s.countUnknown(), toSortFiles, steps: { ...steps } };
+}
+
+const LABEL = { all: 'Updating, scanning and fixing everything', updateDats: 'Updating DATs', refreshDats: 'Refreshing all DATs', scan: 'Scanning ROMs', findFixes: 'Finding fixes', fix: 'Fixing ROMs', auto: 'Scan, find fixes and fix' };
 let lastPost = 0;
+let jobRev = 0; // counts every job snapshot, so the main thread can drop one that arrives after a newer one
 function post(force) {
   const now = Date.now();
   if (!force && now - lastPost < 250) return;
@@ -509,7 +530,7 @@ function post(force) {
 function publicJob() {
   if (!job) return null;
   const { errors, ac, fixRows: _rows, ...rest } = job;
-  return { ...rest, errors: errors.slice(-200), errorCount: errors.length };
+  return { ...rest, rev: ++jobRev, errors: errors.slice(-200), errorCount: errors.length };
 }
 
 function makeThWrk() {
@@ -537,21 +558,22 @@ async function runJob(type, args) {
   const level = [EScanLevel.Level1, EScanLevel.Level2, EScanLevel.Level3].includes(args.level) ? args.level : EScanLevel.Level2;
   const startAt = args.id ? findNode(args.id) : null;
   if (args.id && !startAt) throw bad('That folder is no longer in the tree.');
-  const steps = {
+  const run = {
     dats: () => { j.phase = 'Update DATs'; updateDat(th); },
     scan: async () => { j.phase = 'Scan ROMs'; await new FileScanning(th, { startAt, scanLevel: level }).scanFiles(); },
     find: () => { j.phase = 'Find Fixes'; findFixes(th); },
     fix: async () => { j.phase = 'Fix ROMs'; j.result = await performFixes(th); },
   };
   const plan = {
-    updateDats: ['dats'], refreshDats: ['dats'], scan: ['scan'], findFixes: ['find'], fix: ['fix'], auto: ['scan', 'find', 'fix'],
+    all: ['dats', 'scan', 'find', 'fix'], updateDats: ['dats'], refreshDats: ['dats'], scan: ['scan'], findFixes: ['find'], fix: ['fix'], auto: ['scan', 'find', 'fix'],
   }[type];
   (async () => {
     try {
       if (type === 'refreshDats') invalidateAllDATs(DB.DirRoot.child(0), 'RomVault');
       for (const step of plan) {
         if (th.cancelled) break;
-        await steps[step]();
+        await run[step]();
+        if (!th.cancelled) stepDone(step);
         if (step === 'fix' && j.result?.failed) break;
       }
       j.state = th.cancelled ? 'cancelled' : 'done';
@@ -585,7 +607,7 @@ function fixDats(args) {
 
 // ------------------------------------------------------------------------------------------------ messages
 const handlers = {
-  status: () => ({ configured: configured(), job: publicJob(), settings: publicSettings(), fixLog: { finished: fixRows.finished, count: fixRows.rows.length } }),
+  status: () => ({ configured: configured(), overview: configured() ? overview() : null, job: publicJob(), settings: publicSettings(), fixLog: { finished: fixRows.finished, count: fixRows.rows.length } }),
   tree: () => ({ tree: tree(), job: publicJob() }),
   games: (a) => games(a.id, a),
   roms: (a) => roms(a.id, a.game, a),

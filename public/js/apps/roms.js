@@ -25,6 +25,9 @@ const I = {
   back: svg('<path d="M15 18l-6-6 6-6"/>'),
   stop: svg('<rect x="6" y="6" width="12" height="12" rx="2"/>'),
   chevUp: svg('<path d="m6 15 6-6 6 6"/>'),
+  help: svg('<circle cx="12" cy="12" r="9.5"/><path d="M9.5 9.2a2.6 2.6 0 0 1 5 .9c0 1.8-2.5 2.2-2.5 3.9M12 17.2v.1"/>'),
+  bolt: svg('<path d="M13 2 4 14h7l-1 8 9-12h-7z"/>'),
+  folder: svg('<path d="M2.5 6.5A2 2 0 0 1 4.5 4.5h4.2l2 2h8.8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-15a2 2 0 0 1-2-2z"/>'),
 };
 
 // RepStatus, in the engine's order (romvault/enums.js).
@@ -215,8 +218,39 @@ const field = (label, input, help) => h('label', { class: 'field rv-field' }, h(
 const check = (label, on, attrs = {}) => { const c = h('input', { type: 'checkbox', checked: !!on, ...attrs }); return [c, h('label', { class: 'pref-row rv-check' }, c, h('span', {}, label))]; };
 const pathInput = (value, placeholder, disabled) => h('input', { class: 'input', value: value || '', placeholder, spellcheck: 'false', disabled });
 
+// Pick a folder on the MediaDesk server (the browser can't see the server's disks, so the server lists them).
+async function folderPicker(start, title) {
+  let cur = '';
+  const where = h('input', { class: 'input', spellcheck: 'false', placeholder: 'Type a path, or pick below', onkeydown: (e) => { if (e.key === 'Enter') { e.preventDefault(); go(where.value.trim()); } } });
+  const upBtn = h('button', { class: 'btn btn-sm', type: 'button', onclick: () => go(upTo) }, h('span', { html: I.chevUp }), 'Up');
+  const list = h('div', { class: 'rv-picker-list', role: 'listbox' });
+  const msg = h('div', { class: 'small muted rv-picker-msg' });
+  let upTo = null;
+  async function go(p) {
+    msg.textContent = '';
+    let r;
+    try { r = await call('browse', { params: { path: p } }); } catch (err) { msg.textContent = err.message; return false; }
+    cur = r.path; upTo = r.parent; where.value = r.path;
+    upBtn.disabled = r.parent == null;
+    clear(list, r.dirs.length ? r.dirs.map((d) => h('button', { class: 'rv-picker-item', type: 'button', role: 'option', onclick: () => go(r.full ? d : joinPath(r.path, d)) }, h('span', { html: I.folder }), d))
+      : h('div', { class: 'small muted rv-picker-empty' }, r.path ? 'No folders in here. Use this one, or type a new folder name at the end of the path: it’s created when you save.' : 'No drives found.'));
+    return true;
+  }
+  const startAt = String(start || '').trim();
+  if (!startAt || !(await go(startAt))) {
+    const parent = startAt.replace(/[\\/]+$/, '').replace(/[\\/][^\\/]*$/, '');
+    if (!parent || !(await go(parent))) await go('');
+    if (startAt) where.value = startAt;
+  }
+  return dialog(title, [h('div', { class: 'rv-picker-bar' }, upBtn, where), list, msg], {
+    ok: 'Use this folder', wide: true,
+    onOk: () => { const v = where.value.trim(); if (!v) throw new Error('Pick a folder first.'); return v; },
+  });
+}
+const joinPath = (a, b) => (/[\\/]$/.test(a) ? a + b : `${a}${a.includes('\\') ? '\\' : '/'}${b}`);
+
 // The main settings (RomVault Settings): used by the app's ⚙ and by Settings → ROM Manager.
-function settingsForm(s, { can, mock }) {
+function settingsForm(s, { can, mock, setup = false }) {
   const dat = pathInput(s.DatRoot, 'For example D:\\ROMs\\DATs', !can || mock);
   const rom = pathInput(s.RomRoot, 'For example D:\\ROMs\\RomRoot', !can || mock);
   const ts = pathInput((s.toSort.find((t) => t.primary) || s.toSort[0])?.path, 'For example D:\\ROMs\\ToSort', !can || mock);
@@ -230,15 +264,8 @@ function settingsForm(s, { can, mock }) {
   const [tim, timRow] = check('Save the cache while fixing, every', s.CacheSaveTimerEnabled, { disabled: !can });
   const mins = h('input', { class: 'input rv-mins', type: 'number', min: 1, max: 600, value: s.CacheSaveTimePeriod, disabled: !can });
   timRow.append(mins, h('span', {}, 'minutes'));
-  const body = [
-    mock ? h('div', { class: 'notice small' }, 'Demo mode: the folders hold a small made-up collection and can’t be changed. Everything else can be tried.') : null,
-    !can ? h('div', { class: 'notice small' }, 'Only a parent or an admin can change these.') : null,
-    h('div', { class: 'rv-group' }, h('div', { class: 'rv-group-title' }, 'Folders'),
-      h('p', { class: 'small muted' }, 'Full paths on the computer running MediaDesk.'),
-      field('DAT folder (DATRoot)', dat, 'Your DAT files. Its sub-folders make the tree; a folder with several DATs gets one sub-folder per DAT.'),
-      field('ROM folder (RomRoot)', rom, 'The collection. Each folder in the tree is a folder of the same name in here, unless a directory mapping sends it somewhere else.'),
-      field('Primary ToSort folder', ts, 'Files no DAT needs are moved here, and files here are used to fix sets. Add more ToSort folders from the tree menu.'),
-      field('Fix DAT folder', fixd, 'Where “Save fix DATs to the folder” writes them.')),
+  const browse = (input, title) => (can && !mock ? h('div', { class: 'rv-path' }, input, h('button', { class: 'btn', type: 'button', onclick: async () => { const v = await folderPicker(input.value, title); if (v) input.value = v; } }, h('span', { html: I.folder }), 'Browse…')) : input);
+  const more = [
     h('div', { class: 'rv-group' }, h('div', { class: 'rv-group-title' }, 'Core settings'),
       field('Fixing level', level, 'Level 1 copies a file straight from another archive when the CRC matches; level 2 does that only once it has been hashed with SHA1; level 3 always unpacks, checks and packs again.'),
       dblRow, detRow, cueRow, timRow,
@@ -246,6 +273,18 @@ function settingsForm(s, { can, mock }) {
     h('div', { class: 'rv-group' }, h('div', { class: 'rv-group-title' }, 'Compression'),
       field('Default 7z type', sevenz, 'Used for 7z sets whose rule doesn’t pick one. (RomVault’s ZSTD 7z needs a 7-Zip with ZSTD, so it isn’t offered here.)'),
       h('p', { class: 'small muted' }, `7-Zip on the server: ${s.sevenZip ? 'found, so 7z archives can be read and made.' : 'not found, so 7z archives are skipped. Install 7-Zip (Settings → Files shows how).'}`)),
+  ];
+  const step = (n, label) => (setup ? h('span', { class: 'rv-step' }, h('b', { class: 'rv-step-n' }, String(n)), label) : label);
+  const body = [
+    mock ? h('div', { class: 'notice small' }, 'Demo mode: the folders hold a small made-up collection and can’t be changed. Everything else can be tried.') : null,
+    !can ? h('div', { class: 'notice small' }, 'Only a parent or an admin can change these.') : null,
+    h('div', { class: 'rv-group' }, h('div', { class: 'rv-group-title' }, 'Folders'),
+      h('p', { class: 'small muted' }, 'Folders on the computer running MediaDesk. Any that don’t exist yet are created.'),
+      field(step(1, 'DAT folder (DATRoot)'), browse(dat, 'Choose the DAT folder'), 'Where your DAT files are: the lists of every game and ROM, from No-Intro, Redump, TOSEC or MAME. Each sub-folder becomes a folder in the tree.'),
+      field(step(2, 'ROM folder (RomRoot)'), browse(rom, 'Choose the ROM folder'), 'Where your collection lives. ROM Manager keeps it organised to match the DATs, with a folder for each folder in the tree.'),
+      field(step(3, 'ToSort folder'), browse(ts, 'Choose the ToSort folder'), 'Put new or unsorted files here and ROM Manager files them where they belong. Files no DAT needs are moved here, not deleted.'),
+      setup ? null : field('Fix DAT folder', browse(fixd, 'Choose the fix DAT folder'), 'Where “Save fix DATs to the folder” writes the lists of what’s missing.')),
+    ...(setup ? [h('details', { class: 'rv-more' }, h('summary', {}, 'More settings (you can change these later)'), field('Fix DAT folder', browse(fixd, 'Choose the fix DAT folder'), 'Where “Save fix DATs to the folder” writes the lists of what’s missing.'), ...more)] : more),
   ];
   const read = () => {
     const b = { FixLevel: Number(level.value), DoubleCheckDelete: dbl.checked, DetailedFixReporting: det.checked, DeleteOldCueFiles: cue.checked, CacheSaveTimerEnabled: tim.checked,
@@ -266,15 +305,16 @@ class RomManager {
     const tb = (label, ic, fn, title, caret) => h('button', { class: 'btn rv-tool', title: title || label, onclick: fn }, h('span', { html: ic }), h('span', { class: 'rv-tool-label' }, label), caret ? h('span', { class: 'rv-caret', html: I.caret }) : null);
     this.menuBtn = h('button', { class: 'btn btn-icon rv-menu-btn', title: 'DAT tree', 'aria-label': 'Show the DAT tree', html: icon.menu, onclick: () => this.drawer(true) });
     this.tools = {
-      dats: tb('Update DATs', I.dats, (e) => this.datsMenu(e), 'Read new and changed DATs from the DAT folder', true),
-      scan: tb('Scan ROMs', I.scan, (e) => this.scanMenu(e), 'Scan the ticked folders', true),
-      find: tb('Find Fixes', I.find, () => this.run('findFixes'), 'Work out what can be fixed, and from where'),
-      fix: tb('Fix ROMs', I.fix, (e) => this.fixMenu(e), 'Fix everything that can be fixed in the ticked folders', true),
+      dats: tb('Update DATs', I.dats, (e) => this.datsMenu(e), 'Step 1: read new and changed DAT files from your DAT folder', true),
+      scan: tb('Scan ROMs', I.scan, (e) => this.scanMenu(e), 'Step 2: look at the files in the ticked folders and your ToSort folder', true),
+      find: tb('Find Fixes', I.find, () => this.run('findFixes'), 'Step 3: work out which files can be renamed, moved or rebuilt to fill in your sets'),
+      fix: tb('Fix ROMs', I.fix, (e) => this.fixMenu(e), 'Step 4: make the changes Find Fixes worked out, in the ticked folders', true),
       reports: tb('Reports', I.report, (e) => this.reportsMenu(e), 'Fix DATs and reports', true),
     };
     this.keyBtn = h('button', { class: 'btn btn-icon', title: 'Colour key', 'aria-label': 'Colour key', html: I.key, onclick: () => this.colourKey() });
+    this.helpBtn = h('button', { class: 'btn btn-icon', title: 'How ROM Manager works', 'aria-label': 'How ROM Manager works', html: I.help, onclick: () => this.help() });
     this.gearBtn = h('button', { class: 'btn btn-icon', title: 'Settings', 'aria-label': 'Settings', html: I.gear, onclick: (e) => this.settingsMenu(e) });
-    this.toolbar = h('div', { class: 'rv-toolbar' }, this.menuBtn, ...Object.values(this.tools), h('span', { class: 'rv-gap' }), this.keyBtn, this.gearBtn);
+    this.toolbar = h('div', { class: 'rv-toolbar' }, this.menuBtn, ...Object.values(this.tools), h('span', { class: 'rv-gap' }), this.helpBtn, this.keyBtn, this.gearBtn);
 
     // Left: tree and pre-sets
     this.treeBox = h('div', { class: 'rv-tree', role: 'tree' });
@@ -287,7 +327,9 @@ class RomManager {
     this.shade = h('div', { class: 'rv-shade', onclick: () => this.drawer(false) });
 
     // Right: DAT info, filters, games, ROMs
+    this.guide = h('div', { class: 'rv-guide', hidden: true });
     this.info = h('div', { class: 'rv-info' });
+    this.folders = h('div', { class: 'rv-folders' });
     this.filterBox = h('div', { class: 'rv-filters' });
     this.games = new VTable({
       cols: this.gameCols(false), empty: 'No sets to show here. Pick a DAT in the tree, or change the filters.',
@@ -299,8 +341,8 @@ class RomManager {
     this.romPane = h('div', { class: 'rv-roms' },
       h('div', { class: 'rv-pane-head' }, h('button', { class: 'btn btn-sm rv-back', html: `${I.back}<span>Sets</span>`, onclick: () => this.root.classList.remove('rv-show-roms') }), this.romTitle),
       this.romsT.el);
-    this.gamePane = h('div', { class: 'rv-games' }, this.gamesT = this.games.el);
-    this.main = h('div', { class: 'rv-main' }, this.info, this.filterBox, h('div', { class: 'rv-split' }, this.gamePane, h('div', { class: 'rv-splitter', title: 'Drag to resize', onpointerdown: (e) => this.dragSplit(e) }), this.romPane));
+    this.gamePane = h('div', { class: 'rv-games' }, this.gamesT = this.games.el, this.folders);
+    this.main = h('div', { class: 'rv-main' }, this.guide, this.info, this.filterBox, h('div', { class: 'rv-split' }, this.gamePane, h('div', { class: 'rv-splitter', title: 'Drag to resize', onpointerdown: (e) => this.dragSplit(e) }), this.romPane));
     this.jobBox = h('div', { class: 'rv-job', hidden: true });
     this.root = h('div', { class: 'rv-app' }, this.toolbar, h('div', { class: 'rv-body' }, this.side, this.shade, this.main), this.jobBox);
     win.body.append(this.root);
@@ -331,7 +373,8 @@ class RomManager {
     Object.values(this.tools).forEach((b) => { b.disabled = !s.configured || (!this.can && b !== this.tools.reports); });
     this.renderFilters();
     this.setJob(s.job);
-    if (!s.configured) { this.renderSetup(); return; }
+    if (!s.configured) { this.guide.hidden = true; this.renderSetup(); return; }
+    this.renderGuide();
     await this.loadTree();
     await this.select(this.selId, { quiet: true });
   }
@@ -347,16 +390,17 @@ class RomManager {
   renderSetup() {
     this.root.classList.add('rv-setup');
     const s = this.st.settings;
-    const f = settingsForm(s, { can: this.can, mock: this.st.mock });
-    const save = h('button', { class: 'btn btn-primary', disabled: !this.can }, h('span', { html: icon.check }), 'Save and start');
+    const f = settingsForm(s, { can: this.can, mock: this.st.mock, setup: true });
+    const save = h('button', { class: 'btn btn-primary', disabled: !this.can }, h('span', { html: icon.check }), 'Save and continue');
     save.onclick = async () => {
       save.disabled = true;
-      try { await call('settings', { method: 'POST', body: f.read() }); this.root.classList.remove('rv-setup'); toast('ROM Manager is set up', { body: 'Next: Update DATs, then Scan ROMs, Find Fixes and Fix ROMs.', type: 'success', icon: appIcon.roms }); await this.load(); } catch (err) { toastError(err, 'Not saved'); } finally { save.disabled = !this.can; }
+      try { await call('settings', { method: 'POST', body: f.read() }); this.root.classList.remove('rv-setup'); toast('ROM Manager is set up', { body: 'The bar at the top shows what to do next.', type: 'success', icon: appIcon.roms }); await this.load(); } catch (err) { toastError(err, 'Not saved'); } finally { save.disabled = !this.can; }
     };
-    clear(this.treeBox, h('div', { class: 'rv-tree-empty small muted' }, 'Choose your folders to begin.'));
+    clear(this.treeBox, h('div', { class: 'rv-tree-empty small muted' }, 'Your DATs show here once the folders are chosen.'));
     this.showOver(h('div', { class: 'rv-setup-box' },
       h('div', { class: 'rv-setup-head' }, h('span', { class: 'rv-setup-icon', html: appIcon.roms }), h('div', {}, h('h2', {}, 'Set up ROM Manager'),
-        h('p', { class: 'muted' }, 'ROM Manager keeps your ROM collection matched to DAT files (No-Intro, Redump, TOSEC, MAME…), the way RomVault does, with RomVault’s own engine. Tell it where your DATs, your collection and your ToSort folder are.'))),
+        h('p', { class: 'muted' }, 'ROM Manager checks your ROMs against DAT files, the lists of every game and ROM from No-Intro, Redump, TOSEC or MAME. Then it fixes what it can: renaming files, rebuilding zips and filing new files where they belong. It uses RomVault’s engine.'),
+        h('p', { class: 'muted' }, 'To start, choose three folders on the MediaDesk server.'))),
       f.body, h('div', { class: 'btn-row' }, save)));
   }
 
@@ -450,16 +494,18 @@ class RomManager {
     this.games.setCols(this.gameCols(r.showDescription));
     this.looseFiles = r.looseFiles;
     this.games.setRows(r.games, { keep: keepGame ? (g) => g?.n : null });
+    this.renderFolders(!r.games.length && !this.q ? this.findNode(id) : null);
     const sel = this.games.selected();
     if (keepGame && sel) this.loadRoms(sel.n, true);
     else { this.game = null; this.loadRoms(null); }
   }
   renderInfo(i) {
-    const row = (l, v) => h('div', { class: 'rv-info-row' }, h('span', { class: 'rv-info-l' }, l), h('span', { class: 'rv-info-v', title: v || '' }, v || ''));
+    // Empty rows are left out (the top folder has no DAT details); on phones only name, description and path show.
+    const row = (l, v, extra) => (v ? h('div', { class: `rv-info-row${extra ? ' rv-info-extra' : ''}` }, h('span', { class: 'rv-info-l' }, l), h('span', { class: 'rv-info-v', title: v }, v)) : null);
     const stat = (l, v, st) => h('div', { class: 'rv-stat', style: { '--c': COLOR[st] } }, h('b', {}, num(v)), h('span', {}, l));
     clear(this.info,
-      h('div', { class: 'rv-info-grid' }, row('Name', i.name), row('Description', i.description), row('Category', i.category), row('Version', i.version), row('Author', i.author), row('Date', i.date), row('ROM Path', i.path)),
-      h('div', { class: 'rv-stats' }, stat('ROMs Got', i.have, 'Correct'), stat('ROMs Missing', i.missing, 'Missing'), stat('ROMs Fixable', i.fixes, 'CanBeFixed'), stat('ROMs Unknown', i.unknown, 'Unknown')));
+      h('div', { class: 'rv-info-grid' }, row('Name', i.name), row('Description', i.description), row('Category', i.category, true), row('Version', i.version, true), row('Author', i.author, true), row('Date', i.date, true), row('ROM Path', i.path)),
+      h('div', { class: 'rv-stats' }, stat('ROMs you have', i.have, 'Correct'), stat('ROMs missing', i.missing, 'Missing'), stat('Fixes ready', i.fixes, 'CanBeFixed'), stat('Files no DAT needs', i.unknown, 'Unknown')));
   }
   renderFilters() {
     const f = this.show || {};
@@ -537,6 +583,7 @@ class RomManager {
     contextMenu(x, y, [
       { label: 'Fix ROMs', icon: I.fix, action: () => this.run('fix') },
       { label: 'Scan, Find Fixes and Fix', icon: I.find, action: () => this.run('auto') },
+      { label: 'Update DATs, Scan, Find Fixes and Fix', icon: I.bolt, action: () => this.run('all') },
       '-',
       { label: 'Last fix list', action: () => this.fixLog() },
     ]);
@@ -562,6 +609,7 @@ class RomManager {
       { label: 'Directory Mappings', disabled: !this.can || this.st?.mock, action: () => this.mappingDialog(this.ruleKeyFor(this.selId)) },
       { label: 'Add ToSort', disabled: !this.can || this.st?.mock, action: () => this.addToSort() },
       '-',
+      { label: 'How ROM Manager works', icon: I.help, action: () => this.help() },
       { label: 'Colour key', icon: I.key, action: () => this.colourKey() },
       { label: 'About ROM Manager', action: () => this.about() },
     ]);
@@ -619,23 +667,33 @@ class RomManager {
   async run(type, opts = {}) {
     if (!this.can) { toast('Only a parent or an admin can change the ROM collection', { type: 'error' }); return; }
     if (this.busy()) { toast('Wait for the job to finish first', { type: 'info' }); return; }
-    if (type === 'fix' || type === 'auto') {
-      const ok = await confirmDialog({ title: type === 'auto' ? 'Scan, find fixes and fix?' : 'Fix ROMs?', message: 'This rebuilds sets in the ticked folders, moves files no DAT needs to ToSort, and deletes files once a copy is in the right place. Locked folders are left alone.', confirm: type === 'auto' ? 'Scan and fix' : 'Fix ROMs' });
+    if (type === 'fix' || type === 'auto' || type === 'all') {
+      const title = { fix: 'Fix ROMs?', auto: 'Scan, find fixes and fix?', all: 'Update, scan and fix everything?' }[type];
+      const first = { fix: '', auto: 'This scans the ticked folders, works out what can be fixed, then fixes it. ', all: 'This reads your DATs again, scans the ticked folders, works out what can be fixed, then fixes it. ' }[type];
+      const ok = await confirmDialog({ title, message: `${first}Fixing renames and rebuilds sets in the ticked folders, moves files no DAT needs to your ToSort folder, and deletes a file only once a good copy is in the right place. Locked folders are left alone.`, confirm: type === 'fix' ? 'Fix ROMs' : 'Start' });
       if (!ok) return;
     }
-    try { const r = await call('job', { method: 'POST', body: { type, ...opts } }); this.setJob(r.job); } catch (err) { toastError(err, 'Could not start'); }
+    try { const r = await call('job', { method: 'POST', body: { type, ...opts } }); this.startedId = r.job?.id; this.setJob(r.job); } catch (err) { toastError(err, 'Could not start'); }
   }
   setJob(j) {
     const was = this.job;
     this.job = j;
     this.root.classList.toggle('rv-busy', !!j && j.state === 'running');
+    if ((was?.state === 'running') !== (j?.state === 'running')) this.renderGuide();
     if (!j) { this.jobBox.hidden = true; return; }
-    if (j.state === 'running' || this.lastJobId === j.id || (was && was.id === j.id)) this.renderJob();
+    const mine = this.startedId === j.id; // a quick job can already be finished when the reply that started it arrives
+    if (j.state === 'running' || mine || this.lastJobId === j.id || (was && was.id === j.id)) this.renderJob();
     if (j.state === 'running') {
       clearTimeout(this.pollT);
       this.pollT = setTimeout(() => this.poll(), 400);
       if (!this.treeT || Date.now() - this.treeT > 2500) { this.treeT = Date.now(); this.loadTree(); }
-    } else if (was?.state === 'running') this.finished(j);
+    } else if ((was?.state === 'running' || mine) && this.finishedId !== j.id) {
+      this.finishedId = j.id;
+      this.finished(j);
+      // A clean finish needs no panel: the toast and the "next step" bar say how it went.
+      clearTimeout(this.hideT);
+      if (j.state !== 'error' && !j.errorCount) this.hideT = setTimeout(() => { if (this.job?.id === j.id && !this.busy()) this.jobBox.hidden = true; }, 5000);
+    }
     this.lastJobId = j.id;
   }
   async poll() {
@@ -648,6 +706,7 @@ class RomManager {
     toast(`${j.label}: ${msg}`, { body, type: j.state === 'done' && !j.result?.failed ? 'success' : 'error', icon: appIcon.roms });
     await this.loadTree();
     this.st = await call('status').catch(() => this.st);
+    this.renderGuide();
     await this.select(this.selId, { quiet: true, keepGame: true });
   }
   renderJob() {
@@ -810,6 +869,103 @@ class RomManager {
     if (action === 'remove' && !(await confirmDialog({ title: 'Remove this ToSort folder?', message: `${n.id} stays on disk; ROM Manager just stops using it.`, confirm: 'Remove', danger: true }))) return;
     try { const r = await call('tosort', { method: 'POST', body: { action, id: n.id } }); this.st.settings = r; await this.loadTree(); if (action === 'remove') this.select('RomVault'); } catch (err) { toastError(err); }
   }
+  // --- "what to do next": one plain sentence about the collection and the step that comes next -----------------
+  renderGuide() {
+    const o = this.st?.overview;
+    if (!o || !this.st.configured || readLs('mediadesk.roms.guide', true) === false) { this.guide.hidden = true; return; }
+    const t = o.steps || {};
+    const s = this.st.settings;
+    const total = o.have + o.missing;
+    const pct = total ? Math.floor((o.have / total) * 100) : 0;
+    const busy = this.busy();
+    const btn = (label, ic, fn, primary) => h('button', { class: `btn btn-sm${primary ? ' btn-primary' : ''}`, disabled: !this.can || busy, onclick: fn }, ic ? h('span', { html: ic }) : null, label);
+    const plural = (n, one, many = `${one}s`) => `${num(n)} ${n === 1 ? one : many}`;
+    let tone = 'step'; let title; let text; let acts; let meter = false;
+    if (!t.dats) {
+      title = 'Step 1 of 4: load your DATs';
+      text = `ROM Manager reads the DAT files in ${s.DatRoot} to learn which ROMs make up each set. Copy your DATs there first (zipped is fine); each sub-folder becomes a folder in the tree.`;
+      acts = [btn('Load DATs', I.dats, () => this.run('updateDats'), true)];
+    } else if (!o.dats) {
+      tone = 'warn'; title = 'No DAT files found';
+      text = `There are no DATs in ${s.DatRoot} yet. Copy some there (.dat or .xml, zipped is fine), then look again.`;
+      acts = [btn('Look again', I.dats, () => this.run('updateDats'), true), h('button', { class: 'btn btn-sm', onclick: () => this.settingsDialog() }, h('span', { html: I.gear }), 'Change folders')];
+    } else if (!t.scan || t.scan < t.dats) {
+      title = 'Step 2 of 4: scan your ROMs';
+      text = `${plural(o.dats, 'DAT')} loaded. Next, ROM Manager looks at the files in your ROM and ToSort folders to see what you have. The first scan of a big collection can take a while.`;
+      acts = [btn('Scan ROMs', I.scan, () => this.run('scan', { level: 1 }), true), btn('Scan and fix in one go', I.bolt, () => this.run('auto'))];
+    } else if (!t.find || t.find < t.scan) {
+      title = 'Step 3 of 4: find fixes'; meter = true;
+      text = 'Next, ROM Manager works out which files it can rename, move or rebuild to complete your sets. Nothing is changed yet.';
+      acts = [btn('Find Fixes', I.find, () => this.run('findFixes'), true)];
+    } else if (o.fixes > 0) {
+      tone = 'fix'; meter = true;
+      title = `Step 4 of 4: ${plural(o.fixes, 'fix', 'fixes')} ready`;
+      text = 'Fixing renames, moves and rebuilds files so your sets match the DATs, and moves files no DAT needs to ToSort. Yellow and orange rows show what will change.';
+      acts = [btn('Fix ROMs', I.fix, () => this.run('fix'), true), h('button', { class: 'btn btn-sm', onclick: () => this.report('fix') }, h('span', { html: I.report }), 'See the list first')];
+    } else if (o.missing > 0) {
+      tone = 'info'; meter = true;
+      title = `You have ${num(o.have)} of ${plural(total, 'ROM')} (${pct}%)`;
+      text = `${plural(o.missing, 'ROM is', 'ROMs are')} missing, and none of your files can fill ${o.missing === 1 ? 'it' : 'them'} in. To add more, put files in your ToSort folder, then scan and fix. A fix DAT lists exactly what’s missing.`;
+      acts = [btn('Scan and fix', I.bolt, () => this.run('auto'), true), h('button', { class: 'btn btn-sm', onclick: () => download('fixdat', { red: '1' }) }, h('span', { html: icon.download }), 'List what’s missing')];
+    } else {
+      tone = 'ok'; meter = total > 0;
+      title = total ? `Complete: you have all ${plural(total, 'ROM')}` : 'Nothing to collect yet';
+      text = total ? 'Every set in the ticked folders matches its DAT. When you add DATs or files, check again.' : 'The ticked folders list no ROMs. Tick some folders in the tree, or add DATs.';
+      acts = [btn('Check for changes', I.bolt, () => this.run('all'), true)];
+    }
+    if (busy) text = `${this.job.label}… ${text}`;
+    if (!this.can) text += ' Only a parent or an admin can run these.';
+    this.guide.dataset.tone = tone;
+    this.guide.hidden = false;
+    clear(this.guide,
+      h('div', { class: 'rv-guide-main' },
+        h('div', { class: 'rv-guide-title' }, title),
+        h('div', { class: 'rv-guide-text small' }, text),
+        meter && total ? h('div', { class: 'rv-meter', title: `${num(o.have)} of ${num(total)} ROMs (${pct}%)` }, h('span', { style: { width: `${(o.have / total) * 100}%` } })) : null),
+      h('div', { class: 'rv-guide-acts' }, acts),
+      h('button', { class: 'btn btn-icon btn-sm rv-guide-x', title: 'Hide these tips (bring them back from ? )', 'aria-label': 'Hide these tips', html: icon.x, onclick: () => { writeLs('mediadesk.roms.guide', false); this.guide.hidden = true; } }));
+  }
+  // A folder with no sets of its own (the top, or a folder of DATs) lists its folders instead of an empty table.
+  renderFolders(n) {
+    const kids = (n?.kids || []).filter((k) => !k.tosort);
+    this.gamePane.classList.toggle('rv-show-folders', kids.length > 0);
+    this.root.classList.toggle('rv-folders-mode', kids.length > 0);
+    if (!kids.length) { clear(this.folders); return; }
+    clear(this.folders, h('div', { class: 'rv-folders-head small muted' }, 'Pick a folder to see its sets.'),
+      kids.map((k) => {
+        const tot = k.have + k.missing;
+        const p = tot ? (k.have / tot) * 100 : 0;
+        return h('button', { class: 'rv-folder', onclick: () => this.select(k.id) },
+          h('span', { class: 'rv-node-icon', html: treeIconSvg(k.icon) }),
+          h('span', { class: 'rv-folder-main' },
+            h('span', { class: 'rv-folder-name' }, k.name),
+            h('span', { class: 'rv-meter' }, h('span', { style: { width: `${p}%` } })),
+            h('span', { class: 'small muted' }, tot ? `${num(k.have)} of ${num(tot)} ROMs (${Math.floor(p)}%)${k.fixes ? ` · ${num(k.fixes)} fixes ready` : ''}` : 'No ROMs listed')));
+      }));
+  }
+  help() {
+    const stepRow = (n, ic, name, what) => h('div', { class: 'rv-help-step' }, h('b', { class: 'rv-step-n' }, String(n)), h('div', {}, h('div', { class: 'rv-help-name' }, h('span', { html: ic }), name), h('div', { class: 'small muted' }, what)));
+    const hidden = readLs('mediadesk.roms.guide', true) === false;
+    dialog('How ROM Manager works', [
+      h('p', { class: 'small' }, 'ROM Manager compares your files with DAT files, which list every ROM in every set, and fixes what it can. It works in four steps, each a button on the toolbar. The bar at the top of the window always says which one comes next.'),
+      h('div', { class: 'rv-help-steps' },
+        stepRow(1, I.dats, 'Update DATs', 'Reads the DAT files in your DAT folder and builds the tree from them. Run it again when you add or change DATs.'),
+        stepRow(2, I.scan, 'Scan ROMs', 'Looks at the files in your ROM folder and your ToSort folder, so it knows what you have.'),
+        stepRow(3, I.find, 'Find Fixes', 'Works out which files can be renamed, moved or rebuilt to complete your sets. Nothing changes yet.'),
+        stepRow(4, I.fix, 'Fix ROMs', 'Makes those changes. Files no DAT needs go to ToSort; a file is only deleted once a good copy is in the right place.')),
+      h('p', { class: 'small' }, h('b', {}, 'Shortcut: '), 'Fix ROMs → “Update DATs, Scan, Find Fixes and Fix” does all four.'),
+      h('div', { class: 'rv-group' }, h('div', { class: 'rv-group-title' }, 'Good to know'),
+        h('ul', { class: 'small rv-help-list' },
+          h('li', {}, h('b', {}, 'Ticks: '), 'only ticked folders are scanned and fixed. Right-click a tick box to lock a folder: it’s read but never changed.'),
+          h('li', {}, h('b', {}, 'ToSort: '), 'drop new downloads or unsorted files here, then Scan and fix. They’re filed where they belong.'),
+          h('li', {}, h('b', {}, 'Colours: '), 'green means you have it, red means missing, yellow means it can be fixed. The colour key button lists them all.'),
+          h('li', {}, h('b', {}, 'Missing list: '), 'Reports → Fix DATs makes a DAT of only what’s missing, to share or search with.'))),
+    ], { ok: null, cancel: 'Close', extra: (close) => [
+      h('button', { class: 'btn', type: 'button', onclick: () => { close(null); this.colourKey(); } }, h('span', { html: I.key }), 'Colour key'),
+      hidden ? h('button', { class: 'btn', type: 'button', onclick: () => { writeLs('mediadesk.roms.guide', true); close(null); this.renderGuide(); } }, 'Show the next-step bar again') : null,
+    ] });
+  }
+
   colourKey() {
     dialog('Colour key', [
       h('p', { class: 'small muted' }, 'Sets and files are coloured by status, as in RomVault. A set takes the colour of the most important status among its files.'),
