@@ -1,0 +1,21 @@
+MediaDesk ROM manager engine
+
+The files in this folder are a JavaScript port of RomVault's engine
+(RomVaultCore, DATReader, FileScanner and Compress) from the RVWorld
+repository by Gordon J (https://github.com/RomVault/RVWorld), source commit
+b9a2b0de1d8a755ae72bbfb39f845f7fc914a387. RomVault is licensed under the
+Apache License, Version 2.0; a copy is in LICENSE.
+
+Changes made in this port:
+- Converted from C# to JavaScript (Node.js) for MediaDesk. Each ported file
+  says so in its header.
+- The work runs asynchronously in a worker thread instead of .NET threads.
+- Hashes are stored as lower-case hex strings.
+- The database cache is a JSON file instead of RomVault's binary cache.
+- 7-Zip archives are read and written through the 7-Zip command-line tool
+  instead of RomVault's managed 7-Zip code. The RomVault7Z marker block is
+  written the same way, so archives stay compatible.
+- Left out: MIA reporting, DatVault downloads, SAM, emulator launching and
+  deep CHD verification.
+- Compare.CompareAltHash checked the MD5 condition the wrong way round; the
+  port uses the corrected check.
