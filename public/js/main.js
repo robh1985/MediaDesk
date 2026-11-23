@@ -20,6 +20,7 @@ import { plexViewerApp } from './apps/plexviewer.js';
 import { consoleApp } from './apps/console/console.js';
 import { logViewerApp } from './apps/logviewer.js';
 import { archiveApp } from './apps/archive.js';
+import { romsApp } from './apps/roms.js';
 import { convertApp } from './apps/convert.js';
 import { paintApp } from './apps/paint.js';
 import { paintProApp } from './apps/paintpro.js';
@@ -41,7 +42,7 @@ const session = window.mediadeskSession || {};
 const allowed = new Set(session.user?.allowed || []);
 const mayUse = (app) => !session.user || allowed.has(app.id);
 state.me = session.user || null;
-[dashboardApp, makeArrApp('radarr'), makeArrApp('sonarr'), nzbgetApp, jellyfinApp, plexApp, plexViewerApp, pikvmApp, consoleApp, musicApp, filesApp, notesApp, logViewerApp, archiveApp, convertApp, paintApp, paintProApp, familyApp, ebooksApp, tripsApp, mapsApp, previewApp, calculatorApp, settingsApp, webviewApp,
+[dashboardApp, makeArrApp('radarr'), makeArrApp('sonarr'), nzbgetApp, jellyfinApp, plexApp, plexViewerApp, pikvmApp, consoleApp, romsApp, musicApp, filesApp, notesApp, logViewerApp, archiveApp, convertApp, paintApp, paintProApp, familyApp, ebooksApp, tripsApp, mapsApp, previewApp, calculatorApp, settingsApp, webviewApp,
   { id: 'launcher', name: 'Search', icon: '', open() {} }].filter(mayUse).forEach(registerApp);
 
 // Admins and parents hear about updates published on GitHub (Settings → About applies them).

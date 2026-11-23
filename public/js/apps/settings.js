@@ -69,6 +69,7 @@ export const settingsApp = {
       admin ? page('music', 'Music', appIconSmall('music'), renderMusic, { desc: 'Music library folder', scope: 'everyone', keys: 'songs albums library folder' }) : null,
       admin ? page('files', 'Files', appIconSmall('files'), renderFiles, { desc: 'Shared folders, shares and cloud', scope: 'everyone', keys: 'folders network shares smb nfs webdav cloud google drive onedrive icloud dropbox usb 7-zip archive' }) : null,
       admin ? page('console', 'The Game Console', appIconSmall('console'), renderConsole, { desc: 'Games folder', scope: 'everyone', keys: 'games roms emulator' }) : null,
+      has('roms') && (admin || state.config?.canUpdate) ? page('roms', 'ROM Librarian', appIconSmall('roms'), (c) => import('./roms.js').then((m) => m.renderRomsSettings(c, { section })), { desc: 'DAT, ROM and ToSort folders', scope: 'everyone', keys: 'roms dat no-intro redump mame tosort romvault collection' }) : null,
       admin ? page('ebooks', 'eBook Reader', appIconSmall('ebooks'), renderEbooks, { desc: 'Books folder and Send to Kindle', scope: 'everyone', keys: 'books kindle calibre library' })
         : has('ebooks') ? page('ebooks', 'eBook Reader', appIconSmall('ebooks'), renderMyKindle, { desc: 'Send to Kindle', scope: 'account', keys: 'books kindle email' }) : null,
     ].filter(Boolean);
